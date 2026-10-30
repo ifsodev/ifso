@@ -239,7 +239,7 @@ describe.skipIf(!h.haveAnvil())("ifso-cli on anvil (port 8946)", () => {
       });
       expect(p.exitCode).toBe(0);
       expect(JSON.parse(p.stdout.toString()).escrow.toLowerCase()).toBe(chain.escrow.toLowerCase());
-      const missing = Bun.spawnSync([process.execPath, join(import.meta.dir, "../scripts/ifso-cli.ts"), "status", "1", "--rpc", chain.rpc], { env: { PATH: process.env.PATH ?? "" }, stdout: "pipe", stderr: "pipe", cwd: dir });
+      const missing = Bun.spawnSync([process.execPath, join(import.meta.dir, "../scripts/ifso-cli.ts"), "status", "1", "--rpc", chain.rpc, "--deployments", join(dir, "empty")], { env: { PATH: process.env.PATH ?? "" }, stdout: "pipe", stderr: "pipe", cwd: dir });
       expect(missing.exitCode).toBe(1);
       expect(missing.stderr.toString()).toContain("no escrow address");
     } finally {

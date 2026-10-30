@@ -185,26 +185,61 @@ export async function planPrice(deps: Deps, e: typeof escrows.$inferSelect, nowT
   return { meta: { kind: "settle", escrowId: e.id }, call: settleCall(deps, e.id, proof), send, verdict: send ? ev.verdict : undefined, reason: ev.reason, probe: { condition: c, activeFrom, proof } };
 }
 
+/**
+ * The announced multiplier change of a Stock Token, if one is still pending: the evaluator VOIDs a price that was
+ * decided under one multiplier once a later schedule has taken effect, so escrows on that token are settled first.
+ * Unreadable schedule fields count as "none pending" (the evaluator fails closed on its own).
+ */
+export async function pendingEffectiveAt(deps: Deps, stockToken: Address, nowTs: bigint): Promise<bigint | undefined> {
+  try {
+    const eff = await deps.clients.publicClient.readContract({ address: stockToken, abi: erc8056Abi, functionName: "effectiveAt" });
+    return eff > nowTs ? eff : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Rows on a token with a pending multiplier change first (soonest change first), the rest in their given order. */
+export function prioritiseBySchedule<T>(rows: T[], tokenOf: (r: T) => string | undefined, pending: Map<string, bigint>): T[] {
+  const eff = (r: T) => {
+    const t = tokenOf(r);
+    return t ? pending.get(t.toLowerCase()) : undefined;
+  };
+  const urgent = rows.filter((r) => eff(r) !== undefined).sort((a, b) => (eff(a)! < eff(b)! ? -1 : eff(a)! > eff(b)! ? 1 : 0));
+  return [...urgent, ...rows.filter((r) => eff(r) === undefined)];
+}
+
 async function settlePrice(deps: Deps, now: Date, nowTs: bigint) {
-  const due = await deps.db
+  const rows = await deps.db
     .select()
     .from(escrows)
     // AT_DEADLINE only (TOUCH is the price watcher's job; untouched TOUCH rows just wait for their expiry refund)
     .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.PRICE), priceMode(PRICE_AT_DEADLINE), lte(escrows.deadline, now), gt(escrows.expiry, now), actionable()))
     .orderBy(asc(escrows.deadline))
     .limit(SCAN + skippedIds("price", Date.now()));
+  const tokenOf = (e: (typeof rows)[number]) => {
+    const t = (e.condition as Record<string, unknown> | null)?.stockToken;
+    return typeof t === "string" && t.toLowerCase() !== ZERO_ADDRESS ? t.toLowerCase() : undefined;
+  };
+  const pending = new Map<string, bigint>();
+  for (const t of new Set(rows.map(tokenOf).filter((x): x is string => !!x))) {
+    const eff = await pendingEffectiveAt(deps, t as Address, nowTs);
+    if (eff !== undefined) pending.set(t, eff);
+  }
+  const due = prioritiseBySchedule(rows, tokenOf, pending);
   let sends = 0;
   for (const e of due) {
     if (e.twoSided && !e.accepted) continue;
-    if (sends >= BATCH || skipping("price", e.id, Date.now())) continue;
+    const urgent = pending.has(tokenOf(e) ?? "");
+    if (sends >= BATCH || (!urgent && skipping("price", e.id, Date.now()))) continue;
     if (await guarded(deps, "price", e.id, async () => {
       const plan = await planPrice(deps, e, nowTs);
       if (!plan || (!plan.send && !isShadow(deps))) {
-        noteWait("price", e.id, Date.now()); // nothing to send yet: step aside for a while
+        if (!urgent) noteWait("price", e.id, Date.now()); // nothing to send yet: step aside for a while (never before a pending change)
         return;
       }
       if (plan.send) {
-        deps.log("price decidable", { id: e.id, verdict: plan.verdict === undefined ? undefined : Verdict[plan.verdict], reason: plan.reason });
+        deps.log("price decidable", { id: e.id, verdict: plan.verdict === undefined ? undefined : Verdict[plan.verdict], reason: plan.reason, beforeMultiplierChange: urgent || undefined });
       }
       return execute(deps, plan);
     })) sends++;

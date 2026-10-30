@@ -93,4 +93,12 @@ describe("fixture matching", () => {
     expect(matchFixtures(events, "Arsenal FC", undefined, NOW + 8 * 86400, NOW)[0]!.id).toBe("2");
   });
   test("normTeam", () => expect(normTeam("Arsenal F.C.")).toBe(normTeam("arsenal")));
+  test("outcome expiry never falls below the evaluator minimum (R2-L2)", () => {
+    const base = { draft: { kind: "SPORTS", team: "arsenal", result: "WIN" } as const, nowSec: NOW, amountUsdg: "20", twoSided: false, linkKey: LINK };
+    const o = { resolver: FEED, questionId: ("0x" + "22".repeat(32)) as `0x${string}`, earliestResolve: NOW + 9000, teamIsHome: false };
+    // default window already covers PROPOSAL_GRACE (2 d) + dispute + panel + claim here: unchanged
+    expect(buildParams({ ...base, outcome: { ...o, minSpan: 5 * 86400 } }).expiry).toBe(BigInt(NOW + 9000 + DEFAULTS.outcomeWindow));
+    // a longer on-chain minimum wins over the 7 d default
+    expect(buildParams({ ...base, outcome: { ...o, minSpan: 9 * 86400 } }).expiry).toBe(BigInt(NOW + 9000 + 9 * 86400));
+  });
 });

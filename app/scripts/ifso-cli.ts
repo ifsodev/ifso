@@ -110,7 +110,8 @@ interface Ctx {
 
 function findDeployment(chainId: number, dir?: string): { escrow?: Address; block?: bigint } {
   const here = import.meta.dir;
-  const dirs = [dir, join(process.cwd(), "contracts/deployments"), join(here, "../../contracts/deployments"), join(process.cwd(), "../contracts/deployments")].filter(Boolean) as string[];
+  // An explicit --deployments directory is the only place looked at; the repo-relative defaults are the fallback.
+  const dirs = dir ? [dir] : [join(process.cwd(), "contracts/deployments"), join(here, "../../contracts/deployments"), join(process.cwd(), "../contracts/deployments")];
   for (const d of dirs) {
     const f = join(d, `${chainId}.json`);
     if (!existsSync(f)) continue;

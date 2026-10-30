@@ -58,6 +58,12 @@ export interface ResolvedOutcome {
   /** question close time (kickoff / endDate). With `challengeMargin` it bounds `acceptBy` of a challenge. */
   closeTime?: number;
   challengeMargin?: number;
+  /**
+   * The evaluator's OUTCOME expiry minimum, in seconds after earliestResolve: PROPOSAL_GRACE + the resolver's
+   * dispute and panel windows + MIN_CLAIM_WINDOW, read from the chain (see `outcomeMinSpan`). When set, the expiry
+   * is never earlier than this; unset keeps the default window.
+   */
+  minSpan?: number;
 }
 
 export interface BuildInput {
@@ -122,7 +128,7 @@ export function buildCondition(input: BuildInput): { condition: Condition; expir
       c.target = o.resolver;
       c.key = o.questionId;
       c.outcomeMask = d.kind === "SPORTS" ? sportsMask(!!o.teamIsHome, d.result) : binaryMask(d.answer);
-      return { condition: c, expiry: o.earliestResolve + DEFAULTS.outcomeWindow };
+      return { condition: c, expiry: o.earliestResolve + Math.max(DEFAULTS.outcomeWindow, o.minSpan ?? 0) };
     }
     case "APPROVE":
       c.kind = Kind.APPROVE;

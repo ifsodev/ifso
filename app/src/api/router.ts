@@ -2,7 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { eq, or, desc } from "drizzle-orm";
 import { getAddress, type Address, type Hex } from "viem";
-import { erc8056Abi, ifsoEscrowAbi, usdgAbi } from "../abi";
+import { erc8056Abi, ifsoConditionEvaluatorAbi, ifsoEscrowAbi, ifsoOutcomeResolverAbi, usdgAbi } from "../abi";
 import { BuildError, DEFAULTS, buildParams, type BuildInput } from "../core/builder";
 import { conditionHash, createAuthNonce, escrowId } from "../core/condition";
 import { paramsFromJson } from "../core/paramsJson";
@@ -39,6 +39,20 @@ const t = initTRPC.context<Ctx>().create();
 const addr = z.string().regex(/^0x[0-9a-fA-F]{40}$/).transform((a) => getAddress(a) as Address);
 const hex = z.string().regex(/^0x[0-9a-fA-F]*$/).transform((h) => h as Hex);
 const uint = z.string().regex(/^\d+$/).transform((s) => BigInt(s));
+
+/** Seconds after earliestResolve that an OUTCOME escrow must stay open, read from the contracts (never hard-coded). */
+export async function outcomeMinSpan(deps: Deps, resolver: Address): Promise<number> {
+  const pc = deps.clients.publicClient;
+  const escrow = required(deps.clients.escrow, "ESCROW_ADDRESS");
+  const evaluator = (deps.clients.evaluator ?? (await pc.readContract({ address: escrow, abi: ifsoEscrowAbi, functionName: "evaluator" }))) as Address;
+  const [grace, claim, dispute, panel] = await Promise.all([
+    pc.readContract({ address: evaluator, abi: ifsoConditionEvaluatorAbi, functionName: "PROPOSAL_GRACE" }),
+    pc.readContract({ address: evaluator, abi: ifsoConditionEvaluatorAbi, functionName: "MIN_CLAIM_WINDOW" }),
+    pc.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "disputeWindow" }),
+    pc.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "panelWindow" }),
+  ]);
+  return Number(BigInt(grace) + BigInt(claim) + BigInt(dispute) + BigInt(panel));
+}
 
 export const jsonSafe = <T>(v: T): unknown => JSON.parse(JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x)));
 
@@ -260,7 +274,7 @@ export const appRouter = t.router({
       if (!fx.fixture) throw new TRPCError({ code: "NOT_FOUND", message: copy.parse.unknownCondition(`${d.team} ${d.result.toLowerCase()}`) });
       // the fixture comes from our own league listing (the allow-list); the question is only PLANNED here
       const q = await planFootballQuestion(deps, fx.fixture, questionBudget(ctx, input.sender));
-      bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, teamIsHome: fx.teamIsHome, closeTime: q.closeTime, challengeMargin: DEFAULTS.sportsChallengeMargin };
+      bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, teamIsHome: fx.teamIsHome, closeTime: q.closeTime, challengeMargin: DEFAULTS.sportsChallengeMargin, minSpan: await outcomeMinSpan(deps, required(deps.clients.resolverContract, "RESOLVER_ADDRESS")) };
     } else if (d.kind === "MARKET") {
       if (d.venue !== "polymarket") throw new TRPCError({ code: "BAD_REQUEST", message: "Hyperliquid questions arrive in phase 2." });
       const slug = d.ref.replace(/^https?:\/\/(www\.)?polymarket\.com\/(event|market)\//, "").split(/[/?#]/)[0]!;
@@ -272,7 +286,7 @@ export const appRouter = t.router({
         throw e;
       }
       if (parsed.twoSided && polymarketLooksDecided(q.market)) throw new TRPCError({ code: "BAD_REQUEST", message: "This market is already priced as nearly decided, so it cannot be used for a challenge." });
-      bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, closeTime: q.closeTime, challengeMargin: DEFAULTS.polymarketChallengeMargin };
+      bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, closeTime: q.closeTime, challengeMargin: DEFAULTS.polymarketChallengeMargin, minSpan: await outcomeMinSpan(deps, required(deps.clients.resolverContract, "RESOLVER_ADDRESS")) };
     }
 
     let params: CreateParams;
