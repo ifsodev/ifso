@@ -110,13 +110,15 @@ export const appRouter = t.router({
   build: t.procedure.input(buildInput).mutation(async ({ input, ctx }) => {
     const { deps } = ctx;
     let text = input.text;
+    let tzOffsetMin = input.tzOffsetMin;
     if (input.intentId) {
       const [it] = await deps.db.select().from(intents).where(eq(intents.id, input.intentId));
       if (!it) throw new TRPCError({ code: "NOT_FOUND" });
       text = it.text ?? undefined;
+      tzOffsetMin = it.tzOffsetMin ?? tzOffsetMin; // the offset the bot used, so the deadline is the same instant
     }
     if (!text) throw new TRPCError({ code: "BAD_REQUEST", message: "text or intentId required" });
-    const parsed = parseCommand(text, { nowMs: Date.now(), tzOffsetMin: input.tzOffsetMin, tickers: tickers() });
+    const parsed = parseCommand(text, { nowMs: Date.now(), tzOffsetMin, tickers: tickers() });
     if (!parsed.ok || !parsed.condition) throw new TRPCError({ code: "BAD_REQUEST", message: [...parsed.errors, ...parsed.ambiguities].join(" ") });
     gateDraft(ctx, parsed.condition);
 

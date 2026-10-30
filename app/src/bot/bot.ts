@@ -1,75 +1,98 @@
 // Plain Telegram bot (NO Mini App): Telegram's bot-developer terms §7 restrict Mini Apps with crypto features to
 // TON; regular bots without a Mini App are exempt. So the bot only parses, previews and hands off to the
 // external web app through ordinary URL buttons, where the user signs with their own wallet / passkey.
-// The bot never holds keys, funds, or link secrets.
+// The bot never holds keys, funds, or link secrets, and never logs message text.
 import { Bot, InlineKeyboard, type Context } from "grammy";
-import { desc, eq, inArray } from "drizzle-orm";
+import type { UserFromGetMe } from "grammy/types";
 import { copy } from "../core/copy";
-import { formatUsdg } from "../core/money";
-import { parseCommand } from "../core/parser";
-import { Status } from "../core/types";
 import { SEED_FEEDS } from "../config/chain";
-import { escrows, intents, tgUsers, watchers } from "../db/schema";
+import { listFixtureMatches } from "../api/fixtures";
 import type { Deps } from "../workers/deps";
+import { handleAnswer, handleCommand, handleMine, handleTz, type FixtureLookup, type FlowEnv, type Reply } from "./flow";
+import { drizzleBotStore, type BotStore } from "./store";
 
-export function createBot(deps: Deps): Bot | undefined {
+export interface BotOptions {
+  store?: BotStore;
+  fixtures?: FixtureLookup;
+  /** skips the getMe call (tests); production leaves it unset */
+  botInfo?: UserFromGetMe;
+  /** commands per user per minute */
+  perMinute?: number;
+  now?: () => number;
+}
+
+function keyboard(r: Reply): InlineKeyboard | undefined {
+  if (!r.buttons?.length) return undefined;
+  const kb = new InlineKeyboard();
+  r.buttons.forEach((row, i) => {
+    if (i) kb.row();
+    for (const b of row) "url" in b ? kb.url(b.text, b.url) : kb.text(b.text, b.data);
+  });
+  return kb;
+}
+
+export function createBot(deps: Deps, opts: BotOptions = {}): Bot | undefined {
   if (!deps.env.TELEGRAM_BOT_TOKEN) return undefined;
-  const bot = new Bot(deps.env.TELEGRAM_BOT_TOKEN);
-  const tickers = new Set(SEED_FEEDS.map((f) => f.ticker));
+  const bot = new Bot(deps.env.TELEGRAM_BOT_TOKEN, opts.botInfo ? { botInfo: opts.botInfo } : undefined);
+  const flow: FlowEnv = {
+    store: opts.store ?? drizzleBotStore(deps.db),
+    publicAppUrl: deps.env.PUBLIC_APP_URL,
+    tickers: new Set(SEED_FEEDS.map((f) => f.ticker)),
+    fixtures: opts.fixtures ?? ((team, opp, on) => listFixtureMatches(deps, team, opp, on)),
+    now: opts.now,
+  };
+
+  // a small per-user brake so one chat cannot flood the parser or the fixture lookup
+  const hits = new Map<number, number[]>();
+  const limit = opts.perMinute ?? 12;
+  const tooMany = (id: number) => {
+    const t = (opts.now ?? Date.now)();
+    const recent = (hits.get(id) ?? []).filter((x) => t - x < 60_000);
+    recent.push(t);
+    hits.set(id, recent);
+    if (hits.size > 5000) hits.clear();
+    return recent.length > limit;
+  };
+
+  const send = async (ctx: Context, r: Reply) => {
+    const kb = keyboard(r);
+    await ctx.reply(r.text, kb ? { reply_markup: kb } : undefined);
+  };
 
   bot.command("start", (ctx) => ctx.reply(copy.bot.welcome));
   bot.command("help", (ctx) => ctx.reply(`${copy.bot.help}\n\n${copy.parse.usage}`));
 
-  const handle = async (ctx: Context, cmd: "ifso" | "challenge") => {
-    const from = ctx.from;
-    if (!from || !ctx.chat) return;
-    const body = (ctx.match as string | undefined) ?? "";
-    const user = await deps.db.select().from(tgUsers).where(eq(tgUsers.tgId, BigInt(from.id)));
-    const tz = user[0]?.tzOffsetMin ?? 0;
-    const text = `/${cmd} ${body}`;
-    const r = parseCommand(text, { nowMs: Date.now(), tzOffsetMin: tz, tickers });
-    if (r.errors.length) return ctx.reply(r.errors.join("\n"));
-    if (r.ambiguities.length) return ctx.reply(r.ambiguities.map((q) => copy.bot.askAmbiguity(q)).join("\n"));
-    if (!r.ok || !r.condition) return ctx.reply(copy.parse.usage);
-
-    await deps.db.insert(tgUsers).values({ tgId: BigInt(from.id), username: from.username ?? null }).onConflictDoNothing();
-    const [it] = await deps.db
-      .insert(intents)
-      .values({
-        tgId: BigInt(from.id),
-        tgChatId: BigInt(ctx.chat.id),
-        text,
-        draft: r.condition,
-        recipientHandle: r.recipient?.type === "handle" ? r.recipient.handle : null,
-      })
-      .returning({ id: intents.id });
-    const kb = new InlineKeyboard().url(copy.bot.confirmButton, `${deps.env.PUBLIC_APP_URL}/new/${it!.id}`);
-    const notes = r.notes.length ? `\n\n${r.notes.map((n) => `• ${n}`).join("\n")}` : "";
-    return ctx.reply(`${r.preview}${notes}`, { reply_markup: kb });
+  const command = (cmd: "ifso" | "challenge") => async (ctx: Context) => {
+    if (!ctx.from || !ctx.chat) return;
+    if (tooMany(ctx.from.id)) return void (await ctx.reply(copy.bot.busy));
+    const r = await handleCommand(flow, { tgId: BigInt(ctx.from.id), chatId: BigInt(ctx.chat.id), username: ctx.from.username, cmd, body: String(ctx.match ?? "") });
+    await send(ctx, r);
   };
-
-  bot.command("ifso", (ctx) => handle(ctx, "ifso"));
-  bot.command("challenge", (ctx) => handle(ctx, "challenge"));
+  bot.command("ifso", command("ifso"));
+  bot.command("challenge", command("challenge"));
 
   bot.command("mine", async (ctx) => {
-    if (!ctx.chat) return;
-    const ws = await deps.db.select({ id: watchers.escrowId }).from(watchers).where(eq(watchers.tgChatId, BigInt(ctx.chat.id)));
-    if (!ws.length) return ctx.reply("No if-so payments yet.");
-    const rows = await deps.db.select().from(escrows).where(inArray(escrows.id, ws.map((w) => w.id))).orderBy(desc(escrows.createdBlock)).limit(10);
-    const lines = rows.map((e) => `${formatUsdg(BigInt(e.amount))} USDG · ${Status[e.status]?.toLowerCase()} · comes back ${e.expiry.toISOString().slice(0, 10)}`);
-    const kb = new InlineKeyboard().url(copy.bot.openButton, `${deps.env.PUBLIC_APP_URL}/mine`);
-    return ctx.reply(lines.join("\n"), { reply_markup: kb });
+    if (!ctx.from || !ctx.chat) return;
+    await send(ctx, await handleMine(flow, { tgId: BigInt(ctx.from.id), chatId: BigInt(ctx.chat.id) }));
   });
 
   bot.command("tz", async (ctx) => {
-    const m = String(ctx.match ?? "").match(/^([+-])(\d{1,2})(?::?(\d{2}))?$/);
-    if (!m || !ctx.from) return ctx.reply("Set your time zone like /tz +4 or /tz -5:00");
-    const mins = (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] ?? 0));
-    await deps.db.insert(tgUsers).values({ tgId: BigInt(ctx.from.id), tzOffsetMin: mins }).onConflictDoUpdate({ target: tgUsers.tgId, set: { tzOffsetMin: mins } });
-    return ctx.reply(`Time zone set to UTC${m[1]}${m[2]}${m[3] ? ":" + m[3] : ""}.`);
+    if (!ctx.from) return;
+    await send(ctx, await handleTz(flow, { tgId: BigInt(ctx.from.id), username: ctx.from.username, arg: String(ctx.match ?? "") }));
   });
 
-  bot.catch((err) => deps.log("bot error", { err: String(err.error) }));
+  bot.callbackQuery(/^q:([0-9a-f-]{36}):(\d{1,2})$/, async (ctx) => {
+    const m = ctx.match as RegExpMatchArray;
+    const res = await handleAnswer(flow, { tgId: BigInt(ctx.from.id), chatId: BigInt(ctx.chat?.id ?? ctx.from.id), intentId: m[1]!, option: Number(m[2]) });
+    await ctx.answerCallbackQuery(res.toast ? { text: res.toast } : undefined);
+    if (res.reply) {
+      const kb = keyboard(res.reply);
+      await ctx.editMessageText(res.reply.text, kb ? { reply_markup: kb } : undefined).catch(() => send(ctx, res.reply!));
+    }
+  });
+
+  // never log message text: only the error class and Telegram's own description
+  bot.catch((err) => deps.log("bot error", { err: String((err.error as Error)?.name ?? "error"), update: err.ctx.update.update_id }));
   return bot;
 }
 

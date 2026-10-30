@@ -107,8 +107,12 @@ export const loadEnv = (src: Record<string, string | undefined> = process.env, r
     const missing = missingFor(role, src);
     if (missing.length) throw new EnvError(role, missing);
   }
-  return schema.parse(src);
+  return schema.parse(withoutBlanks(src));
 };
+
+/** A line like `ESCROW_ADDRESS=` (copied from .env.example) means "not set", so it takes the default or stays undefined. */
+const withoutBlanks = (src: Record<string, string | undefined>) =>
+  Object.fromEntries(Object.entries(src).filter(([, v]) => v === undefined || v.trim() !== ""));
 
 export const rpcUrls = (env: Pick<Env, "RHC_RPC_URLS">): string[] =>
   env.RHC_RPC_URLS.split(",").map((s) => s.trim()).filter(Boolean);

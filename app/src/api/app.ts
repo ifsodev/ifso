@@ -9,6 +9,7 @@ import type { Deps } from "../workers/deps";
 import { appRouter, jsonSafe } from "./router";
 import { RateLimiter } from "./rateLimit";
 import { readiness, type Probe } from "../ops/health";
+import { webhookPath } from "../bot/webhook";
 
 export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: Record<string, Probe> = {}) {
   const app = new Hono();
@@ -42,8 +43,8 @@ export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: R
     }),
   );
 
-  if (bot && deps.env.TELEGRAM_WEBHOOK_SECRET) {
-    app.post("/tg/webhook", webhookCallback(bot, "hono", { secretToken: deps.env.TELEGRAM_WEBHOOK_SECRET }));
-  }
+  // Telegram webhook: secret URL path + the X-Telegram-Bot-Api-Secret-Token header (a wrong or missing token is a 401)
+  const path = webhookPath(deps.env);
+  if (bot && path) app.post(path, webhookCallback(bot, "hono", { secretToken: deps.env.TELEGRAM_WEBHOOK_SECRET }));
   return app;
 }

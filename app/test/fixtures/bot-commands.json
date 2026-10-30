@@ -1,0 +1,1270 @@
+{
+ "nowIso": "2026-10-21T12:00:00.000Z",
+ "cases": [
+  {
+   "input": "/ifso @jake 20 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    },
+    "contains": [
+     "Send 20 USDG to @jake",
+     "Arsenal"
+    ],
+    "fee": "0.75"
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if liverpool draw",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "liverpool",
+     "result": "DRAW"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if everton lose",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "everton",
+     "result": "LOSE"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if chelsea win or draw",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "chelsea",
+     "result": "WIN_OR_DRAW"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if chelsea don't lose",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "chelsea",
+     "result": "WIN_OR_DRAW"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if arsenal beat chelsea",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN",
+     "opponent": "chelsea"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if tottenham win against fulham",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "tottenham",
+     "result": "WIN",
+     "opponent": "fulham"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if brentford win vs brighton",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "brentford",
+     "result": "WIN",
+     "opponent": "brighton"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if arsenal win on saturday",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN",
+     "onIso": "2026-10-24T12:00:00.000Z"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if arsenal win next sunday",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN",
+     "onIso": "2026-11-01T12:00:00.000Z"
+    }
+   }
+  },
+  {
+   "input": "/ifso@ifso_bot @jake 20 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake $20 usdg if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "20",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 12.50 if wolves win",
+   "expect": {
+    "kind": "preview",
+    "amount": "12.5",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "wolves",
+     "result": "WIN"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 1 if aston villa win",
+   "expect": {
+    "kind": "preview",
+    "amount": "1",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "aston villa",
+     "result": "WIN"
+    }
+   }
+  },
+  {
+   "input": "/ifso @jake 1000000 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "1000000",
+    "recipient": "@jake",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    }
+   }
+  },
+  {
+   "input": "/ifso @mia_k 75 if the arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "75",
+    "recipient": "@mia_k",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    }
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on nov 14 at 6pm",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-11-14T18:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 in 3 days",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-10-24T12:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 in 1 hour",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-10-21T13:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 in 2 weeks",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-11-04T12:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 2026-12-25",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-12-25T09:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on the 1st",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-11-01T09:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on dec 25",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-12-25T09:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 25 dec",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-12-25T09:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 25/12",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-12-25T09:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 12/25",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-12-25T09:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on tomorrow",
+   "expect": {
+    "kind": "preview",
+    "amount": "5",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-10-22T09:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso link 1200 on the 1st",
+   "expect": {
+    "kind": "preview",
+    "amount": "1200",
+    "recipient": "link",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-11-01T09:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @sam 30 on nov 14",
+   "tz": "Asia/Dubai",
+   "expect": {
+    "kind": "preview",
+    "amount": "30",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-11-14T05:00:00.000Z"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @sam 30 on nov 14",
+   "tz": "America/Los_Angeles",
+   "expect": {
+    "kind": "preview",
+    "amount": "30",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-11-14T17:00:00.000Z"
+    },
+    "fee": "0.25",
+    "contains": [
+     "America/Los_Angeles"
+    ]
+   }
+  },
+  {
+   "input": "/ifso @sam 30 on jul 4 2027 at 9am",
+   "tz": "America/New_York",
+   "expect": {
+    "kind": "preview",
+    "amount": "30",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2027-07-04T13:00:00.000Z"
+    },
+    "fee": "0.25",
+    "contains": [
+     "2027-07-04 09:00 America/New_York (2027-07-04 13:00 UTC)"
+    ]
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes above 200 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA",
+     "op": "GTE",
+     "priceUsd": "200",
+     "mode": "AT_DEADLINE",
+     "deadlineIso": "2026-10-23T20:00:00.000Z"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes below 200 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA",
+     "op": "LTE",
+     "priceUsd": "200",
+     "mode": "AT_DEADLINE",
+     "deadlineIso": "2026-10-23T20:00:00.000Z"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if tsla hits above 300 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "TSLA",
+     "op": "GTE",
+     "priceUsd": "300",
+     "mode": "TOUCH",
+     "deadlineIso": "2026-10-24T00:00:00.000Z"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if tsla touches below 150 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "TSLA",
+     "op": "LTE",
+     "priceUsd": "150",
+     "mode": "TOUCH"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if aapl closes at or above 250 by dec 18",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "AAPL",
+     "op": "GTE",
+     "priceUsd": "250",
+     "mode": "AT_DEADLINE",
+     "deadlineIso": "2026-12-18T21:00:00.000Z"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if aapl is over 250.5 by dec 18",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "AAPL",
+     "op": "GTE",
+     "priceUsd": "250.5",
+     "mode": "AT_DEADLINE"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if spy is below 500 by nov 20",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "SPY",
+     "op": "LTE",
+     "priceUsd": "500",
+     "mode": "AT_DEADLINE",
+     "deadlineIso": "2026-11-20T21:00:00.000Z"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if eth closes above 3000 by nov 20",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "ETH",
+     "op": "GTE",
+     "priceUsd": "3000",
+     "mode": "AT_DEADLINE"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if $nvda closes above $200 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA",
+     "op": "GTE",
+     "priceUsd": "200",
+     "mode": "AT_DEADLINE"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes > 200 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA",
+     "op": "GTE",
+     "priceUsd": "200",
+     "mode": "AT_DEADLINE"
+    },
+    "fee": "0.25",
+    "priceBand": true,
+    "contains": [
+     "count when reached exactly"
+    ]
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes < 200 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA",
+     "op": "LTE",
+     "priceUsd": "200",
+     "mode": "AT_DEADLINE"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes above 200 by 2026-11-20",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA",
+     "op": "GTE",
+     "priceUsd": "200",
+     "mode": "AT_DEADLINE",
+     "deadlineIso": "2026-11-20T21:00:00.000Z"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 250 if tsla tops 300 by next friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "250",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "TSLA",
+     "op": "GTE",
+     "priceUsd": "300",
+     "mode": "TOUCH"
+    },
+    "fee": "0.25",
+    "priceBand": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes above 200 by friday",
+   "tz": "Asia/Dubai",
+   "expect": {
+    "kind": "preview",
+    "amount": "100",
+    "recipient": "@mia",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA",
+     "op": "GTE",
+     "priceUsd": "200",
+     "mode": "AT_DEADLINE"
+    },
+    "fee": "0.25",
+    "priceBand": true,
+    "contains": [
+     "Asia/Dubai"
+    ]
+   }
+  },
+  {
+   "input": "/ifso @sam 300 when we both say ok",
+   "expect": {
+    "kind": "preview",
+    "amount": "300",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "APPROVE",
+     "mode": "PARTIES"
+    },
+    "fee": "0.25",
+    "contains": [
+     "you both tap OK"
+    ]
+   }
+  },
+  {
+   "input": "/ifso @sam 300 if we both approve",
+   "expect": {
+    "kind": "preview",
+    "amount": "300",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "APPROVE",
+     "mode": "PARTIES"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @sam 300 if i approve",
+   "expect": {
+    "kind": "preview",
+    "amount": "300",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "APPROVE",
+     "mode": "PARTIES"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @sam 300 if @ref says so",
+   "expect": {
+    "kind": "preview",
+    "amount": "300",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "APPROVE",
+     "mode": "REFEREE",
+     "referee": {
+      "type": "handle",
+      "handle": "ref"
+     }
+    },
+    "fee": "0.25",
+    "contains": [
+     "@ref (referee) says so"
+    ]
+   }
+  },
+  {
+   "input": "/ifso @sam 300 if @ref approves",
+   "expect": {
+    "kind": "preview",
+    "amount": "300",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "APPROVE",
+     "mode": "REFEREE",
+     "referee": {
+      "type": "handle",
+      "handle": "ref"
+     }
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso link 40 if @ref decides",
+   "expect": {
+    "kind": "preview",
+    "amount": "40",
+    "recipient": "link",
+    "cond": {
+     "kind": "APPROVE",
+     "mode": "REFEREE",
+     "referee": {
+      "type": "handle",
+      "handle": "ref"
+     }
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @sam 300 if 0x00000000000000000000000000000000000000bb says so",
+   "expect": {
+    "kind": "preview",
+    "amount": "300",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "APPROVE",
+     "mode": "REFEREE"
+    },
+    "fee": "0.25"
+   }
+  },
+  {
+   "input": "/ifso @sam 25 if polymarket will-it-rain resolves yes",
+   "expect": {
+    "kind": "preview",
+    "amount": "25",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "MARKET",
+     "venue": "polymarket",
+     "ref": "will-it-rain",
+     "answer": "YES"
+    },
+    "fee": "0.75"
+   }
+  },
+  {
+   "input": "/ifso @sam 25 if polymarket will-it-rain resolves no",
+   "expect": {
+    "kind": "preview",
+    "amount": "25",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "MARKET",
+     "venue": "polymarket",
+     "ref": "will-it-rain",
+     "answer": "NO"
+    },
+    "fee": "0.75"
+   }
+  },
+  {
+   "input": "/ifso 0x00000000000000000000000000000000000000aa 50 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "50",
+    "recipient": "0x0000…00aa",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    }
+   }
+  },
+  {
+   "input": "/ifso 0x00000000000000000000000000000000000000AA 50 in 3 days",
+   "expect": {
+    "kind": "preview",
+    "amount": "50",
+    "recipient": "0x0000…00aa",
+    "cond": {
+     "kind": "TIME"
+    }
+   }
+  },
+  {
+   "input": "/ifso link 50 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "50",
+    "recipient": "link",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    },
+    "contains": [
+     "whoever opens your link"
+    ]
+   }
+  },
+  {
+   "input": "/ifso link 50 on nov 14",
+   "expect": {
+    "kind": "preview",
+    "amount": "50",
+    "recipient": "link",
+    "cond": {
+     "kind": "TIME",
+     "atIso": "2026-11-14T09:00:00.000Z"
+    }
+   }
+  },
+  {
+   "input": "/ifso link 50 if nvda closes above 200 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "50",
+    "recipient": "link",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA"
+    }
+   }
+  },
+  {
+   "input": "/challenge @sam 10 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "10",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    },
+    "counter": "10",
+    "challenge": true,
+    "contains": [
+     "Challenge with @sam: you chip in 10 USDG, they chip in 10 USDG"
+    ]
+   }
+  },
+  {
+   "input": "/challenge @sam 10 vs 5 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "10",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    },
+    "counter": "5",
+    "challenge": true,
+    "contains": [
+     "they chip in 5 USDG"
+    ]
+   }
+  },
+  {
+   "input": "/challenge @sam 10 / 20 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "10",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    },
+    "counter": "20",
+    "challenge": true
+   }
+  },
+  {
+   "input": "/challenge@ifso_bot @sam 10 if chelsea beat arsenal",
+   "expect": {
+    "kind": "preview",
+    "amount": "10",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "chelsea",
+     "result": "WIN",
+     "opponent": "arsenal"
+    },
+    "counter": "10",
+    "challenge": true
+   }
+  },
+  {
+   "input": "/challenge @sam 10 if nvda closes above 200 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "10",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "NVDA"
+    },
+    "counter": "10",
+    "challenge": true
+   }
+  },
+  {
+   "input": "/challenge @sam 50 if @ref says so",
+   "expect": {
+    "kind": "preview",
+    "amount": "50",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "APPROVE",
+     "mode": "REFEREE",
+     "referee": {
+      "type": "handle",
+      "handle": "ref"
+     }
+    },
+    "counter": "50",
+    "challenge": true
+   }
+  },
+  {
+   "input": "/challenge link 10 if arsenal win",
+   "expect": {
+    "kind": "preview",
+    "amount": "10",
+    "recipient": "link",
+    "cond": {
+     "kind": "SPORTS",
+     "team": "arsenal",
+     "result": "WIN"
+    },
+    "counter": "10",
+    "challenge": true,
+    "contains": [
+     "private invites"
+    ]
+   }
+  },
+  {
+   "input": "/challenge 0x00000000000000000000000000000000000000aa 15 if tsla hits above 400 by friday",
+   "expect": {
+    "kind": "preview",
+    "amount": "15",
+    "recipient": "0x0000…00aa",
+    "cond": {
+     "kind": "PRICE",
+     "ticker": "TSLA",
+     "mode": "TOUCH"
+    },
+    "counter": "15",
+    "challenge": true
+   }
+  },
+  {
+   "input": "/challenge @sam 10 if polymarket will-it-rain resolves yes",
+   "expect": {
+    "kind": "preview",
+    "amount": "10",
+    "recipient": "@sam",
+    "cond": {
+     "kind": "MARKET"
+    },
+    "counter": "10",
+    "challenge": true
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if tsla hits 300 by friday",
+   "expect": {
+    "kind": "question",
+    "qkind": "direction",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda touches 250 by dec 18",
+   "expect": {
+    "kind": "question",
+    "qkind": "direction",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if aapl reaches 300 by friday",
+   "expect": {
+    "kind": "question",
+    "qkind": "direction",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if eth hits 5000 by nov 20",
+   "expect": {
+    "kind": "question",
+    "qkind": "direction",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes above 200",
+   "expect": {
+    "kind": "question",
+    "qkind": "deadline",
+    "options": 3
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if spy is below 500",
+   "expect": {
+    "kind": "question",
+    "qkind": "deadline",
+    "options": 3
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if eth closes above 3000",
+   "expect": {
+    "kind": "question",
+    "qkind": "deadline",
+    "options": 3
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if tsla hits above 300",
+   "expect": {
+    "kind": "question",
+    "qkind": "deadline",
+    "options": 3
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 11/01",
+   "expect": {
+    "kind": "question",
+    "qkind": "date_format",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 03/04 at 5pm",
+   "expect": {
+    "kind": "question",
+    "qkind": "date_format",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 02/03",
+   "expect": {
+    "kind": "question",
+    "qkind": "date_format",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes above 200 by 06/07",
+   "expect": {
+    "kind": "question",
+    "qkind": "date_format",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes above 200 on dec 12",
+   "expect": {
+    "kind": "question",
+    "qkind": "weekend",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes above 200 by saturday",
+   "expect": {
+    "kind": "question",
+    "qkind": "weekend",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if tsla hits above 300 by sunday",
+   "expect": {
+    "kind": "question",
+    "qkind": "weekend",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if spy closes below 500 on 2026-11-22",
+   "expect": {
+    "kind": "question",
+    "qkind": "weekend",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @sam 10 if manchester win",
+   "expect": {
+    "kind": "question",
+    "qkind": "team",
+    "options": 2
+   }
+  },
+  {
+   "input": "/challenge @sam 10 if manchester win",
+   "expect": {
+    "kind": "question",
+    "qkind": "team",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if tsla hits 300",
+   "expect": {
+    "kind": "question",
+    "qkind": "direction",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 11/01 at 6pm",
+   "expect": {
+    "kind": "question",
+    "qkind": "date_format",
+    "options": 2
+   }
+  },
+  {
+   "input": "/ifso hello",
+   "expect": {
+    "kind": "error",
+    "contains": "Try:"
+   }
+  },
+  {
+   "input": "/ifso",
+   "expect": {
+    "kind": "error",
+    "contains": "Try:"
+   }
+  },
+  {
+   "input": "/ifso @jake 20",
+   "expect": {
+    "kind": "error",
+    "contains": "Try:"
+   }
+  },
+  {
+   "input": "/ifso @jake 0.5 if arsenal win",
+   "expect": {
+    "kind": "error",
+    "contains": "smallest if-so payment"
+   }
+  },
+  {
+   "input": "/ifso @jake 5 vs 5 if arsenal win",
+   "expect": {
+    "kind": "error",
+    "contains": "Two amounts only work with /challenge"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on 2026-01-01",
+   "expect": {
+    "kind": "error",
+    "contains": "already passed"
+   }
+  },
+  {
+   "input": "/ifso @mia 5 on blursday",
+   "expect": {
+    "kind": "error",
+    "contains": "couldn't read the date"
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if zzzz above 10 by friday",
+   "expect": {
+    "kind": "error",
+    "contains": "ZZZZ"
+   }
+  },
+  {
+   "input": "/challenge @sam 10 on nov 14",
+   "expect": {
+    "kind": "error",
+    "contains": "needs something to decide"
+   }
+  },
+  {
+   "input": "/challenge @sam 10 when we both say ok",
+   "expect": {
+    "kind": "error",
+    "contains": "name a referee"
+   }
+  },
+  {
+   "input": "/ifso @jake 20 if nowhere fc win",
+   "expect": {
+    "kind": "error",
+    "contains": "upcoming league fixture"
+   }
+  },
+  {
+   "input": "/ifso @mia 100 if nvda closes above 200 by 2026-01-01",
+   "expect": {
+    "kind": "error",
+    "contains": "already passed"
+   }
+  }
+ ]
+}

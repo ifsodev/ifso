@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -21,6 +22,7 @@ export const tgUsers = pgTable("tg_users", {
   username: text("username"),
   address: text("address"),
   tzOffsetMin: integer("tz_offset_min").notNull().default(0),
+  tz: text("tz"), //                 IANA zone from /tz (DST aware); tzOffsetMin is its offset when it was set
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -38,6 +40,8 @@ export const intents = pgTable(
     escrowId: text("escrow_id"),
     recipientHandle: text("recipient_handle"),
     state: text("state", { enum: ["draft", "built", "submitted", "confirmed", "failed"] }).notNull().default("draft"),
+    tzOffsetMin: integer("tz_offset_min"), //  offset the bot used for the deadline, so the web build reads the same instant
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull().default(sql`now() + interval '24 hours'`),
     txHash: text("tx_hash"),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

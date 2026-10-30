@@ -68,7 +68,7 @@ if (role === "worker" || role === "all") {
   tick(QUEUES.priceWatch, () => priceWatchTick(deps), 15_000);
   tick(QUEUES.resolver, () => resolverTick(deps), 60_000);
   tick(QUEUES.indexer, () => indexerTick(deps, async (ev) => void (await notifyQ.add("event", JSON.parse(JSON.stringify(ev, (_k, v) => (typeof v === "bigint" ? v.toString() : v)))))), 5_000);
-  makeWorker<{ name: string; escrowId?: string; args: Record<string, unknown> }>(QUEUES.notify, conn, async (job) => notifyEvent(deps, send, job.data), 4);
+  makeWorker<{ name: string; escrowId?: string; questionId?: string; txHash?: string; args: Record<string, unknown> }>(QUEUES.notify, conn, async (job) => notifyEvent(deps, send, job.data), 4);
   setInterval(() => void runMonitors(deps, alert).catch((e) => deps.log("monitor failed", { error: String(e?.message ?? e) })), 60_000);
   deps.log("workers started");
 }

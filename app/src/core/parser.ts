@@ -3,6 +3,8 @@
 // lands in `ambiguities`, and the bot asks before building a payment.
 import { nyWallClockToUnix } from "./price";
 import { copy } from "./copy";
+import { DEFAULTS } from "./builder";
+import { formatWhen, zoneOffsetFor, zonedWallToUnix, type Zone } from "./tz";
 
 export type Recipient =
   | { type: "handle"; handle: string }
@@ -28,10 +30,19 @@ export interface ParseContext {
   nowMs: number;
   /** user's UTC offset in minutes for TIME conditions (e.g. Dubai = 240). Stock deadlines always use New York time. */
   tzOffsetMin?: number;
+  /** user's IANA zone (e.g. "Asia/Dubai"); wins over tzOffsetMin and follows daylight saving */
+  tz?: string;
   /** tickers with a registered price feed (upper-case) */
   tickers: ReadonlySet<string>;
   /** optional last prices (8-dec feed units, underlying terms) to infer the direction of "hits 200" */
   lastPrice?: Readonly<Record<string, number>>;
+}
+
+/** A question the bot asks instead of guessing. Each option carries the full command text to run if it is picked. */
+export interface Question {
+  kind: "direction" | "date_format" | "deadline" | "weekend" | "team";
+  text: string;
+  options: { label: string; text?: string; replace?: [from: string, to: string] }[];
 }
 
 export interface ParseResult {
@@ -42,9 +53,23 @@ export interface ParseResult {
   counterAmountUsdg?: string;
   condition?: ConditionDraft;
   ambiguities: string[];
+  /** structured form of `ambiguities` (same order); the bot turns these into buttons */
+  questions: Question[];
   notes: string[];
   errors: string[];
   preview?: string;
+  /** zone used for the deadline text in the preview */
+  zone?: Zone;
+  /** flat fee in USDG shown in the preview */
+  feeUsdg?: string;
+  /** unix seconds the escrow would expire at, when it can be known before a fixture is chosen */
+  expiry?: number;
+}
+
+/** Records an ambiguity both as a plain sentence (web) and as a question with buttons (bot). */
+function ask(res: Pick<ParseResult, "ambiguities"> & { questions?: Question[] }, q: Question) {
+  res.ambiguities.push(q.text);
+  res.questions?.push(q);
 }
 
 const AMOUNT = String.raw`\$?(\d{1,7}(?:\.\d{1,6})?)\s*(?:usdg|usd|dollars?|bucks|\$)?`;
@@ -62,7 +87,8 @@ const WEEKDAY_SHORT = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
 export function parseCommand(input: string, ctx: ParseContext): ParseResult {
-  const res: ParseResult = { ok: false, twoSided: false, ambiguities: [], notes: [], errors: [] };
+  const res: ParseResult = { ok: false, twoSided: false, ambiguities: [], questions: [], notes: [], errors: [] };
+  res.zone = ctx.tz ? { name: ctx.tz } : ctx.tzOffsetMin ? { offsetMin: ctx.tzOffsetMin } : undefined;
   const text = input.trim().replace(/\s+/g, " ").replace(/[’‘]/g, "'");
   const m = text.match(HEAD);
   if (!m) {
@@ -86,14 +112,43 @@ export function parseCommand(input: string, ctx: ParseContext): ParseResult {
     if (res.condition.kind === "APPROVE" && res.condition.mode === "PARTIES") res.errors.push(copy.parse.challengeNeedsReferee);
     if (res.recipient?.type === "link") res.notes.push(copy.parse.challengeLinkPrivate);
   }
-  if (res.condition && "deadline" in res.condition && res.condition.deadline * 1000 <= ctx.nowMs) {
+  if (res.condition && "deadline" in res.condition && res.condition.deadline > 0 && res.condition.deadline * 1000 <= ctx.nowMs) {
     res.errors.push(copy.parse.inPast);
   }
   if (res.condition?.kind === "TIME" && res.condition.at * 1000 <= ctx.nowMs) res.errors.push(copy.parse.inPast);
 
+  for (const q of res.questions)
+    for (const o of q.options) {
+      if (o.replace) o.text = replaceCI(text, o.replace[0], o.replace[1]);
+      delete o.replace;
+    }
+  if (res.condition) {
+    res.feeUsdg = res.condition.kind === "SPORTS" || res.condition.kind === "MARKET" ? "0.75" : "0.25";
+    res.expiry = expiryFor(res.condition, Math.floor(ctx.nowMs / 1000));
+  }
   res.ok = !!res.condition && res.errors.length === 0 && res.ambiguities.length === 0;
   if (res.condition) res.preview = renderPreview(res);
   return res;
+}
+
+/** Same windows the builder uses; undefined when the expiry depends on a fixture or market not chosen yet. */
+export function expiryFor(c: ConditionDraft, nowSec: number): number | undefined {
+  switch (c.kind) {
+    case "TIME":
+      return c.at + DEFAULTS.timeClaimWindow;
+    case "PRICE":
+      return c.mode === "TOUCH" ? c.deadline + DEFAULTS.touchGrace : c.deadline + DEFAULTS.holdWindow + DEFAULTS.priceSettleWindow;
+    case "APPROVE":
+      return nowSec + DEFAULTS.approveWindow;
+    default:
+      return undefined;
+  }
+}
+
+/** Replaces the first case-insensitive occurrence; falls back to the whole text when `from` is not found. */
+export function replaceCI(text: string, from: string, to: string): string {
+  const i = text.toLowerCase().indexOf(from.toLowerCase());
+  return i < 0 ? text : text.slice(0, i) + to + text.slice(i + from.length);
 }
 
 function parseRecipient(s: string): Recipient {
@@ -113,9 +168,9 @@ function parseCondition(t: string, conn: string, ctx: ParseContext, res: ParseRe
 
   // ---- TIME: "on nov 1", "on the 1st", "in 3 days", "at 9am friday"
   if (conn === "on" || conn === "at" || conn === "in") {
-    const when = parseWhen(`${conn === "in" ? "in " : ""}${lower}`, ctx.nowMs, ctx.tzOffsetMin ?? 0, 9, res);
+    const when = parseWhen(`${conn === "in" ? "in " : ""}${lower}`, ctx.nowMs, ctx.tzOffsetMin ?? 0, 9, res, false, ctx.tz);
     if (when === undefined) {
-      res.errors.push(copy.parse.badDate(t));
+      if (!res.ambiguities.length) res.errors.push(copy.parse.badDate(t));
       return undefined;
     }
     return { kind: "TIME", at: when };
@@ -157,15 +212,34 @@ function parseCondition(t: string, conn: string, ctx: ParseContext, res: ParseRe
       res.notes.push(copy.parse.inferredDirection(ticker, op));
     }
     if (dirWord === ">" || dirWord === "<") res.notes.push(copy.parse.inclusive);
-    if (!op) res.ambiguities.push(copy.parse.needDirection(ticker, price));
+    const rest = pm[5] ? ` ${pm[5]} ${pm[6]}` : "";
+    const lead = `${pm[1]} ${verb ? verb + " " : ""}`;
+    if (!op)
+      ask(res, {
+        kind: "direction",
+        text: copy.parse.needDirection(ticker, price),
+        options: [
+          { label: copy.parse.optAbove(price), replace: [t, `${lead}at or above ${price}${rest}`] },
+          { label: copy.parse.optBelow(price), replace: [t, `${lead}at or below ${price}${rest}`] },
+        ],
+      });
     if (!verb || verb === "is" || verb === "trades" || verb === "stays") res.notes.push(copy.parse.atDeadlineMeaning);
 
     const prepWhen = pm[5] ? `${pm[5] === "this" || pm[5] === "next" ? pm[5] + " " : ""}${pm[6]}` : undefined;
     let deadline: number | undefined;
-    if (!prepWhen) res.ambiguities.push(copy.parse.needDeadline);
+    if (!prepWhen)
+      ask(res, {
+        kind: "deadline",
+        text: copy.parse.needDeadline,
+        options: [
+          { label: copy.parse.optTomorrow, replace: [t, `${t} by tomorrow`] },
+          { label: copy.parse.optFriday, replace: [t, `${t} by friday`] },
+          { label: copy.parse.optNextFriday, replace: [t, `${t} by next friday`] },
+        ],
+      });
     else {
-      deadline = parseWhen(prepWhen, ctx.nowMs, 0, touch ? 20 : 16, res, true);
-      if (deadline === undefined) res.errors.push(copy.parse.badDate(prepWhen));
+      deadline = parseWhen(prepWhen, ctx.nowMs, 0, touch ? 20 : 16, res, true, ctx.tz);
+      if (deadline === undefined && !res.ambiguities.length) res.errors.push(copy.parse.badDate(prepWhen));
     }
     return {
       kind: "PRICE",
@@ -191,11 +265,11 @@ function parseCondition(t: string, conn: string, ctx: ParseContext, res: ParseRe
     let opp = sp[3]?.trim();
     let on: number | undefined;
     // "arsenal win saturday" -> trailing word is a date, not an opponent
-    if (opp && sp[4] === undefined && parseWhen(opp, ctx.nowMs, ctx.tzOffsetMin ?? 0, 12, { ambiguities: [], notes: [] } as never) !== undefined) {
-      on = parseWhen(opp, ctx.nowMs, ctx.tzOffsetMin ?? 0, 12, res);
+    if (opp && sp[4] === undefined && parseWhen(opp, ctx.nowMs, ctx.tzOffsetMin ?? 0, 12, { ambiguities: [], questions: [], notes: [] }, false, ctx.tz) !== undefined) {
+      on = parseWhen(opp, ctx.nowMs, ctx.tzOffsetMin ?? 0, 12, res, false, ctx.tz);
       opp = undefined;
     }
-    if (sp[4]) on = parseWhen(sp[4], ctx.nowMs, ctx.tzOffsetMin ?? 0, 12, res);
+    if (sp[4]) on = parseWhen(sp[4], ctx.nowMs, ctx.tzOffsetMin ?? 0, 12, res, false, ctx.tz);
     const result = /^(win or draw|don't lose|do not lose|dont lose)$/.test(v)
       ? "WIN_OR_DRAW"
       : /^draws?$/.test(v)
@@ -221,8 +295,9 @@ export function parseWhen(
   nowMs: number,
   tzOffsetMin: number,
   defaultHour: number,
-  res: Pick<ParseResult, "ambiguities" | "notes">,
+  res: Pick<ParseResult, "ambiguities" | "notes"> & { questions?: Question[] },
   stockClock = false,
+  tzName?: string,
 ): number | undefined {
   let p = phrase.toLowerCase().trim().replace(/^(by|on|at|before)\s+/, "");
   let hour = defaultHour;
@@ -245,7 +320,9 @@ export function parseWhen(
   }
 
   // local calendar "today" in the relevant clock
-  const offMin = stockClock ? nyOffsetMinutes(nowMs) : tzOffsetMin;
+  const offMin = stockClock ? nyOffsetMinutes(nowMs) : tzName ? zoneOffsetFor({ name: tzName }, nowMs) : tzOffsetMin;
+  const wallToUnix = (yy: number, mm: number, dd: number, h: number, mi: number, off: number) =>
+    tzName && !stockClock ? zonedWallToUnix(tzName, yy, mm, dd, h, mi) : wallToUnixFixed(yy, mm, dd, h, mi, off);
   const localNow = new Date(nowMs + offMin * 60_000);
   let y = localNow.getUTCFullYear();
   let mo = localNow.getUTCMonth();
@@ -313,8 +390,29 @@ export function parseWhen(
     }
     const slash = p.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
     if (!matched && slash) {
-      res.ambiguities.push(`"${p}" could be day/month or month/day — write it like "nov 1" or "2026-11-01"`);
-      return undefined;
+      const a = Number(slash[1]);
+      const b = Number(slash[2]);
+      const yr = slash[3] ? (slash[3].length === 2 ? 2000 + Number(slash[3]) : Number(slash[3])) : undefined;
+      const dayFirst = a > 12 || a === b ? true : b > 12 ? false : undefined;
+      if (dayFirst === undefined) {
+        const word = (m: number) => MONTHS[m - 1]!.slice(0, 3);
+        ask(res, {
+          kind: "date_format",
+          text: copy.parse.askDateFormat(slash[0]),
+          options: [
+            { label: copy.parse.optDayFirst(a, word(b)), replace: [slash[0], `${a} ${word(b)}${yr ? " " + yr : ""}`] },
+            { label: copy.parse.optMonthFirst(b, word(a)), replace: [slash[0], `${word(a)} ${b}${yr ? " " + yr : ""}`] },
+          ],
+        });
+        return undefined;
+      }
+      const [dd, mm] = dayFirst ? [a, b] : [b, a];
+      if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return undefined;
+      matched = true;
+      mo = mm - 1;
+      d = dd;
+      if (yr) y = yr;
+      else if (wallToUnix(y, mo, d, hour, minute, offMin) * 1000 <= nowMs) y += 1;
     }
   }
   if (!matched) return undefined;
@@ -326,15 +424,26 @@ export function parseWhen(
     let dd = target.getUTCDate();
     const wday = target.getUTCDay();
     if (wday === 6 || wday === 0) {
+      const ymd = (t: Date) => `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
+      const fri = new Date(Date.UTC(y, mo, d - (wday === 6 ? 1 : 2)));
+      const mon = new Date(Date.UTC(y, mo, d + (wday === 6 ? 2 : 1)));
       dd -= wday === 6 ? 1 : 2;
-      res.notes.push("weekend date moved to Friday's close (US market hours)");
+      res.notes.push(copy.parse.weekendRolled);
+      ask(res, {
+        kind: "weekend",
+        text: copy.parse.askWeekend,
+        options: [
+          { label: copy.parse.optFridayClose, replace: [p, ymd(fri)] },
+          { label: copy.parse.optMondayClose, replace: [p, ymd(mon)] },
+        ],
+      });
     }
     unix = nyWallClockToUnix(target.getUTCFullYear(), target.getUTCMonth() + 1, dd, hour, minute);
   }
   return unix;
 }
 
-function wallToUnix(y: number, mo: number, d: number, h: number, mi: number, offMin: number): number {
+function wallToUnixFixed(y: number, mo: number, d: number, h: number, mi: number, offMin: number): number {
   return Math.floor((Date.UTC(y, mo, d, h, mi) - offMin * 60_000) / 1000);
 }
 
@@ -350,19 +459,22 @@ function nyOffsetMinutes(nowMs: number): number {
 export function renderPreview(r: ParseResult): string {
   const who = r.recipient?.type === "handle" ? `@${r.recipient.handle}` : r.recipient?.type === "address" ? short(r.recipient.address) : copy.preview.linkHolder;
   const c = r.condition!;
-  const cond = describeCondition(c);
-  if (r.twoSided) return copy.preview.challenge(who, r.amountUsdg!, r.counterAmountUsdg!, cond);
-  return copy.preview.payment(who, r.amountUsdg!, cond);
+  const cond = describeCondition(c, r.zone);
+  const lines = [r.twoSided ? copy.preview.challenge(who, r.amountUsdg!, r.counterAmountUsdg!, cond) : copy.preview.payment(who, r.amountUsdg!, cond)];
+  if (r.feeUsdg) lines.push(copy.preview.fee(r.feeUsdg));
+  lines.push(r.expiry ? copy.preview.expiry(formatWhen(r.expiry, r.zone)) : copy.preview.expiryAfterResult);
+  if (c.kind === "PRICE") lines.push(copy.preview.priceBand);
+  return lines.join("\n");
 }
 
-export function describeCondition(c: ConditionDraft): string {
+export function describeCondition(c: ConditionDraft, zone?: Zone): string {
   switch (c.kind) {
     case "TIME":
-      return copy.describe.time(fmtDate(c.at));
+      return copy.describe.time(fmtDate(c.at, zone));
     case "PRICE":
-      return copy.describe.price(c.ticker, c.op, c.priceUsd, c.mode, fmtDate(c.deadline));
+      return copy.describe.price(c.ticker, c.op, c.priceUsd, c.mode, fmtDate(c.deadline, zone));
     case "SPORTS":
-      return copy.describe.sports(c.team, c.result, c.opponent, c.on ? fmtDate(c.on) : undefined);
+      return copy.describe.sports(c.team, c.result, c.opponent, c.on ? fmtDate(c.on, zone) : undefined);
     case "MARKET":
       return copy.describe.market(c.venue, c.ref, c.answer);
     case "APPROVE":
@@ -374,6 +486,6 @@ function short(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
-export function fmtDate(unix: number): string {
-  return new Date(unix * 1000).toISOString().replace("T", " ").replace(/:\d{2}\.\d{3}Z$/, " UTC");
+export function fmtDate(unix: number, zone?: Zone): string {
+  return formatWhen(unix, zone);
 }

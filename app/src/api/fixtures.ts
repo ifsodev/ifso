@@ -26,14 +26,52 @@ export function matchFixtures(events: OddsApiEvent[], team: string, opponent: st
     .sort((a, b) => Date.parse(a.commence_time) - Date.parse(b.commence_time));
 }
 
-export async function findFixture(deps: Deps, team: string, opponent?: string, on?: number): Promise<{ fixture?: FootballFixture; teamIsHome?: boolean; ambiguous?: string[] }> {
+async function loadEvents(deps: Deps): Promise<OddsApiEvent[] | undefined> {
   const key = deps.env.ODDS_API_KEY;
-  if (!key) return {};
+  if (!key) return undefined;
   if (!cache || Date.now() - cache.at > 10 * 60_000) {
     const lists = await Promise.all(LEAGUES.map((l) => listEvents(key, l).then((r) => r.body).catch(() => [] as OddsApiEvent[])));
     cache = { at: Date.now(), events: lists.flat() };
   }
-  const matches = matchFixtures(cache.events, team, opponent, on, Math.floor(Date.now() / 1000));
+  return cache.events;
+}
+
+export const LEAGUE_NAMES: Record<string, string> = {
+  soccer_epl: "Premier League",
+  soccer_spain_la_liga: "La Liga",
+  soccer_italy_serie_a: "Serie A",
+  soccer_germany_bundesliga: "Bundesliga",
+  soccer_france_ligue_one: "Ligue 1",
+  soccer_usa_mls: "MLS",
+};
+
+export interface FixtureMatch {
+  home: string;
+  away: string;
+  league: string;
+  commence: number; // unix seconds
+  /** which side of the fixture matched the typed team name */
+  matched: string;
+}
+
+/** Upcoming league fixtures for a typed team name, soonest first. undefined = no odds key, so no lookup is possible. */
+export async function listFixtureMatches(deps: Deps, team: string, opponent?: string, on?: number): Promise<FixtureMatch[] | undefined> {
+  const events = await loadEvents(deps);
+  if (!events) return undefined;
+  const t = normTeam(team);
+  return matchFixtures(events, team, opponent, on, Math.floor(Date.now() / 1000)).map((e) => ({
+    home: e.home_team,
+    away: e.away_team,
+    league: LEAGUE_NAMES[e.sport_key] ?? e.sport_key,
+    commence: Math.floor(Date.parse(e.commence_time) / 1000),
+    matched: normTeam(e.home_team).includes(t) || t.includes(normTeam(e.home_team)) ? e.home_team : e.away_team,
+  }));
+}
+
+export async function findFixture(deps: Deps, team: string, opponent?: string, on?: number): Promise<{ fixture?: FootballFixture; teamIsHome?: boolean; ambiguous?: string[] }> {
+  const events = await loadEvents(deps);
+  if (!events) return {};
+  const matches = matchFixtures(events, team, opponent, on, Math.floor(Date.now() / 1000));
   if (!matches.length) return {};
   const first = matches[0]!;
   const sameTeamNames = new Set(matches.slice(0, 3).map((m) => (normTeam(m.home_team).includes(normTeam(team)) ? m.home_team : m.away_team)));
