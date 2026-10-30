@@ -97,7 +97,8 @@ contract MockUSDG {
         external
     {
         if (block.timestamp > deadline) revert PermitExpired();
-        bytes32 digest = _digest(keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonces[owner]++, deadline)));
+        bytes32 digest =
+            _digest(keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonces[owner]++, deadline)));
         if (ECDSA.recover(digest, v, r, s) != owner) revert InvalidSignature();
         allowance[owner][spender] = value;
         emit Approval(owner, spender, value);

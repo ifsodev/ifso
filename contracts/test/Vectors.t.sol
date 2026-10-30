@@ -59,9 +59,15 @@ contract VectorsTest is IfsoFixture {
     }
 
     function test_Eip712StructParity() public view {
-        assertEq(keccak256(abi.encode(escrow.CLAIM_TYPEHASH(), uint256(42), V_ACCEPTOR, CONDITION_HASH)), CLAIM_STRUCT, "claim");
         assertEq(
-            keccak256(abi.encode(escrow.DECISION_TYPEHASH(), uint256(42), uint8(3), uint256(7), uint256(1_790_000_000))),
+            keccak256(abi.encode(escrow.CLAIM_TYPEHASH(), uint256(42), V_ACCEPTOR, CONDITION_HASH)),
+            CLAIM_STRUCT,
+            "claim"
+        );
+        assertEq(
+            keccak256(
+                abi.encode(escrow.DECISION_TYPEHASH(), uint256(42), uint8(3), uint256(7), uint256(1_790_000_000))
+            ),
             DECISION_STRUCT,
             "decision"
         );

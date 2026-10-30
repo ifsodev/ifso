@@ -176,8 +176,9 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
             if (c.multiplier != IERC8056(token).uiMultiplier()) revert MultiplierMismatch();
             // refuse conditions that a scheduled corporate action would VOID before they can resolve
             uint256 at = IERC8056(token).effectiveAt();
-            if (at != 0 && at <= uint256(c.deadline) + c.holdWindow && IERC8056(token).newUIMultiplier() != c.multiplier)
-            {
+            if (
+                at != 0 && at <= uint256(c.deadline) + c.holdWindow && IERC8056(token).newUIMultiplier() != c.multiplier
+            ) {
                 revert MultiplierMismatch();
             }
         }
@@ -273,11 +274,7 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
     }
 
     /// @dev Next round after `roundId`, aware of proxy phases (roundId = phaseId << 64 | aggregatorRoundId).
-    function _next(AggregatorV3Interface feed, uint80 roundId)
-        private
-        view
-        returns (bool, int256, uint256)
-    {
+    function _next(AggregatorV3Interface feed, uint80 roundId) private view returns (bool, int256, uint256) {
         (bool ok, int256 a, uint256 u) = _round(feed, roundId + 1);
         if (ok) return (true, a, u);
         (uint80 latestId,,,,) = feed.latestRoundData();

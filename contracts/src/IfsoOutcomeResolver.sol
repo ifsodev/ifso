@@ -79,9 +79,14 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     mapping(bytes32 => Question) internal _q;
     mapping(address => uint256) public claimableBond;
 
-    constructor(address owner_, address bondToken_, uint64 disputeWindow_, uint64 panelWindow_, uint96 bond_, address panel_)
-        Owned2Step(owner_)
-    {
+    constructor(
+        address owner_,
+        address bondToken_,
+        uint64 disputeWindow_,
+        uint64 panelWindow_,
+        uint96 bond_,
+        address panel_
+    ) Owned2Step(owner_) {
         if (bondToken_ == address(0) || panel_ == address(0)) revert ZeroAddress();
         if (disputeWindow_ < 30 minutes || disputeWindow_ > 7 days) revert BadQuestion();
         if (panelWindow_ < 1 days || panelWindow_ > 14 days) revert BadQuestion();

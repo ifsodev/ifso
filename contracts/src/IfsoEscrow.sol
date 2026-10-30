@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Condition, CreateParams, Kind, Status, Verdict, APPROVE_PARTIES, APPROVE_REFEREE} from "./libraries/IfsoTypes.sol";
+import {
+    Condition,
+    CreateParams,
+    Kind,
+    Status,
+    Verdict,
+    APPROVE_PARTIES,
+    APPROVE_REFEREE
+} from "./libraries/IfsoTypes.sol";
 import {IIfsoEscrow} from "./interfaces/IIfsoEscrow.sol";
 import {IIfsoConditionEvaluator} from "./interfaces/IIfsoConditionEvaluator.sol";
 import {IUSDG} from "./interfaces/IUSDG.sol";
@@ -475,9 +483,8 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
         Escrow storage e = _escrows[id];
         address signer = e.sender;
         uint256 nonce = nonces[signer]++;
-        bytes32 digest = _hashTypedData(
-            keccak256(abi.encode(REFUND_REDIRECT_TYPEHASH, id, refundTo, altRefundTo, nonce, deadline))
-        );
+        bytes32 digest =
+            _hashTypedData(keccak256(abi.encode(REFUND_REDIRECT_TYPEHASH, id, refundTo, altRefundTo, nonce, deadline)));
         if (!SignatureChecker.isValid(signer, digest, sig)) revert BadSignature();
         _setRefund(id, e, refundTo, altRefundTo);
     }
@@ -588,9 +595,8 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
         view
         returns (bytes32)
     {
-        return _hashTypedData(
-            keccak256(abi.encode(REFUND_REDIRECT_TYPEHASH, id, refundTo, altRefundTo, nonce, deadline))
-        );
+        return
+            _hashTypedData(keccak256(abi.encode(REFUND_REDIRECT_TYPEHASH, id, refundTo, altRefundTo, nonce, deadline)));
     }
 
     function conditionHashOf(Condition calldata c) external pure returns (bytes32) {

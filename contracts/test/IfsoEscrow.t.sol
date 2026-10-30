@@ -225,8 +225,9 @@ contract IfsoEscrowTest is IfsoFixture {
     function test_CreateWithAuthorization_TamperedParamsRevert() public {
         CreateParams memory p = _named(_time(uint64(T0 + 1 days)), uint64(T0 + 3 days));
         uint256 total = uint256(p.amount) + FEE;
-        bytes memory auth =
-            _usdgAuthSig(senderPk, sender, address(escrow), total, T0 - 1, T0 + 1 hours, escrow.createAuthNonce(sender, p));
+        bytes memory auth = _usdgAuthSig(
+            senderPk, sender, address(escrow), total, T0 - 1, T0 + 1 hours, escrow.createAuthNonce(sender, p)
+        );
         p.recipient = attacker; // relayer tries to re-point the payment
         vm.prank(attacker);
         vm.expectRevert(MockUSDG.InvalidSignature.selector);
@@ -249,14 +250,18 @@ contract IfsoEscrowTest is IfsoFixture {
     function test_CreateBatch_PayrollRun() public {
         CreateParams[] memory ps = new CreateParams[](3);
         for (uint256 i; i < 3; ++i) {
-            ps[i] = _params(_time(uint64(T0 + 1 days)), address(uint160(0x5000 + i)), address(0), 100e6, uint64(T0 + 5 days));
+            ps[i] = _params(
+                _time(uint64(T0 + 1 days)), address(uint160(0x5000 + i)), address(0), 100e6, uint64(T0 + 5 days)
+            );
         }
         vm.prank(sender);
         uint256[] memory ids = escrow.createBatch(ps);
         assertEq(usdg.balanceOf(address(escrow)), 300e6, "batch escrowed");
         assertEq(usdg.balanceOf(address(router)), 3 * uint256(FEE), "flat fee per payment");
         vm.warp(T0 + 1 days);
-        for (uint256 i; i < 3; ++i) escrow.settle(ids[i], "", false);
+        for (uint256 i; i < 3; ++i) {
+            escrow.settle(ids[i], "", false);
+        }
         assertEq(usdg.balanceOf(address(0x5002)), 100e6, "paid");
     }
 

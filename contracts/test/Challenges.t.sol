@@ -150,7 +150,8 @@ contract ChallengesTest is IfsoFixture {
 
     function test_TouchChallenge_WindowStartsAtAcceptance() public {
         uint64 dl = uint64(T0 + 3 days);
-        CreateParams memory p = _params(_priceTouch(200e8, OP_GTE, uint64(T0), dl), recipient, address(0), 20e6, uint64(dl + 1 days));
+        CreateParams memory p =
+            _params(_priceTouch(200e8, OP_GTE, uint64(T0), dl), recipient, address(0), 20e6, uint64(dl + 1 days));
         p.twoSided = true;
         p.counterAmount = 20e6;
         p.acceptBy = uint64(T0 + 1 days);

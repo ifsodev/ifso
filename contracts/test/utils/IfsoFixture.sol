@@ -78,9 +78,7 @@ abstract contract IfsoFixture is TestBase {
         seq = new MockSequencerFeed();
         seq.set(0, T0 - 2 days);
 
-        evaluator = new IfsoConditionEvaluator(
-            owner, IPyth(address(pyth)), AggregatorV3Interface(address(seq))
-        );
+        evaluator = new IfsoConditionEvaluator(owner, IPyth(address(pyth)), AggregatorV3Interface(address(seq)));
         resolver = new IfsoOutcomeResolver(owner, address(usdg), 2 hours, 72 hours, 100e6, panel);
         router = new FeeRouter(owner, address(usdg), address(0xF1), address(0xF2), address(0xF3), address(0xF4));
         escrow = new IfsoEscrow(

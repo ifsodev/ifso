@@ -19,7 +19,9 @@ interface IIfsoOutcomeResolver {
         uint8 numOutcomes,
         string specURI
     );
-    event Proposed(bytes32 indexed questionId, address indexed proposer, uint8 outcome, bytes32 sourcesHash, uint96 bond);
+    event Proposed(
+        bytes32 indexed questionId, address indexed proposer, uint8 outcome, bytes32 sourcesHash, uint96 bond
+    );
     event Disputed(bytes32 indexed questionId, address indexed disputer, bytes32 evidenceHash);
     event Finalized(bytes32 indexed questionId, uint8 outcome, bool byPanel);
     event PanelTimedOut(bytes32 indexed questionId);
