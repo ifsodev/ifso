@@ -9,6 +9,6 @@ describe("outcomeMinSpan", () => {
     const deps = { clients: { escrow: "0x00000000000000000000000000000000000e5c20", evaluator: "0x00000000000000000000000000000000000e7a10", publicClient: { readContract: async (r: { functionName: string }) => vals[r.functionName] } } } as unknown as Deps;
     expect(await outcomeMinSpan(deps, "0x00000000000000000000000000000000000000dd")).toBe(172800 + 86400 + 86400 + 172800);
     vals.PROPOSAL_GRACE = 0n; // a different on-chain value is followed
-    expect(await outcomeMinSpan(deps, "0x00000000000000000000000000000000000000dd")).toBe(86400 * 3 + 0 + 86400 * 0 + 0 + 172800 - 86400 * 2 + 86400 * 0);
+    expect(await outcomeMinSpan(deps, "0x00000000000000000000000000000000000000dd")).toBe(86400 + 86400 + 172800);
   });
 });
