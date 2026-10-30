@@ -34,7 +34,7 @@ export async function relayClaim(
   limiter: RateLimiter,
   input: { id: bigint; recipient: Address; signature: Hex; ip: string },
 ): Promise<{ txHash: Hex; status: "bound" | "paid" }> {
-  const ipHash = RateLimiter.ipHash(input.ip);
+  const ipHash = RateLimiter.ipHash(input.ip, deps.env.IP_HASH_SALT);
   if (!(await limiter.hit(`claim:${ipHash}`, deps.env.CLAIM_RELAY_PER_IP_PER_HOUR, 3600))) {
     throw new ClaimError("RATE_LIMITED", "too many claims from this network, try again later");
   }

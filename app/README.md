@@ -1,12 +1,12 @@
 # IFSO app (API, bot, workers)
 
-Bun · Hono · tRPC v11 · Drizzle (Postgres/Timescale) · BullMQ (Redis) · viem · grammY.
+Bun · Hono · tRPC v11 · Drizzle (Postgres 16) · BullMQ (Redis) · viem · grammY.
 
 ```bash
-docker compose -f ../docker-compose.yml up -d      # postgres + redis
+docker compose -f ../docker-compose.yml up -d      # postgres 5442 + redis 6389
 cp .env.example .env && bun install
 bun run db:migrate                                  # applies drizzle/0000_init.sql
-bun run api      # Hono: /trpc/*, /tg/webhook, /q/:specHash.json, /healthz
+bun run api      # Hono: /trpc/*, /tg/webhook, /q/:specHash.json, /healthz, /readyz
 bun run worker   # keeper (30 s), price watcher (15 s), resolver (60 s), indexer (5 s), notifier
 bun run bot      # long polling for dev (production: set TELEGRAM_WEBHOOK_SECRET and use the webhook route)
 bun test         # 111 tests: parser, links + claim signatures, claim relay, typed-data parity, TS<->Solidity
@@ -21,6 +21,8 @@ bunx tsc --noEmit
 | `src/bot/` | Telegram bot (commands -> preview -> URL button to the web app) |
 | `src/workers/` | keeper, price watcher, round history, Pyth fetch, outcome resolver, indexer, notifier, BullMQ queues |
 | `src/sources/` | The Odds API, TheSportsDB, Polymarket (Gamma + Polygon CTF), Hyperliquid HIP-4 (phase 2) |
+| `src/chain/` | viem clients: ordered RPC fallback + chunked `getLogs` (`rpc.ts`), keystore hot keys (`keys.ts`) |
+| `src/ops/` | `/healthz` + `/readyz` probes, ops alerts (deduped, log-only unless `ALERTS_ARMED=1`), monitors |
 | `src/client/claimPage.ts` | Browser claim flow (fragment read + wipe, chain-rendered details, sign, relay) |
 | `src/abi/` | ABIs generated from the Solidity sources (`contracts/tools/solcjs-compile.mjs --abi-ts-out`) |
 | `scripts/print-vectors.ts` | Prints the parity vectors asserted by `contracts/test/Vectors.t.sol` |

@@ -8,13 +8,19 @@ import { questions } from "../db/schema";
 import type { Deps } from "../workers/deps";
 import { appRouter, jsonSafe } from "./router";
 import { RateLimiter } from "./rateLimit";
+import { readiness, type Probe } from "../ops/health";
 
-export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot) {
+export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: Record<string, Probe> = {}) {
   const app = new Hono();
   // strict headers; the claim page itself (web app) additionally ships a CSP with no third-party scripts
   app.use("*", secureHeaders({ referrerPolicy: "no-referrer", xFrameOptions: "DENY" }));
 
   app.get("/healthz", (c) => c.json({ ok: true, chainId: deps.clients.chain.id, escrow: deps.clients.escrow ?? null }));
+
+  app.get("/readyz", async (c) => {
+    const r = await readiness(probes);
+    return c.json(r, r.ok ? 200 : 503);
+  });
 
   // question specs are public (their hash is on-chain); served from the DB
   app.get("/q/:file", async (c) => {

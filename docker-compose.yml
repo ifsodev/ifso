@@ -1,9 +1,9 @@
-# Local dev dependencies for app/ (Postgres + Timescale, Redis for BullMQ).
+# Local dev dependencies for app/ (plain Postgres 16 and Redis 7, pinned by digest). Ports avoid the common defaults.
 services:
   postgres:
-    image: timescale/timescaledb:2.17.2-pg16
+    image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     environment: { POSTGRES_USER: ifso, POSTGRES_PASSWORD: ifso, POSTGRES_DB: ifso }
-    ports: ["5432:5432"]
+    ports: ["5442:5432"]
   redis:
-    image: redis:7.4-alpine
-    ports: ["6379:6379"]
+    image: redis:7@sha256:b6b6e3dc0c0952737748e55d5d885272840c7e42ba41ab1d5489f693419882f5
+    ports: ["6389:6379"]

@@ -1,14 +1,14 @@
 import type IORedis from "ioredis";
 import { keccak256, toHex } from "viem";
 
-/** Per-IP fixed-window limiter. IPs are hashed with a daily salt and never stored raw. */
+/** Per-IP fixed-window limiter. IPs are hashed with a secret salt (IP_HASH_SALT) and the date and never stored raw. */
 export class RateLimiter {
   private mem = new Map<string, { n: number; until: number }>();
   constructor(private redis?: IORedis) {}
 
-  static ipHash(ip: string): string {
+  static ipHash(ip: string, salt = ""): string {
     const day = new Date().toISOString().slice(0, 10);
-    return keccak256(toHex(`ifso:${day}:${ip}`)).slice(0, 18);
+    return keccak256(toHex(`ifso:${salt}:${day}:${ip}`)).slice(0, 18);
   }
 
   async hit(key: string, limit: number, windowSec: number): Promise<boolean> {

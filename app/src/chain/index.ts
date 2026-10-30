@@ -2,27 +2,31 @@
 //  relayer  - submits claims, gasless creates/accepts, decisions, refund redirects (cannot redirect funds)
 //  keeper   - settle + refund sweeps (permissionless calls)
 //  resolver - registers questions, proposes outcomes with USDG bonds, disputes, finalizes
-import { createPublicClient, createWalletClient, http, type Address, type Hex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { rhc, rhcTestnet } from "./config/chain";
-import type { Env } from "./config/env";
+import { createWalletClient, type Address } from "viem";
+import type { Account } from "viem/accounts";
+import { rhc, rhcTestnet } from "../config/chain";
+import { rpcUrls, type Env } from "../config/env";
+import { loadHotKey } from "./keys";
+import { createPublicClient } from "viem";
+import { makeTransport, type RpcOptions } from "./rpc";
 
 export function chainFor(env: Env) {
-  return env.CHAIN_ID === 46630 ? rhcTestnet : rhc;
+  return env.CHAIN_ID === 46630 ? rhcTestnet : env.CHAIN_ID === 31337 ? { ...rhc, id: 31337 } : rhc;
 }
 
-export function makeClients(env: Env) {
+export function makeClients(env: Env, rpc: Omit<RpcOptions, "chain"> = {}) {
   const chain = chainFor(env);
-  const transport = http(env.RHC_RPC_URL, { batch: true, retryCount: 3 });
+  const urls = rpcUrls(env);
+  const transport = makeTransport(urls, { ...rpc, chain });
   const publicClient = createPublicClient({ chain, transport });
-  const wallet = (pk?: string) =>
-    pk ? createWalletClient({ chain, transport, account: privateKeyToAccount(pk as Hex) }) : undefined;
+  // wallets send through the same ordered fallback
+  const wallet = (account?: Account) => (account ? createWalletClient({ chain, transport, account }) : undefined);
   return {
     chain,
     publicClient,
-    relayer: wallet(env.RELAYER_PK),
-    keeper: wallet(env.KEEPER_PK),
-    resolver: wallet(env.RESOLVER_PK),
+    relayer: wallet(loadHotKey("RELAYER", env)),
+    keeper: wallet(loadHotKey("KEEPER", env)),
+    resolver: wallet(loadHotKey("RESOLVER", env)),
     escrow: env.ESCROW_ADDRESS as Address | undefined,
     evaluator: env.EVALUATOR_ADDRESS as Address | undefined,
     resolverContract: env.RESOLVER_ADDRESS as Address | undefined,

@@ -123,7 +123,7 @@ export const sourceReports = pgTable(
   (t) => [index("source_reports_q_idx").on(t.questionId)],
 );
 
-/** Chainlink round cache (Timescale hypertable on updated_at in production). */
+/** Chainlink round cache: a normal table, indexed on (feed, updated_at). */
 export const priceRounds = pgTable(
   "price_rounds",
   {

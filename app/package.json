@@ -12,7 +12,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "bun run src/db/migrate.ts",
     "abi": "node ../contracts/tools/solcjs-compile.mjs --src-only --abi-out ./abi-json"
   },
   "dependencies": {
