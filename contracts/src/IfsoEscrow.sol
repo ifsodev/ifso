@@ -665,11 +665,12 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
 
     /// @dev USDG transfer that reports failure instead of reverting (USDG is a known token: true or revert).
     ///      A transfer that ran out of gas reverts the whole call instead, so a caller cannot starve the transfer
-    ///      (63/64 rule) to push a payable side into the owed state.
+    ///      (63/64 rule) to push a payable side into the owed state. USDG is a proxy: an out-of-gas in its inner
+    ///      frame hands back about 2/64 of `g`, so the bound is g/16, not g/63 (R2-I1).
     function _tryPay(address to, uint256 amt) private returns (bool) {
         uint256 g = gasleft();
         (bool ok, bytes memory r) = address(usdg).call(abi.encodeCall(IERC20.transfer, (to, amt)));
-        if (!ok && gasleft() <= g / 63) revert();
+        if (!ok && gasleft() <= g / 16) revert();
         return ok && (r.length == 0 || (r.length == 32 && uint256(bytes32(r)) == 1));
     }
 

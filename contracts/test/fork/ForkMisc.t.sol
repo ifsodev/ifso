@@ -78,8 +78,9 @@ contract ForkMiscTest is ForkBase {
             vm.clearMockedCalls();
         }
 
-        // an escrow created on the live multiplier VOIDs (money comes back) when a change took effect at or before
-        // the deciding round; a change that took effect after it leaves the decided result standing (R1-L1)
+        // an escrow created on the live multiplier VOIDs (money comes back) when a change is in force at the deciding
+        // round or took effect between it and the settle (R2-L1: the value it replaced is no longer visible); a
+        // change still pending at settle leaves the decided result standing (R1-L1)
         (, Round memory r, Round memory next) = _window(FEED_SPY, 3);
         uint64 dl = uint64(r.updatedAt + (next.updatedAt - r.updatedAt) / 2);
         vm.warp(dl - 1 hours);
@@ -92,8 +93,11 @@ contract ForkMiscTest is ForkBase {
         uint256 m0 = IERC8056(TOKEN_SPY).uiMultiplier();
         vm.mockCall(TOKEN_SPY, abi.encodeWithSignature("newUIMultiplier()"), abi.encode(m0 + 1));
         uint256 snap = vm.snapshotState();
+        vm.mockCall(TOKEN_SPY, abi.encodeWithSignature("effectiveAt()"), abi.encode(forkNow + 1));
+        assertTrue(escrow.settle(id, abi.encode(r.id), false) == Verdict.TRUE, "change pending at settle");
+        vm.revertToState(snap);
         vm.mockCall(TOKEN_SPY, abi.encodeWithSignature("effectiveAt()"), abi.encode(forkNow));
-        assertTrue(escrow.settle(id, abi.encode(r.id), false) == Verdict.TRUE, "change after the deciding round");
+        assertTrue(escrow.settle(id, abi.encode(r.id), false) == Verdict.VOID, "change in force before settle: VOID");
         vm.revertToState(snap);
         vm.mockCall(TOKEN_SPY, abi.encodeWithSignature("effectiveAt()"), abi.encode(uint256(r.updatedAt)));
         uint256 before = usdg.balanceOf(sender);

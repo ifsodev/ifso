@@ -107,7 +107,7 @@ def main():
              "| File | Killed | Total | Score |", "|---|---|---|---|"]
         for f, d in by_file.items():
             L.append(f"| `{f}` | {d['killed']} | {d['total']} | {100.0 * d['killed'] / max(d['total'], 1):.1f}% |")
-        L += ["", "## Round-1 finding mutants (each undoes one fix)", "", "| Mutant | Finding | What it undoes | Result |", "|---|---|---|---|"]
+        L += ["", "## Review finding mutants (each undoes one fix)", "", "| Mutant | Finding | What it undoes | Result |", "|---|---|---|---|"]
         for r in results:
             if r["finding"] != "-":
                 L.append(f"| {r['id']} | {r['finding']} | {r['why']} | {r['status']} |")

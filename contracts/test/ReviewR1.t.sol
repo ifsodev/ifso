@@ -133,13 +133,13 @@ contract ReviewR1Test is IfsoFixture {
         vm.prank(sender);
         vm.expectRevert(IfsoConditionEvaluator.InvalidCondition.selector);
         escrow.create(p);
-        p.expiry = earliest + 2 hours + 72 hours + 1 days - 1;
+        p.expiry = earliest + evaluator.PROPOSAL_GRACE() + 2 hours + 72 hours + 1 days - 1; // R2-L2 adds the grace
         vm.prank(sender);
         vm.expectRevert(IfsoConditionEvaluator.InvalidCondition.selector);
         escrow.create(p);
 
         // the new minimum
-        p.expiry = earliest + 2 hours + 72 hours + 1 days;
+        p.expiry = earliest + evaluator.PROPOSAL_GRACE() + 2 hours + 72 hours + 1 days;
         uint256 id = _create(p);
         vm.prank(recipient);
         escrow.accept(id, "", address(0));
@@ -162,20 +162,22 @@ contract ReviewR1Test is IfsoFixture {
     }
 
     // =========================================================================================================
-    // R1-L1: a multiplier change after the deciding price must not VOID a decided result.
+    // R1-L1: a multiplier change after the deciding price must not VOID a decided result while it is still
+    //   pending. Since R2-L1, a change that is already in force at settle VOIDs (fail closed: the value it replaced,
+    //   which was in force at the price, is no longer visible), so settle before the announced effectiveAt.
     // =========================================================================================================
-    function test_R1_L1_SplitAfterDeadline_VoidsADecidedResult() public {
+    function test_R1_L1_PendingSplitAfterDeadline_Releases() public {
         uint64 dl = uint64(T0 + 2 days);
         uint256 id = _create(_named(_priceAt(200e8, OP_GTE, dl), uint64(dl + 3 days + 6 hours)));
         uint80 r = nvdaFeed.push(250e8, dl - 10 minutes); // in force at the deadline: TRUE
-        nvda.schedule(2e18, dl + 1 hours); // corporate action announced after creation, effective after the deadline
-        vm.warp(dl + 2 hours); // keeper settles a little late
+        nvda.schedule(2e18, dl + 3 hours); // corporate action announced after creation, effective after the deadline
+        vm.warp(dl + 2 hours); // keeper settles a little late, still before the action
         escrow.settle(id, _proof(r), false);
         assertTrue(_status(id) == Status.RELEASED, "deadline price was pre-split and decided: should release");
     }
 
-    /// @notice Same, with a token that already reports the new multiplier (non-lazy) at settle time.
-    function test_R1_L1_AppliedChangeAfterDecidingRound_StillReleases() public {
+    /// @notice Once the change is in force at settle (lazy or applied token), the result VOIDs (R2-L1).
+    function test_R1_L1_AppliedChangeBeforeSettle_VoidsSinceR2L1() public {
         uint64 dl = uint64(T0 + 2 days);
         uint256 id = _create(_named(_priceAt(200e8, OP_GTE, dl), uint64(dl + 3 days + 6 hours)));
         uint80 r = nvdaFeed.push(250e8, dl - 10 minutes);
@@ -183,7 +185,7 @@ contract ReviewR1Test is IfsoFixture {
         vm.warp(dl + 2 hours);
         nvda.setMultiplier(2e18); // applied
         escrow.settle(id, _proof(r), false);
-        assertTrue(_status(id) == Status.RELEASED, "change after the deciding round: decided result stands");
+        assertTrue(_status(id) == Status.RETURNED, "change in force before settle: VOID since R2-L1");
     }
 
     /// @notice A change effective at or before the deciding price still VOIDs (lazy and applied tokens), and an
@@ -214,9 +216,8 @@ contract ReviewR1Test is IfsoFixture {
         uint64 dl = uint64(T0 + 3 days);
         uint256 id = _create(_named(_priceTouch(200e8, OP_GTE, uint64(T0), dl), dl + 1 days));
         uint80 r = nvdaFeed.push(230e8, T0 + 1 hours);
-        nvda.schedule(2e18, T0 + 2 hours);
-        vm.warp(T0 + 3 hours);
-        nvda.setMultiplier(2e18);
+        nvda.schedule(2e18, T0 + 4 hours);
+        vm.warp(T0 + 3 hours); // settled while the change is still pending
         escrow.settle(id, _proof(r), false);
         assertTrue(_status(id) == Status.RELEASED, "touched before the change");
     }

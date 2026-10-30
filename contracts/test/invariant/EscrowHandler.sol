@@ -212,7 +212,8 @@ contract EscrowHandler {
             c.target = address(w.resolver);
             c.key = q;
             c.outcomeMask = 1 << (1 + (amount % 3));
-            uint64 minExpiry = earliest + w.resolver.disputeWindow() + w.resolver.panelWindow() + 1 days;
+            uint64 minExpiry =
+                earliest + evaluator.PROPOSAL_GRACE() + w.resolver.disputeWindow() + w.resolver.panelWindow() + 1 days;
             CreateParams memory p = _base(actor, amount, link, minExpiry + uint64(_bound(extra, 0, 2 days)));
             p.condition = c;
             if (twoSided) {

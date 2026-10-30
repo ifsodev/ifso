@@ -65,6 +65,7 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
     uint64 public constant MAX_HORIZON = 400 days;
     uint64 public constant MIN_SETTLE_WINDOW = 6 hours; // expiry must leave keepers this long after resolution
     uint64 public constant MIN_CLAIM_WINDOW = 1 days; //  TIME: expiry >= deadline + 1 day
+    uint64 public constant PROPOSAL_GRACE = 2 days; // OUTCOME: room for an honest proposal made this late (R2-L2)
 
     // ------------------------------------------------------------------ immutables / registry
     IPyth public immutable pyth; //                                  may be address(0) (Pyth disabled)
@@ -154,9 +155,13 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
             if (c.outcomeMask == 0 || c.outcomeMask & 1 != 0 || (c.outcomeMask >> (uint256(n) + 1)) != 0) {
                 revert InvalidCondition();
             }
-            // R1-M3: room for a proposal at earliestResolve, a dispute, the full panel window and a settle margin,
-            // so a losing side cannot dispute once and wait for the escrow to expire into a VOID
-            if (uint256(expiry) < uint256(earliest) + r.disputeWindow() + r.panelWindow() + MIN_CLAIM_WINDOW) {
+            // R1-M3 / R2-L2: room for an honest proposal up to PROPOSAL_GRACE after earliestResolve (late sources),
+            // a dispute, the full panel window and a settle margin, so a losing side cannot dispute once and wait
+            // for the escrow to expire into a VOID
+            if (
+                uint256(expiry)
+                    < uint256(earliest) + PROPOSAL_GRACE + r.disputeWindow() + r.panelWindow() + MIN_CLAIM_WINDOW
+            ) {
                 revert InvalidCondition();
             }
         } else {
@@ -373,35 +378,38 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
         return c.op == OP_GTE ? px >= c.threshold : px <= c.threshold;
     }
 
-    /// @dev True when the multiplier IN FORCE AT `at` (the deciding price's time) may differ from the creation
-    ///      snapshot. A corporate action that takes effect after the deciding price never VOIDs an already decided
-    ///      result (R1-L1). Fails closed: an unreadable multiplier, or a changed one whose timing cannot be proven
-    ///      to be after `at`, counts as a change.
+    /// @dev True unless the multiplier IN FORCE AT `at` (the deciding price's time) is provably the creation
+    ///      snapshot. ERC-8056 exposes only the latest schedule, so the value before it is known only while that
+    ///      schedule is still pending (`uiMultiplier` is then the value in force). Fails closed (R2-L1): an
+    ///      unreadable multiplier or schedule, a latest schedule that took effect between `at` and now (the value
+    ///      it replaced, which was in force at `at`, is no longer visible), or any mismatch counts as a change.
     function _multiplierChanged(Condition calldata c, uint256 at) private view returns (bool) {
         if (c.stockToken == address(0)) return false;
         uint256 m;
+        uint256 eff;
+        uint256 nm;
         try IERC8056(c.stockToken).uiMultiplier() returns (uint256 x) {
             m = x;
         } catch {
             return true; // cannot verify => do not decide on a possibly re-based price
         }
-        uint256 eff;
-        uint256 nm;
         try IERC8056(c.stockToken).effectiveAt() returns (uint256 x) {
             eff = x;
-        } catch {}
-        if (eff != 0) {
-            try IERC8056(c.stockToken).newUIMultiplier() returns (uint256 x) {
-                nm = x;
-            } catch {
-                return m != c.multiplier || eff <= at; // schedule unreadable: only a provably clean state passes
-            }
+        } catch {
+            return true; // schedule unreadable
         }
-        // current value equals the snapshot: changed only if a schedule took effect at/before `at` (not yet
-        // reflected by uiMultiplier) with a different value
-        if (m == c.multiplier) return eff != 0 && eff <= at && nm != c.multiplier;
-        // current value differs: acceptable only when it is exactly the scheduled change, effective after `at`
-        return !(eff > at && nm == m);
+        if (eff == 0) return m != c.multiplier; // never scheduled: the current value is the only one
+        try IERC8056(c.stockToken).newUIMultiplier() returns (uint256 x) {
+            nm = x;
+        } catch {
+            return true; // schedule unreadable
+        }
+        // the latest schedule was in force at `at`: the value then is its new multiplier
+        if (eff <= at) return nm != c.multiplier || m != nm;
+        // it took effect after `at` but before now: the value it replaced cannot be read any more
+        if (eff <= block.timestamp) return true;
+        // still pending: the current value has been in force since the last change
+        return m != c.multiplier;
     }
 
     function _checkSequencer() private view {

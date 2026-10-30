@@ -45,5 +45,13 @@ is under Unreleased and is grouped by area. Dates are the commit dates (UTC).
   replayed at the relayer's cost (round 1, M5).
 - 2026-10-30: A corporate action that takes effect after the deciding price no longer voids an already decided result;
   multipliers are judged at the price's time (round 1, L1).
+- 2026-10-30: The multiplier check fails closed whenever the multiplier in force at the deciding price cannot be proven
+  to be the creation snapshot: a corporate action that took effect between the deciding price and the settle now voids,
+  as do unreadable schedule fields, so two actions during one payment can no longer hide the first (round 2, L1). A
+  change that is announced but still pending at settle keeps a decided result.
+- 2026-10-30: The OUTCOME expiry minimum adds `PROPOSAL_GRACE` (2 days) for an honest proposal made late, so a dispute
+  after a late proposal still settles before expiry (round 2, L2).
+- 2026-10-30: The gas-starvation guard of a void payout covers the USDG proxy's second call frame (`g/16` instead of
+  `g/63`), so a starved transfer can never record a payable side as owed (round 2, I1).
 - 2026-10-30: Deploy assertions now fail when the launch cap is removed, when the owner is not a real Safe, and when Pyth
   is switched on.

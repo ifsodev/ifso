@@ -245,17 +245,43 @@ contract IfsoHalmosTest {
         } catch {}
     }
 
-    /// @notice R1-L1 as a proof: a multiplier schedule that takes effect strictly after the deciding round never
-    ///         VOIDs an already decided AT_DEADLINE result, whatever the new multiplier is.
-    function check_R1L1_LaterCorporateActionDoesNotVoid(uint256 newMultiplier, uint32 delay, int256 answer) public {
-        vm.assume(answer > 0 && delay > 0 && delay < 365 days);
+    /// @notice R1-L1 as a proof: a multiplier schedule that takes effect strictly after the deciding round and is
+    ///         still pending at settle never VOIDs an already decided AT_DEADLINE result, whatever its value.
+    function check_R1L1_PendingCorporateActionDoesNotVoid(uint256 newMultiplier, uint32 delay, int256 answer) public {
+        vm.assume(answer > 0 && delay > 10 minutes + 1 && delay < 365 days);
         Condition memory c = _atDeadline(100e8, OP_GTE);
         uint256 decidedAt = c.deadline - 10 minutes;
         uint80 r = feed.push(answer, decidedAt);
-        stock.schedule(newMultiplier, decidedAt + delay); // strictly after the deciding round
+        stock.schedule(newMultiplier, decidedAt + delay); // after the settle below
         vm.warp(c.deadline + 1);
         Verdict v = evaluator.evaluate(c, uint64(T0), abi.encode(uint256(r)), address(this));
         assert(v == Verdict.TRUE || v == Verdict.FALSE);
+    }
+
+    /// @notice R2-L1 as a proof, for any two corporate actions (values m1, m2 at e1 < e2; lazy or applied token;
+    ///         any settle time): a TRUE/FALSE verdict implies the multiplier in force at the deciding round is the
+    ///         creation snapshot. ERC-8056 shows only the latest schedule (m2, e2).
+    function check_R2L1_TwoActionsDecideOnlyOnTheSnapshot(
+        uint256 m1,
+        uint256 m2,
+        uint32 d1,
+        uint32 d2,
+        uint32 settleDelay,
+        bool lazy
+    ) public {
+        vm.assume(d2 > 0);
+        Condition memory c = _atDeadline(100e8, OP_GTE);
+        uint256 e1 = T0 + 1 + uint256(d1);
+        uint256 e2 = e1 + uint256(d2);
+        uint256 nowTs = uint256(c.deadline) + 1 + uint256(settleDelay);
+        uint80 r = feed.push(150e8, c.deadline - 10 minutes); // crosses: TRUE unless VOID
+        uint256 shown = nowTs >= e2 && !lazy ? m2 : (nowTs >= e1 ? m1 : 1e18); // lazy lags the latest schedule
+        stock.setMultiplier(shown);
+        stock.schedule(m2, e2);
+        vm.warp(nowTs);
+        Verdict v = evaluator.evaluate(c, uint64(T0), abi.encode(uint256(r)), address(this));
+        uint256 decidedAt = c.deadline - 10 minutes;
+        assert(v == Verdict.VOID || (decidedAt >= e2 ? m2 : (decidedAt >= e1 ? m1 : 1e18)) == 1e18);
     }
 
     /// @notice A change already in force at or before the deciding round VOIDs it (the price may be re-based).

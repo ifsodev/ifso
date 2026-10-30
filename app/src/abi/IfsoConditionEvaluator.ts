@@ -101,6 +101,19 @@ export const ifsoConditionEvaluatorAbi = [
   },
   {
     "type": "function",
+    "name": "PROPOSAL_GRACE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "SEQUENCER_GRACE",
     "inputs": [],
     "outputs": [
