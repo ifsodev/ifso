@@ -7,7 +7,7 @@ import { loadEnv } from "../src/config/env";
 import { createDb } from "../src/db/client";
 import type { Deps } from "../src/workers/deps";
 
-const env = loadEnv({ ESCROW_ADDRESS: "0x00000000000000000000000000000000000e5c20" });
+const env = loadEnv({ ESCROW_ADDRESS: "0x00000000000000000000000000000000000e5c20", TRUST_PROXY: "cloudflare" });
 const deps: Deps = { env, db: createDb(env.DATABASE_URL).db, clients: makeClients(env), log: () => {} };
 const app = createApp(deps, new RateLimiter());
 const q = (input: unknown) => `/trpc/parse?input=${encodeURIComponent(JSON.stringify(input))}`;

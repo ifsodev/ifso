@@ -5,7 +5,8 @@ export const PRICE_GATED_COUNTRIES = new Set(["US", "GB", "CA", "CH", "AE"]);
 
 export function countryFromHeaders(h: Headers | Record<string, string | undefined>): string | undefined {
   const get = (k: string) => (h instanceof Headers ? h.get(k) ?? undefined : h[k] ?? h[k.toLowerCase()]);
-  const c = get("cf-ipcountry") ?? get("x-vercel-ip-country") ?? get("x-country");
+  // Edge-set headers only (never x-country). The API reads them through api/clientIp.trustedCountry, which TRUST_PROXY gates.
+  const c = get("cf-ipcountry") ?? get("x-vercel-ip-country");
   return c && /^[A-Za-z]{2}$/.test(c) && c.toUpperCase() !== "XX" ? c.toUpperCase() : undefined;
 }
 

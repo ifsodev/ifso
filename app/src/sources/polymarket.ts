@@ -19,6 +19,11 @@ export interface GammaMarket {
   outcomes: string; //      JSON string, e.g. "[\"Yes\",\"No\"]"
   outcomePrices: string; // JSON string, e.g. "[\"1\",\"0\"]"
   endDate?: string;
+  /** Gamma's own signals; absent on old recorded fixtures. */
+  active?: boolean;
+  closedTime?: string; //   set once the market closed (can be BEFORE endDate: early resolution)
+  liquidityNum?: number;
+  volumeNum?: number;
 }
 
 /** Gamma market -> report. Pure, so recorded fixtures replay through the same code. */

@@ -28,13 +28,35 @@ export const GAS_HEADROOM_DEN = 10n;
 export const FEE_CAP_NUM = 3n; //       max fee per gas = current gas price x 1.5
 export const FEE_CAP_DEN = 2n;
 
-const queues = new Map<string, Promise<unknown>>();
-/** Runs `fn` after every earlier job for the same key finished (success or not). */
-export function serialised<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const prev = queues.get(key) ?? Promise.resolve();
-  const next = prev.then(fn, fn);
-  queues.set(key, next.catch(() => undefined));
-  return next;
+interface Lane {
+  running: boolean;
+  high: Array<() => void>;
+  low: Array<() => void>;
+}
+const lanes = new Map<string, Lane>();
+/**
+ * Runs `fn` after every earlier job for the same key finished (success or not), one at a time (one nonce stream per
+ * account). `high` jobs (user claims) are picked before any waiting `low` job, so a flood of other relays can delay a
+ * claim by at most the one send in flight.
+ */
+export function serialised<T>(key: string, fn: () => Promise<T>, priority: "high" | "low" = "low"): Promise<T> {
+  const lane = lanes.get(key) ?? { running: false, high: [], low: [] };
+  lanes.set(key, lane);
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      lane.running = true;
+      fn().then(resolve, reject).finally(() => {
+        const next = lane.high.shift() ?? lane.low.shift();
+        if (next) next();
+        else {
+          lane.running = false;
+          lanes.delete(key);
+        }
+      });
+    };
+    if (!lane.running) run();
+    else (priority === "high" ? lane.high : lane.low).push(run);
+  });
 }
 
 /** Simulate a call from the wallet's account without sending (eth_call). */
@@ -53,7 +75,7 @@ export async function sendCall(
   deps: Deps,
   wallet: WalletClient | undefined,
   call: ContractCall,
-  meta: { kind: string; escrowId?: string; questionId?: string; ipHash?: string },
+  meta: { kind: string; escrowId?: string; questionId?: string; ipHash?: string; priority?: "high" | "low" },
 ): Promise<SendResult> {
   if (!wallet?.account) return { ok: false, error: "hot key not configured" };
   const account = wallet.account;
@@ -82,7 +104,7 @@ export async function sendCall(
       await deps.db.insert(relayTxs).values({ kind: meta.kind, escrowId: meta.escrowId, questionId: meta.questionId, ipHash: meta.ipHash, status: "skipped", error });
       return { ok: false, error, simulated: true };
     }
-  });
+  }, meta.priority ?? (meta.kind === "claim" ? "high" : "low"));
 }
 
 /** KEEPER_SHADOW=1: log what would be sent next to the eth_call answer, send nothing. */

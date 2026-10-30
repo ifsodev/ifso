@@ -3,13 +3,15 @@
 //  - after earliestResolve: reads >= 2 independent sources, proposes only on agreement (USDG bond)
 //  - watches proposals made by anyone else and disputes the ones its sources contradict
 //  - finalizes undisputed proposals after the window; times out silent panels (=> VOID => refunds)
-import { and, eq, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, exists, gt, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { encodeAbiParameters, keccak256, maxUint256, type Address, type Hex } from "viem";
 import { ifsoOutcomeResolverAbi, usdgAbi } from "../abi";
 import { agree, questionSpecHash, type SourceReport } from "../core/outcome";
-import { questions, sourceReports } from "../db/schema";
+import { cursors, escrows, questions, sourceReports } from "../db/schema";
 import { required } from "../chain";
 import { liveSources } from "../sources";
+import type { GammaMarket } from "../sources/polymarket";
+import type { Env } from "../config/env";
 import { chainNow } from "./keeper";
 import { sendCall } from "./tx";
 import { raise, type Deps } from "./deps";
@@ -52,58 +54,146 @@ export function footballSpec(f: FootballFixture) {
   };
 }
 
-async function registerOnChain(deps: Deps, row: typeof questions.$inferInsert, closeTime: number, earliest: number) {
-  const resolver = required(deps.clients.resolverContract, "RESOLVER_ADDRESS");
-  const r = await sendCall(
-    deps,
-    deps.clients.resolver,
-    {
-      address: resolver,
-      abi: ifsoOutcomeResolverAbi,
-      functionName: "createQuestion",
-      args: [row.specHash as Hex, BigInt(closeTime), BigInt(earliest), row.numOutcomes, row.specUri],
-    },
-    { kind: "question-create", questionId: row.id },
-  );
-  if (!r.ok) throw new Error(`createQuestion failed: ${r.error}`);
-  await deps.db.insert(questions).values({ ...row, createdTx: r.hash }).onConflictDoNothing();
+/** Row state 0: planned off-chain by `build`, not on the resolver yet (costs us nothing; the resolver key never signs for it). */
+export const Q_PLANNED = 0;
+
+type QuestionRow = typeof questions.$inferInsert;
+
+/** Stores the question spec (state 0) so the public spec URL and a later registration have it. Returns true when new. */
+async function planRow(deps: Deps, row: QuestionRow, beforeInsert?: () => Promise<void>): Promise<boolean> {
+  await beforeInsert?.();
+  const inserted = await deps.db.insert(questions).values({ ...row, state: Q_PLANNED }).onConflictDoNothing().returning({ id: questions.id });
+  return inserted.length > 0;
 }
 
-export async function ensureFootballQuestion(deps: Deps, f: FootballFixture): Promise<{ id: Hex; earliestResolve: number; closeTime: number }> {
+/**
+ * Registers a planned question on the resolver (resolver key pays gas). Called only when a funded create is about to
+ * be relayed (api `submit`) or by `ensure*` (tests and the resolver's own tools). Idempotent.
+ */
+export async function registerPlanned(deps: Deps, id: Hex): Promise<void> {
+  const [row] = await deps.db.select().from(questions).where(eq(questions.id, id));
+  if (!row) throw new Error("unknown question");
+  if (row.state !== Q_PLANNED) return;
+  const resolver = required(deps.clients.resolverContract, "RESOLVER_ADDRESS");
+  const onchain = await readQuestion(deps, resolver, id);
+  if (Number(onchain.state) === 0) {
+    const r = await sendCall(
+      deps,
+      deps.clients.resolver,
+      {
+        address: resolver,
+        abi: ifsoOutcomeResolverAbi,
+        functionName: "createQuestion",
+        args: [row.specHash as Hex, BigInt(Math.floor(row.closeTime.getTime() / 1000)), BigInt(Math.floor(row.earliestResolve.getTime() / 1000)), row.numOutcomes, row.specUri],
+      },
+      { kind: "question-create", questionId: row.id },
+    );
+    if (!r.ok) throw new Error(`createQuestion failed: ${r.error}`);
+    await deps.db.update(questions).set({ state: 1, createdTx: r.hash }).where(and(eq(questions.id, id), eq(questions.state, Q_PLANNED)));
+  } else {
+    await deps.db.update(questions).set({ state: Number(onchain.state) }).where(and(eq(questions.id, id), eq(questions.state, Q_PLANNED)));
+  }
+}
+
+export interface PlannedQuestion {
+  id: Hex;
+  earliestResolve: number;
+  closeTime: number;
+  /** false when the question was already known (planned or registered): no new row. */
+  isNew: boolean;
+}
+
+export function footballRow(f: FootballFixture): { row: QuestionRow; closeTime: number; earliest: number } {
   const spec = footballSpec(f);
   const specHash = questionSpecHash(spec);
   const closeTime = f.commenceTime;
   const earliest = f.commenceTime + FOOTBALL_RESOLVE_DELAY;
   const id = questionIdFor(specHash, closeTime, earliest, 3);
-  const existing = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.id, id));
-  if (!existing.length) {
-    await registerOnChain(
-      deps,
-      {
-        id,
-        source: "football",
-        spec,
-        specHash,
-        specUri: `${deps.env.PUBLIC_APP_URL}/q/${specHash}.json`,
-        title: `${f.home} vs ${f.away}`,
-        home: f.home,
-        away: f.away,
-        providerRefs: spec.providers,
-        closeTime: new Date(closeTime * 1000),
-        earliestResolve: new Date(earliest * 1000),
-        numOutcomes: 3,
-      },
-      closeTime,
-      earliest,
-    );
-  }
-  return { id, earliestResolve: earliest, closeTime };
+  return {
+    closeTime,
+    earliest,
+    row: {
+      id,
+      source: "football",
+      spec,
+      specHash,
+      specUri: "", // filled by the caller (needs PUBLIC_APP_URL)
+      title: `${f.home} vs ${f.away}`,
+      home: f.home,
+      away: f.away,
+      providerRefs: spec.providers,
+      closeTime: new Date(closeTime * 1000),
+      earliestResolve: new Date(earliest * 1000),
+      numOutcomes: 3,
+    },
+  };
 }
 
-export async function ensurePolymarketQuestion(deps: Deps, slug: string): Promise<{ id: Hex; earliestResolve: number; closeTime: number }> {
+/** Plans (no chain write) a league fixture question. */
+export async function planFootballQuestion(deps: Deps, f: FootballFixture, beforeInsert?: () => Promise<void>): Promise<PlannedQuestion> {
+  const { row, closeTime, earliest } = footballRow(f);
+  const [existing] = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.id, row.id));
+  if (existing) return { id: row.id as Hex, earliestResolve: earliest, closeTime, isNew: false };
+  row.specUri = `${deps.env.PUBLIC_APP_URL}/q/${row.specHash}.json`;
+  await planRow(deps, row, beforeInsert);
+  return { id: row.id as Hex, earliestResolve: earliest, closeTime, isNew: true };
+}
+
+export async function ensureFootballQuestion(deps: Deps, f: FootballFixture): Promise<{ id: Hex; earliestResolve: number; closeTime: number }> {
+  const q = await planFootballQuestion(deps, f);
+  await registerPlanned(deps, q.id);
+  return q;
+}
+
+/** Why a Polymarket market is not allowed for outcome payments (undefined = allowed). Liquidity and volume are what the public API reports. */
+export function polymarketRefusal(m: GammaMarket | undefined, env: Pick<Env, "POLYMARKET_MIN_LIQUIDITY_USD" | "POLYMARKET_MIN_VOLUME_USD" | "POLYMARKET_MAX_DAYS_OUT">, nowSec: number): string | undefined {
+  if (!m?.endDate || m.closed) return "question not found or already closed";
+  if (m.active === false) return "this market is not active";
+  let outcomes: string[] = [];
+  try {
+    outcomes = JSON.parse(m.outcomes) as string[];
+  } catch {
+    /* falls through */
+  }
+  if (outcomes.length !== 2 || outcomes[0]?.toLowerCase() !== "yes" || outcomes[1]?.toLowerCase() !== "no") return "only Yes/No markets are supported";
+  const close = polymarketCloseTime(m);
+  if (close === undefined) return "this market has no usable end date";
+  if (close < nowSec + 3600) return "this market ends too soon";
+  if (close > nowSec + env.POLYMARKET_MAX_DAYS_OUT * 86400) return `this market ends more than ${env.POLYMARKET_MAX_DAYS_OUT} days from now`;
+  if (!(Number(m.liquidityNum) >= env.POLYMARKET_MIN_LIQUIDITY_USD)) return "this market does not have enough liquidity";
+  if (!(Number(m.volumeNum) >= env.POLYMARKET_MIN_VOLUME_USD)) return "this market does not have enough trading volume";
+  return undefined;
+}
+
+/**
+ * Close time = the earliest of the market's endDate and its own closedTime. Markets often settle before endDate;
+ * the later of the two would leave a challenge open after the answer is known.
+ */
+export function polymarketCloseTime(m: GammaMarket): number | undefined {
+  const times = [m.endDate, m.closedTime]
+    .map((x) => (x ? Math.floor(new Date(x).getTime() / 1000) : NaN))
+    .filter((x) => Number.isFinite(x) && x > 0);
+  return times.length ? Math.min(...times) : undefined;
+}
+
+export const YES_PRICE_MIN = 0.02;
+export const YES_PRICE_MAX = 0.98;
+/** A market already priced outside 2..98% is effectively decided: no challenges on it. */
+export function polymarketLooksDecided(m: GammaMarket): boolean {
+  try {
+    const p = Number((JSON.parse(m.outcomePrices) as string[])[0]);
+    return !Number.isFinite(p) || p < YES_PRICE_MIN || p > YES_PRICE_MAX;
+  } catch {
+    return true;
+  }
+}
+
+/** Plans (no chain write) a Polymarket question; refuses markets that fail the allow-list. */
+export async function planPolymarketQuestion(deps: Deps, slug: string, beforeInsert?: () => Promise<void>): Promise<PlannedQuestion & { market: GammaMarket }> {
   const { market } = await sources(deps).gamma(slug);
-  if (!market?.endDate || market.closed) throw new Error("question not found or already closed");
-  const end = Math.floor(new Date(market.endDate).getTime() / 1000);
+  const refusal = polymarketRefusal(market, deps.env, Math.floor(Date.now() / 1000));
+  if (refusal || !market) throw new PolymarketRefused(refusal ?? "question not found or already closed");
+  const end = polymarketCloseTime(market)!;
   const spec = {
     v: 1,
     source: "polymarket",
@@ -115,27 +205,29 @@ export async function ensurePolymarketQuestion(deps: Deps, slug: string): Promis
   };
   const specHash = questionSpecHash(spec);
   const id = questionIdFor(specHash, end, end, 2);
-  const existing = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.id, id));
-  if (!existing.length) {
-    await registerOnChain(
-      deps,
-      {
-        id,
-        source: "polymarket",
-        spec,
-        specHash,
-        specUri: `${deps.env.PUBLIC_APP_URL}/q/${specHash}.json`,
-        title: market.question,
-        providerRefs: { polymarket: slug, conditionId: market.conditionId },
-        closeTime: new Date(end * 1000),
-        earliestResolve: new Date(end * 1000),
-        numOutcomes: 2,
-      },
-      end,
-      end,
-    );
-  }
-  return { id, earliestResolve: end, closeTime: end };
+  const [existing] = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.id, id));
+  if (existing) return { id, earliestResolve: end, closeTime: end, isNew: false, market };
+  await planRow(deps, {
+    id,
+    source: "polymarket",
+    spec,
+    specHash,
+    specUri: `${deps.env.PUBLIC_APP_URL}/q/${specHash}.json`,
+    title: market.question,
+    providerRefs: { polymarket: slug, conditionId: market.conditionId },
+    closeTime: new Date(end * 1000),
+    earliestResolve: new Date(end * 1000),
+    numOutcomes: 2,
+  }, beforeInsert);
+  return { id, earliestResolve: end, closeTime: end, isNew: true, market };
+}
+
+export class PolymarketRefused extends Error {}
+
+export async function ensurePolymarketQuestion(deps: Deps, slug: string): Promise<{ id: Hex; earliestResolve: number; closeTime: number }> {
+  const q = await planPolymarketQuestion(deps, slug);
+  await registerPlanned(deps, q.id);
+  return q;
 }
 
 /** Reads every configured source for a question. Failures become "pending" reports (never guesses). */
@@ -207,18 +299,45 @@ async function syncRow(deps: Deps, resolver: Address, id: Hex): Promise<OnchainQ
   return o;
 }
 
-export async function resolverTick(deps: Deps) {
+const CURSOR = "resolver";
+async function readCursor(deps: Deps): Promise<{ at: Date; id: string } | undefined> {
+  const [c] = await deps.db.select().from(cursors).where(eq(cursors.name, CURSOR));
+  return c?.hash ? { at: new Date(Number(c.block) * 1000), id: c.hash } : undefined;
+}
+async function writeCursor(deps: Deps, last: { earliestResolve: Date; id: string } | undefined) {
+  if (!last) {
+    await deps.db.delete(cursors).where(eq(cursors.name, CURSOR));
+    return;
+  }
+  const v = { name: CURSOR, block: BigInt(Math.floor(last.earliestResolve.getTime() / 1000)), hash: last.id };
+  await deps.db.insert(cursors).values(v).onConflictDoUpdate({ target: cursors.name, set: { block: v.block, hash: v.hash } });
+}
+
+export async function resolverTick(deps: Deps, pageSize = 100) {
   const resolver = required(deps.clients.resolverContract, "RESOLVER_ADDRESS");
   const me = deps.clients.resolver?.account?.address?.toLowerCase();
   const now = Number(await chainNow(deps)); // the contract judges windows by block time, so do we
   const disputeWindow = Number(await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "disputeWindow" }));
   const panelWindow = Number(await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "panelWindow" }));
 
-  const live = await deps.db
-    .select()
-    .from(questions)
-    .where(and(inArray(questions.state, [1, 2, 3]), lte(questions.earliestResolve, new Date(now * 1000))))
-    .limit(100);
+  // Only questions that have at least one funded (OPEN or MET) escrow are worth a bond. Oldest earliestResolve first,
+  // walking a cursor so questions that stay undecided for days cannot starve the ones behind them.
+  const fundedEscrow = exists(deps.db.select({ one: sql`1` }).from(escrows).where(and(eq(escrows.questionId, questions.id), inArray(escrows.status, [1, 2]))));
+  const cur = await readCursor(deps);
+  const PAGE = pageSize;
+  const page = (after: ReturnType<typeof or> | undefined) =>
+    deps.db
+      .select()
+      .from(questions)
+      .where(and(inArray(questions.state, [1, 2, 3]), lte(questions.earliestResolve, new Date(now * 1000)), fundedEscrow, after))
+      .orderBy(asc(questions.earliestResolve), asc(questions.id))
+      .limit(PAGE);
+  let live = cur ? await page(or(gt(questions.earliestResolve, cur.at), and(eq(questions.earliestResolve, cur.at), gt(questions.id, cur.id)))) : [];
+  if (!live.length) live = await page(undefined); // end of the walk (or no cursor yet): start again from the oldest
+  await writeCursor(deps, live.length < PAGE ? undefined : live[live.length - 1]);
+
+  // planned questions nobody ever funded are dropped once their close time passed
+  await deps.db.delete(questions).where(and(eq(questions.state, Q_PLANNED), lt(questions.closeTime, new Date(now * 1000))));
 
   for (const q of live) {
     try {

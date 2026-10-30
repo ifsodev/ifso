@@ -57,7 +57,20 @@ const schema = z.object({
   ZERODEV_PROJECT_ID: z.string().optional(),
   ALCHEMY_KEY: z.string().optional(),
 
+  // Which single hop in front of the API is trusted for the client address and country (see api/clientIp.ts).
+  TRUST_PROXY: z.enum(["none", "cloudflare", "vercel", "caddy"]).default("none"),
   CLAIM_RELAY_PER_IP_PER_HOUR: z.coerce.number().default(20),
+  // relayed (gas paid by us) actions besides claim: budgets per client network, per signing wallet, per escrow
+  RELAY_PER_IP_PER_HOUR: z.coerce.number().default(60),
+  RELAY_PER_SIGNER_PER_HOUR: z.coerce.number().default(20),
+  RELAY_PER_ESCROW_PER_DAY: z.coerce.number().default(10),
+  // new outcome questions a stranger may plan through `build`
+  BUILD_QUESTIONS_PER_IP_PER_HOUR: z.coerce.number().default(10),
+  BUILD_QUESTIONS_PER_SENDER_PER_HOUR: z.coerce.number().default(5),
+  // Polymarket allow-list for outcome payments
+  POLYMARKET_MIN_LIQUIDITY_USD: z.coerce.number().default(5000),
+  POLYMARKET_MIN_VOLUME_USD: z.coerce.number().default(25000),
+  POLYMARKET_MAX_DAYS_OUT: z.coerce.number().default(60),
   SPONSOR_MIN_AMOUNT_USDG: z.coerce.number().default(1),
 });
 

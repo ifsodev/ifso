@@ -28,7 +28,19 @@ export const DEFAULTS = {
   outcomeWindow: 7 * 86400, //  after earliestResolve
   approveWindow: 30 * 86400,
   challengeAcceptWindow: 2 * 86400,
+  /** A challenge must stay acceptable for at least this long, or the builder refuses it (contract: acceptBy > now). */
+  challengeMinAcceptWindow: 10 * 60,
+  /** Challenges on a league fixture close this long before kickoff. */
+  sportsChallengeMargin: 10 * 60,
+  /**
+   * Challenges on a Polymarket market close this long before its creation-time endDate. Markets often become
+   * knowable before endDate, so the margin keeps the acceptance window well clear of the likely answer.
+   */
+  polymarketChallengeMargin: 24 * 3600,
 };
+
+/** Thrown for a request the contract would reject; the API turns it into a plain 400. */
+export class BuildError extends Error {}
 
 export interface ResolvedOutcome {
   resolver: Address;
@@ -36,6 +48,9 @@ export interface ResolvedOutcome {
   earliestResolve: number;
   /** sports: is the user's team the home side; markets: undefined */
   teamIsHome?: boolean;
+  /** question close time (kickoff / endDate). With `challengeMargin` it bounds `acceptBy` of a challenge. */
+  closeTime?: number;
+  challengeMargin?: number;
 }
 
 export interface BuildInput {
@@ -113,6 +128,23 @@ export function buildCondition(input: BuildInput): { condition: Condition; expir
   }
 }
 
+/**
+ * Latest acceptBy the contract takes for this condition, minus our margin, capped at the default window and one hour
+ * before expiry. Refuses (BuildError) when less than the minimum window is left, instead of building a call that reverts.
+ */
+export function challengeAcceptBy(input: BuildInput, condition: Condition, expiry: number): number {
+  const now = input.nowSec;
+  let latest = Math.min(now + DEFAULTS.challengeAcceptWindow, expiry - 3600);
+  if (condition.kind === Kind.PRICE) latest = Math.min(latest, Number(condition.deadline) - 1); // contract: acceptBy <= deadline; stay strictly before
+  if (condition.kind === Kind.OUTCOME && input.outcome?.closeTime !== undefined) {
+    latest = Math.min(latest, input.outcome.closeTime - (input.outcome.challengeMargin ?? DEFAULTS.sportsChallengeMargin));
+  }
+  if (latest < now + DEFAULTS.challengeMinAcceptWindow) {
+    throw new BuildError("This challenge would have to be accepted within minutes. Pick a later deadline or a later event.");
+  }
+  return latest;
+}
+
 export function buildParams(input: BuildInput): CreateParams {
   if (!!input.recipient === !!input.linkKey) throw new Error("exactly one of recipient / linkKey");
   const { condition, expiry } = buildCondition(input);
@@ -124,7 +156,7 @@ export function buildParams(input: BuildInput): CreateParams {
     refundTo: input.refundTo ?? ZERO_ADDRESS,
     altRefundTo: input.altRefundTo ?? ZERO_ADDRESS,
     expiry: BigInt(input.expiryOverride ?? expiry),
-    acceptBy: input.twoSided ? BigInt(Math.min(input.nowSec + DEFAULTS.challengeAcceptWindow, expiry - 3600)) : 0n,
+    acceptBy: input.twoSided ? BigInt(challengeAcceptBy(input, condition, input.expiryOverride ?? expiry)) : 0n,
     twoSided: input.twoSided,
     cancellable: input.twoSided ? false : !!input.cancellable,
     salt: input.salt ?? randomSalt(),

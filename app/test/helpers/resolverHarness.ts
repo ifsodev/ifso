@@ -7,6 +7,7 @@ import { questions } from "../../src/db/schema";
 import { eq } from "drizzle-orm";
 import { ensureFootballQuestion, resetResolverAlerts, type FootballFixture } from "../../src/workers/resolver";
 import type { Deps } from "../../src/workers/deps";
+import { indexerTick } from "../../src/workers/indexer";
 import { bootChain, bootDb, makeTestDeps, type TestChain, type TestDb } from "./chain";
 import { eplEvents, fixtureSources, oddsScores, type FixtureOverrides } from "./resolverFixtures";
 
@@ -19,7 +20,7 @@ export interface ResolverEnv {
   resolverAddress: `0x${string}`;
   setSources(o?: FixtureOverrides): void;
   /** Register fixture #i (TheSportsDB idEvent / synthetic Odds API id) as a question kicking off `inSec` from now. */
-  question(i: number, inSec?: number): Promise<{ id: Hex; earliestResolve: number; closeTime: number; fixture: FootballFixture }>;
+  question(i: number, inSec?: number, funded?: boolean): Promise<{ id: Hex; earliestResolve: number; closeTime: number; fixture: FootballFixture }>;
   stop(): Promise<void>;
 }
 
@@ -47,7 +48,7 @@ export async function bootResolverEnv(): Promise<ResolverEnv> {
     setSources(o) {
       deps.sources = fixtureSources(o);
     },
-    async question(i, inSec = 3600) {
+    async question(i, inSec = 3600, funded = true) {
       const e = eplEvents[i]!;
       const odds = oddsScores.find((s) => s._derivedFrom === e.idEvent)!;
       const fixture: FootballFixture = {
@@ -59,6 +60,11 @@ export async function bootResolverEnv(): Promise<ResolverEnv> {
         commenceTime: Number(await chain.now()) + inSec,
       };
       const q = await ensureFootballQuestion(deps, fixture);
+      // the resolver only bonds questions with a funded escrow behind them (R1-M7): put one on every question
+      if (funded) {
+        await createOutcomeEscrow({ chain, deps } as ResolverEnv, q.id, BigInt(q.earliestResolve + 30 * 86400));
+        await indexerTick(deps, async () => {});
+      }
       return { ...q, fixture };
     },
     async stop() {

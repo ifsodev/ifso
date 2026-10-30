@@ -7,8 +7,9 @@ import { createApp } from "../src/api/app";
 import { questionSpecHash } from "../src/core/outcome";
 import { questions, relayTxs, sourceReports } from "../src/db/schema";
 import { ensureFootballQuestion, ensurePolymarketQuestion, footballSpec, resolverTick } from "../src/workers/resolver";
+import { indexerTick } from "../src/workers/indexer";
 import { haveAnvil, havePostgres } from "./helpers/chain";
-import { bootResolverEnv, onchainState, questionOnchain, rowOf, type ResolverEnv } from "./helpers/resolverHarness";
+import { bootResolverEnv, createOutcomeEscrow, onchainState, questionOnchain, rowOf, type ResolverEnv } from "./helpers/resolverHarness";
 import { eplEvents, expectedFootball, pmMarkets } from "./helpers/resolverFixtures";
 
 setDefaultTimeout(120_000);
@@ -61,9 +62,11 @@ describe.skipIf(!haveAnvil() || !havePostgres())("resolver flow on anvil", () =>
   test("polymarket: registered while open, resolved on Gamma AND the on-chain payout, then proposed", async () => {
     const m = pmMarkets[0]!;
     const endIso = new Date((Number(await env.chain.now()) + 3600) * 1000).toISOString();
-    const open = { ...m.gamma, closed: false, umaResolutionStatus: "", outcomePrices: '["0.55","0.45"]', endDate: endIso };
+    const open = { ...m.gamma, closed: false, umaResolutionStatus: "", outcomePrices: '["0.55","0.45"]', endDate: endIso, liquidityNum: 50_000, volumeNum: 250_000 };
     env.setSources({ gamma: { [m.gamma.slug]: open }, ctf: { [m.gamma.conditionId]: { den: 0n, yes: 0n, no: 0n } } });
     const q = await ensurePolymarketQuestion(env.deps, m.gamma.slug);
+    await createOutcomeEscrow(env, q.id, BigInt(q.earliestResolve + 30 * 86400));
+    await indexerTick(env.deps, async () => {});
     await env.chain.warpTo(BigInt(q.earliestResolve + 1));
 
     // Gamma says resolved but the chain has no payout yet: wait for both

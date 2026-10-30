@@ -3,7 +3,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { trpcServer } from "@hono/trpc-server";
 import { eq } from "drizzle-orm";
 import { webhookCallback, type Bot } from "grammy";
-import { countryFromHeaders } from "../core/geo";
+import { clientIp, trustedCountry } from "./clientIp";
 import { questions } from "../db/schema";
 import type { Deps } from "../workers/deps";
 import { appRouter, jsonSafe } from "./router";
@@ -37,8 +37,8 @@ export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: R
       createContext: (_opts, c) => ({
         deps,
         limiter,
-        ip: c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "0.0.0.0",
-        country: countryFromHeaders(c.req.raw.headers),
+        ip: clientIp(c.req.raw.headers, deps.env.TRUST_PROXY, (c.env as { socketIp?: string } | undefined)?.socketIp),
+        country: trustedCountry(c.req.raw.headers, deps.env.TRUST_PROXY),
       }),
     }),
   );

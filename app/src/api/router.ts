@@ -2,8 +2,8 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { eq, or, desc } from "drizzle-orm";
 import { getAddress, type Address, type Hex } from "viem";
-import { erc8056Abi, ifsoEscrowAbi } from "../abi";
-import { buildParams, type BuildInput } from "../core/builder";
+import { erc8056Abi, ifsoEscrowAbi, usdgAbi } from "../abi";
+import { BuildError, DEFAULTS, buildParams, type BuildInput } from "../core/builder";
 import { conditionHash, createAuthNonce, escrowId } from "../core/condition";
 import { copy } from "../core/copy";
 import { stockPriceConditionAllowed } from "../core/geo";
@@ -16,10 +16,10 @@ import { escrows, intents, questions } from "../db/schema";
 import { required } from "../chain";
 import { sendCall } from "../workers/tx";
 import type { Deps } from "../workers/deps";
-import { ensureFootballQuestion, ensurePolymarketQuestion } from "../workers/resolver";
+import { PolymarketRefused, planFootballQuestion, planPolymarketQuestion, polymarketLooksDecided, registerPlanned } from "../workers/resolver";
 import { ClaimError, readEscrow, relayAccept, relayClaim } from "./claim";
+import { RateLimiter } from "./rateLimit";
 import { findFixture } from "./fixtures";
-import type { RateLimiter } from "./rateLimit";
 
 export interface Ctx {
   deps: Deps;
@@ -77,6 +77,54 @@ function gateDraft(ctx: Ctx, d: ConditionDraft | undefined) {
   const feed = SEED_FEEDS.find((f) => f.ticker === d.ticker);
   if (feed?.isStock && !stockPriceConditionAllowed(ctx.country)) {
     throw new TRPCError({ code: "FORBIDDEN", message: copy.preview.geoBlockedPrice });
+  }
+}
+
+const tooMany = (message: string) => new TRPCError({ code: "TOO_MANY_REQUESTS", message });
+
+/** Budgets for relayed calls (we pay the gas): per client network and per signing wallet, per hour. */
+async function relayBudget(ctx: Ctx, signer?: Address) {
+  const { env } = ctx.deps;
+  const ipHash = RateLimiter.ipHash(ctx.ip, env.IP_HASH_SALT);
+  if (!(await ctx.limiter.hit(`relay:ip:${ipHash}`, env.RELAY_PER_IP_PER_HOUR, 3600))) throw tooMany("too many requests from this network, try again later");
+  if (signer && !(await ctx.limiter.hit(`relay:signer:${signer.toLowerCase()}`, env.RELAY_PER_SIGNER_PER_HOUR, 3600))) throw tooMany("too many requests for this wallet, try again later");
+  return ipHash;
+}
+
+/** Decisions and refund redirects per escrow per day: a real escrow needs a handful, never hundreds. */
+async function escrowDailyCap(ctx: Ctx, id: bigint) {
+  if (!(await ctx.limiter.hit(`relay:escrow:${id}`, ctx.deps.env.RELAY_PER_ESCROW_PER_DAY, 86400))) throw tooMany("too many changes to this payment today, try again tomorrow");
+}
+
+const F_SENDER_OK = 8;
+const F_RECIPIENT_OK = 16;
+
+/** Gate before a new question is planned: per network and per sender. */
+function questionBudget(ctx: Ctx, sender: Address) {
+  return async () => {
+    const { env } = ctx.deps;
+    const ipHash = RateLimiter.ipHash(ctx.ip, env.IP_HASH_SALT);
+    if (!(await ctx.limiter.hit(`question:ip:${ipHash}`, env.BUILD_QUESTIONS_PER_IP_PER_HOUR, 3600))) throw tooMany("too many new questions from this network, try again later");
+    if (!(await ctx.limiter.hit(`question:sender:${sender.toLowerCase()}`, env.BUILD_QUESTIONS_PER_SENDER_PER_HOUR, 3600))) throw tooMany("too many new questions from this wallet, try again later");
+  };
+}
+
+/**
+ * A question is registered on the resolver only for a sender who holds the funds for a create (balance covers the
+ * result fee and the sponsored minimum). Build plans it off-chain; this registers it. Rate limited like build.
+ */
+async function registerForFundedSender(ctx: Ctx, questionId: Hex, sender: Address, needed: bigint) {
+  const { deps } = ctx;
+  const [row] = await deps.db.select().from(questions).where(eq(questions.id, questionId));
+  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "unknown question: build the payment first" });
+  if (row.state !== 0) return; // already on the resolver
+  await relayBudget(ctx, sender);
+  const balance = await deps.clients.publicClient.readContract({ address: deps.clients.usdg, abi: usdgAbi, functionName: "balanceOf", args: [sender] });
+  if (balance < needed) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "the sending wallet does not hold enough USDG for this payment" });
+  try {
+    await registerPlanned(deps, questionId);
+  } catch (e) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: String((e as Error).message).slice(0, 200) });
   }
 }
 
@@ -149,17 +197,30 @@ export const appRouter = t.router({
       const fx = await findFixture(deps, d.team, d.opponent, d.on);
       if (fx.ambiguous) throw new TRPCError({ code: "BAD_REQUEST", message: `Which team: ${fx.ambiguous.join(" or ")}?` });
       if (!fx.fixture) throw new TRPCError({ code: "NOT_FOUND", message: copy.parse.unknownCondition(`${d.team} ${d.result.toLowerCase()}`) });
-      const q = await ensureFootballQuestion(deps, fx.fixture);
-      bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, teamIsHome: fx.teamIsHome };
-      if (parsed.twoSided && q.closeTime <= nowSec + 600) throw new TRPCError({ code: "BAD_REQUEST", message: "This match is about to start; challenges close at kickoff." });
+      // the fixture comes from our own league listing (the allow-list); the question is only PLANNED here
+      const q = await planFootballQuestion(deps, fx.fixture, questionBudget(ctx, input.sender));
+      bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, teamIsHome: fx.teamIsHome, closeTime: q.closeTime, challengeMargin: DEFAULTS.sportsChallengeMargin };
     } else if (d.kind === "MARKET") {
       if (d.venue !== "polymarket") throw new TRPCError({ code: "BAD_REQUEST", message: "Hyperliquid questions arrive in phase 2." });
       const slug = d.ref.replace(/^https?:\/\/(www\.)?polymarket\.com\/(event|market)\//, "").split(/[/?#]/)[0]!;
-      const q = await ensurePolymarketQuestion(deps, slug);
-      bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve };
+      let q;
+      try {
+        q = await planPolymarketQuestion(deps, slug, questionBudget(ctx, input.sender)); // allow-list: open, binary, liquid, traded, sane end date
+      } catch (e) {
+        if (e instanceof PolymarketRefused) throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+        throw e;
+      }
+      if (parsed.twoSided && polymarketLooksDecided(q.market)) throw new TRPCError({ code: "BAD_REQUEST", message: "This market is already priced as nearly decided, so it cannot be used for a challenge." });
+      bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, closeTime: q.closeTime, challengeMargin: DEFAULTS.polymarketChallengeMargin };
     }
 
-    const params = buildParams(bi);
+    let params: CreateParams;
+    try {
+      params = buildParams(bi);
+    } catch (e) {
+      if (e instanceof BuildError) throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+      throw e;
+    }
     const fee = await deps.clients.publicClient.readContract({ address: escrowAddr, abi: ifsoEscrowAbi, functionName: "feeFor", args: [params.condition.kind] });
     const value = params.amount + fee;
     const validAfter = BigInt(nowSec - 60);
@@ -190,16 +251,32 @@ export const appRouter = t.router({
       const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
       const p = paramsFromJson(input.params);
       if (p.condition.kind === Kind.PRICE) gateDraft(ctx, { kind: "PRICE", ticker: SEED_FEEDS.find((f) => f.feed.toLowerCase() === p.condition.target.toLowerCase())?.ticker ?? "", op: "GTE", priceUsd: "0", mode: "AT_DEADLINE", deadline: 0 });
+      const ipHash = await relayBudget(ctx, input.from);
+      if (p.condition.kind === Kind.OUTCOME) {
+        const fee = await ctx.deps.clients.publicClient.readContract({ address: escrowAddr, abi: ifsoEscrowAbi, functionName: "feeFor", args: [p.condition.kind] });
+        await registerForFundedSender(ctx, p.condition.key as Hex, input.from, p.amount + fee);
+      }
       const r = await sendCall(
         ctx.deps,
         ctx.deps.clients.relayer,
         { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "createWithAuthorization", args: [p as never, input.from, input.validAfter, input.validBefore, input.signature] },
-        { kind: "create", escrowId: escrowId(input.from, p.salt).toString() },
+        { kind: "create", escrowId: escrowId(input.from, p.salt).toString(), ipHash },
       );
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "create failed" });
       if (input.intentId) await ctx.deps.db.update(intents).set({ state: "submitted", txHash: r.hash }).where(eq(intents.id, input.intentId));
       return { txHash: r.hash, id: escrowId(input.from, p.salt).toString() };
     }),
+
+  /**
+   * Registers a planned outcome question on the resolver, for a sender who creates the escrow themselves (not through
+   * `submit`, which does this on its own). Needs the sender's USDG balance to cover the result fee plus the minimum.
+   */
+  prepareQuestion: t.procedure.input(z.object({ questionId: hex, sender: addr })).mutation(async ({ input, ctx }) => {
+    const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
+    const fee = await ctx.deps.clients.publicClient.readContract({ address: escrowAddr, abi: ifsoEscrowAbi, functionName: "feeFor", args: [Kind.OUTCOME] });
+    await registerForFundedSender(ctx, input.questionId, input.sender, fee + BigInt(Math.round(ctx.deps.env.SPONSOR_MIN_AMOUNT_USDG * 1e6)));
+    return { ok: true };
+  }),
 
   /** Claim page: everything shown is read from the chain, not from the URL (anti-phishing). */
   escrow: t.procedure.input(z.object({ id: uint })).query(async ({ input, ctx }) => {
@@ -219,14 +296,30 @@ export const appRouter = t.router({
 
   accept: t.procedure
     .input(z.object({ id: uint, acceptor: addr, linkSig: hex, counterRefundTo: addr, validAfter: uint, validBefore: uint, authSig: hex }))
-    .mutation(async ({ input, ctx }) => relayAccept(ctx.deps, input)),
+    .mutation(async ({ input, ctx }) => {
+      await relayBudget(ctx, input.acceptor);
+      try {
+        return await relayAccept(ctx.deps, input);
+      } catch (e) {
+        if (e instanceof ClaimError) throw new TRPCError({ code: "BAD_REQUEST", message: e.message, cause: e });
+        throw e;
+      }
+    }),
 
   /** Relayed EIP-712 Decision (tap OK / decline / referee). */
   decide: t.procedure
     .input(z.object({ id: uint, signer: addr, action: z.number().int().min(1).max(4), deadline: uint, signature: hex }))
     .mutation(async ({ input, ctx }) => {
       const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
-      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "decideBySig", args: [input.id, input.signer, input.action, input.deadline, input.signature] }, { kind: "decision", escrowId: input.id.toString() });
+      const ipHash = await relayBudget(ctx, input.signer);
+      // a repeat OK changes nothing on chain but still costs gas: refuse it before anything is sent
+      const { e } = await readEscrow(ctx.deps, input.id);
+      if (input.action === 1) {
+        const flag = input.signer.toLowerCase() === String(e.sender ?? "").toLowerCase() ? F_SENDER_OK : input.signer.toLowerCase() === String(e.recipient ?? "").toLowerCase() ? F_RECIPIENT_OK : 0;
+        if (flag && (Number(e.flags) & flag) !== 0) throw new TRPCError({ code: "BAD_REQUEST", message: "this approval is already recorded" });
+      }
+      await escrowDailyCap(ctx, input.id);
+      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "decideBySig", args: [input.id, input.signer, input.action, input.deadline, input.signature] }, { kind: "decision", escrowId: input.id.toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "decision failed" });
       return { txHash: r.hash };
     }),
@@ -236,7 +329,12 @@ export const appRouter = t.router({
     .input(z.object({ id: uint, refundTo: addr, altRefundTo: addr, deadline: uint, signature: hex }))
     .mutation(async ({ input, ctx }) => {
       const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
-      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "setRefundAddressesBySig", args: [input.id, input.refundTo, input.altRefundTo, input.deadline, input.signature] }, { kind: "redirect", escrowId: input.id.toString() });
+      const ipHash = await relayBudget(ctx);
+      const { e } = await readEscrow(ctx.deps, input.id);
+      const same = (a: unknown, b: string) => String(a ?? "").toLowerCase() === b.toLowerCase();
+      if (same(e.refundTo, input.refundTo) && same(e.altRefundTo, input.altRefundTo)) throw new TRPCError({ code: "BAD_REQUEST", message: "the refund addresses are already set to these" });
+      await escrowDailyCap(ctx, input.id);
+      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "setRefundAddressesBySig", args: [input.id, input.refundTo, input.altRefundTo, input.deadline, input.signature] }, { kind: "redirect", escrowId: input.id.toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "redirect failed" });
       return { txHash: r.hash };
     }),

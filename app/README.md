@@ -19,7 +19,7 @@ bunx tsc --noEmit
 | Path | What |
 |---|---|
 | `src/core/` | Pure logic shared by API, bot, web app: types, condition hashing, EIP-712, links, parser, price mirror, outcome agreement, builder, money, geo, **copy.ts (every user-facing string)** |
-| `src/api/` | tRPC router, Hono app, claim/accept relay, fixtures lookup, rate limiting |
+| `src/api/` | tRPC router, Hono app, claim/accept relay, fixtures lookup, rate limiting, trusted client address (`clientIp.ts`, `TRUST_PROXY`) |
 | `src/bot/` | Telegram bot: `/ifso`, `/challenge`, `/mine`, `/tz`; unclear input becomes a question with buttons, the final reply is one URL button to the web app (no Mini App) |
 | `src/workers/` | keeper, price watcher, round history (phase-aware finder), Pyth fetch, outcome resolver, indexer (block-hash cursor, reorg rewind), notifier, BullMQ queues |
 | `src/sources/` | The Odds API, TheSportsDB (free test key `123`), Polymarket (Gamma + Polygon CTF via `POLYGON_RPC_URL`, default a free public RPC), Hyperliquid HIP-4 (phase 2); `index.ts` is the swappable fetcher interface the resolver tests replay recorded fixtures through |
@@ -29,3 +29,20 @@ bunx tsc --noEmit
 | `src/abi/` | ABIs generated from the Solidity sources (`contracts/tools/solcjs-compile.mjs --abi-ts-out`) |
 | `scripts/server/` | Server scripts for one Ubuntu 24.04 VPS: provision, deploy with rollback, systemd units, Caddy, backups; see its `README.md` |
 | `scripts/print-vectors.ts` | Prints the parity vectors asserted by `contracts/test/Vectors.t.sol` |
+
+## Relay limits, questions and challenges (security review round 1)
+
+- **Client address and country** come from one trusted hop only (`TRUST_PROXY`, see `.env.example`). Headers a client can set
+  (first `x-forwarded-for` entry, `x-country`) are never read. With the default `none` the country is unknown and Stock Token
+  price conditions are refused.
+- **Relayed calls** (`submit`, `accept`, `decide`, `redirectRefund`) have budgets per network, per signing wallet and, for
+  decisions and refund redirects, per payment per day. A repeat approval or an unchanged refund address is refused before any
+  gas is spent. Claims use a higher-priority lane in the relayer queue, so other relays cannot stall them.
+- **Outcome questions**: `build` only plans a question off-chain (state 0). It is registered on the resolver when a sender who
+  holds the funds calls `submit`, or `prepareQuestion` for senders who create the payment themselves. Polymarket markets must be
+  open, Yes/No, liquid and traded, and end within `POLYMARKET_MAX_DAYS_OUT` days. The close time is the earlier of the market's
+  end date and its own close signal. The resolver proposes only for questions with a funded payment, oldest first with a cursor.
+- **Challenges**: the accept window closes before the event (10 minutes before kickoff for league fixtures, 24 hours before the
+  end date for Polymarket) and strictly before an at-deadline price deadline. If less than 10 minutes would remain, the builder
+  refuses. A market already priced outside 2 to 98 percent cannot be used for a challenge.
+- **Keeper sweeps** skip rows that keep failing (per-escrow backoff, 2 minutes doubling to 6 hours), so a stuck row never hides the rows behind it.
