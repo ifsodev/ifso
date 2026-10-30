@@ -10,10 +10,13 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=ifso
-Group=ifso
+# Its own Unix user (review R2-L3): only this role's key files are readable by it.
+User=ifso-worker
+Group=ifso-worker
 WorkingDirectory=/opt/ifso/current/app
-Environment=HOME=/var/lib/ifso
+Environment=HOME=/var/lib/ifso-worker
+StateDirectory=ifso-worker
+StateDirectoryMode=0700
 EnvironmentFile=/etc/ifso/common.env
 EnvironmentFile=/etc/ifso/db.env
 EnvironmentFile=/etc/ifso/worker.env
@@ -30,7 +33,8 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/ifso
+# Defence in depth on top of the file owners: the other roles' keys do not exist in this unit's view.
+InaccessiblePaths=-/etc/ifso/keys/relayer.json -/etc/ifso/keys/relayer.password
 UMask=0077
 ProtectProc=invisible
 ProtectKernelTunables=true

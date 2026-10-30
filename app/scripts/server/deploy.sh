@@ -23,7 +23,8 @@
 # --dry-run: no root needed, no chown/runuser, systemctl is only logged (unless IFSO_SYSTEMCTL names a stand-in), the real
 # git/bun/curl are used unless IFSO_GIT/IFSO_BUN/IFSO_CURL name stand-ins. deploy-local.test.sh drives this mode in CI.
 # Paths and commands can be redirected with IFSO_ETC, IFSO_OPT, IFSO_STATE, IFSO_SYSTEMCTL, IFSO_BUN, IFSO_GIT, IFSO_CURL,
-# IFSO_BACKUP_CMD, IFSO_HEALTH_URL, IFSO_HEALTH_TRIES, IFSO_HEALTH_WAIT, IFSO_SETTLE, IFSO_RETRY_WAITS (tests only).
+# IFSO_BACKUP_CMD, IFSO_HEALTH_URL, IFSO_HEALTH_TRIES, IFSO_HEALTH_WAIT, IFSO_SETTLE, IFSO_RETRY_WAITS, IFSO_API_USER,
+# IFSO_WORKER_USER (tests only).
 #
 # sudo-rs note: this script reads every setting from files in /etc/ifso, never from environment variables passed through
 # sudo (sudo-rs and sudo both drop most of them), so `sudo ifso-deploy <sha>` behaves the same on either.
@@ -45,6 +46,8 @@ HEALTH_TRIES="${IFSO_HEALTH_TRIES:-30}"
 HEALTH_WAIT="${IFSO_HEALTH_WAIT:-2}"
 SETTLE="${IFSO_SETTLE:-10}"
 KEEP_RELEASES=5
+API_USER="${IFSO_API_USER:-ifso-api}"       # owner of the relayer key files
+WORKER_USER="${IFSO_WORKER_USER:-ifso-worker}" # owner of the keeper and resolver key files
 
 log() { printf '[deploy %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { printf 'deploy: %s\n' "$*" >&2; exit "${2:-64}"; }
@@ -121,7 +124,7 @@ UNITS=(ifso-api ifso-worker)
 if [[ -n "$(cfg TELEGRAM_BOT_TOKEN)" ]]; then UNITS+=(ifso-bot); fi
 
 check_settings() {
-  local f key p chain url hex got
+  local f key p chain url hex got owner
   for f in common api worker db; do
     [[ -r "$ETC/$f.env" ]] || die "$ETC/$f.env is missing: run provision.sh" 64
   done
@@ -131,6 +134,9 @@ check_settings() {
   chain="$(cfg CHAIN_ID)"
   [[ "$chain" == "$WANT_CHAIN" ]] || die "profile $PROFILE needs CHAIN_ID=$WANT_CHAIN, the settings say '${chain:-unset}'"
   [[ "$(cfg NODE_ENV)" == production ]] || die "NODE_ENV must be production on a server"
+  p="$(cfg TRUST_PROXY)"
+  [[ -n "$(cfg WEB_ORIGINS)" ]] || log "warning: WEB_ORIGINS is empty in $ETC/api.env: only PUBLIC_APP_URL may call the API from a browser (CORS)"
+  [[ -n "$p" && "$p" != none ]] || die "TRUST_PROXY is ${p:-unset} for the api role: set TRUST_PROXY=caddy in $ETC/api.env (behind Caddy every client would otherwise share one rate-limit bucket)"
   [[ -n "$(cfg ESCROW_ADDRESS)" ]] || die "ESCROW_ADDRESS is empty"
   for key in RELAYER KEEPER RESOLVER; do
     for f in "${key}_KEYSTORE" "${key}_PASSWORD_FILE"; do
@@ -139,6 +145,11 @@ check_settings() {
       [[ -f "$p" ]] || die "$f points at $p, which does not exist: copy the key file there (README step 5)"
       # shellcheck disable=SC2012
       if [[ "$(ls -ld "$p" | cut -c5-10)" != "------" ]]; then die "$p is readable by other users: chmod 600 it"; fi
+      # review R2-L3: each key belongs to the one role that uses it (relayer: api; keeper, resolver: worker)
+      if [[ "$key" == RELAYER ]]; then owner="$API_USER"; else owner="$WORKER_USER"; fi
+      # shellcheck disable=SC2012
+      got="$(ls -ld "$p" | awk '{print $3}')"
+      [[ "$got" == "$owner" ]] || die "$p is owned by '$got', not $owner: run provision.sh --fix-key-perms (only the role that uses a key may read it)"
     done
   done
   url="$(cfg RHC_RPC_URLS)"

@@ -5,14 +5,16 @@
 #
 #   PROFILE=testnet bash provision.sh        everything below (PROFILE is testnet or mainnet, required the first time)
 #   bash provision.sh --units-only           only (re)install the systemd units, Caddyfile-independent scripts, backup and deploy
-#   bash provision.sh --fix-key-perms        only re-own /etc/ifso/keys for the ifso user (after you copy key files in)
+#   bash provision.sh --fix-key-perms        only re-own /etc/ifso/keys for the service users (after you copy key files in)
 #
 # What it does: apt upgrade; git, build tools, jq; UTC clock with NTP; a swap file when there is none; Postgres 16 (no
 # extensions) with an `ifso` role and one database (ifso_testnet or ifso_mainnet); Redis 7 on 127.0.0.1 with a password and
 # the noeviction policy BullMQ needs; Bun 1.4.4 and Foundry's cast 1.8.4 (checksum-verified downloads); Caddy; ufw allowing
-# only 22, 80 and 443; fail2ban; unattended security upgrades; the `ifso` service user; /etc/ifso/{common,api,bot,worker,db}.env
-# (0600, root); /etc/ifso/keys (the hot-key keystores and password files, 0600, owned by ifso); the systemd units; the daily
-# backup timer; /usr/local/sbin/ifso-deploy and ifso-backup; a deploy key for the private repo.
+# only 22, 80 and 443; fail2ban; unattended security upgrades; the `ifso` user (owns the code and the deploy key) and one
+# service user per role, `ifso-api`, `ifso-bot` and `ifso-worker` (review R2-L3: an RCE in the public API must not reach the
+# keeper or resolver key); /etc/ifso/{common,api,bot,worker,db}.env (0600, root); /etc/ifso/keys (root, 0711, not listable):
+# relayer.* owned by ifso-api, keeper.* and resolver.* owned by ifso-worker, all 0600, the bot gets none; the systemd units;
+# the daily backup timer; /usr/local/sbin/ifso-deploy and ifso-backup; a deploy key for the private repo.
 #
 # Env (all optional except PROFILE on the first run; saved to /etc/ifso/provision.conf and reused):
 #   PROFILE    testnet | mainnet
@@ -55,16 +57,30 @@ for f in systemd/ifso.target Caddyfile env.example backup.sh deploy.sh; do
 done
 cd /
 
-ensure_keys() {
-  local f
+ensure_service_users() { # one Unix user per role (review R2-L3); state lives in each unit's StateDirectory
+  local u
+  for u in ifso-api ifso-bot ifso-worker; do
+    if ! id "$u" >/dev/null 2>&1; then
+      log "creating the $u system user"
+      useradd --system --user-group --home-dir "/var/lib/$u" --no-create-home --shell /usr/sbin/nologin "$u"
+    fi
+  done
+}
+
+ensure_keys() { # only the role that uses a key can read it: relayer -> ifso-api; keeper, resolver -> ifso-worker
+  local f owner
   id ifso >/dev/null 2>&1 || die "the ifso user is missing: run provision.sh without arguments first"
-  install -d -o ifso -g ifso -m 0700 "$KEYS_DIR"
+  ensure_service_users
+  install -d -o root -g root -m 0711 "$KEYS_DIR"
   for f in "$KEYS_DIR"/*; do
     [[ -f "$f" ]] || continue
-    case "$f" in
-      *.json | *.password) chown ifso:ifso "$f"; chmod 0600 "$f" ;;
-      *) warn "$f is not a .json keystore or .password file: left as it is" ;;
+    case "$(basename "$f")" in
+      relayer.json | relayer.password) owner=ifso-api ;;
+      keeper.json | keeper.password | resolver.json | resolver.password) owner=ifso-worker ;;
+      *.json | *.password) owner=root; warn "$f is not a key name this server knows (relayer, keeper, resolver): readable by root only" ;;
+      *) warn "$f is not a .json keystore or .password file: left as it is"; continue ;;
     esac
+    chown "$owner:$owner" "$f"; chmod 0600 "$f"
   done
 }
 
@@ -82,8 +98,8 @@ install_units() {
   if [[ "$changed" == 1 ]]; then log "systemd units installed"; else log "systemd units unchanged"; fi
 }
 
-if [[ "$KEYS_ONLY" == 1 ]]; then ensure_keys; log "key files in $KEYS_DIR are owned by ifso, mode 0600"; exit 0; fi
-if [[ "$UNITS_ONLY" == 1 ]]; then install_units; exit 0; fi
+if [[ "$KEYS_ONLY" == 1 ]]; then ensure_keys; log "key files in $KEYS_DIR: relayer owned by ifso-api, keeper and resolver by ifso-worker, mode 0600"; exit 0; fi
+if [[ "$UNITS_ONLY" == 1 ]]; then ensure_service_users; install_units; exit 0; fi
 
 # ---------------------------------------------------------------- settings
 # shellcheck disable=SC1090
@@ -136,7 +152,7 @@ fi
 printf 'vm.swappiness=10\n' >/etc/sysctl.d/60-ifso.conf
 sysctl -q -p /etc/sysctl.d/60-ifso.conf
 
-# ---------------------------------------------------------------- the ifso user and directories
+# ---------------------------------------------------------------- the ifso user, the service users and directories
 if ! id ifso >/dev/null 2>&1; then
   log "creating the ifso system user"
   useradd --system --user-group --home-dir /var/lib/ifso --create-home --shell /usr/sbin/nologin ifso

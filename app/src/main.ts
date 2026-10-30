@@ -44,8 +44,8 @@ const bot = createBot(deps);
 if (role === "api" || role === "all") {
   const redis = redisConnection(env.REDIS_URL);
   const app = createApp(deps, new RateLimiter(redis), bot, defaultProbes(deps, redis));
-  Bun.serve({ port: env.PORT, fetch: (req, server) => app.fetch(req, { socketIp: server.requestIP(req)?.address }) });
-  deps.log(`api listening on :${env.PORT}`);
+  Bun.serve({ port: env.PORT, hostname: env.HOST, fetch: (req, server) => app.fetch(req, { socketIp: server.requestIP(req)?.address }) });
+  deps.log(`api listening on ${env.HOST}:${env.PORT}`);
 }
 
 if (role === "bot" || (role === "all" && !env.TELEGRAM_WEBHOOK_SECRET)) {

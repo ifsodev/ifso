@@ -12,6 +12,8 @@ mkdir -p "$T/bin" "$T/etc/keys" "$T/opt" "$T/state" "$T/ctl"
 export IFSO_ETC="$T/etc" IFSO_OPT="$T/opt" IFSO_STATE="$T/state"
 export IFSO_SYSTEMCTL="$T/bin/systemctl" IFSO_BUN="$T/bin/bun" IFSO_CURL="$T/bin/curl"
 export IFSO_HEALTH_TRIES=2 IFSO_HEALTH_WAIT=0 IFSO_SETTLE=0 IFSO_RETRY_WAITS="0 0"
+ME="$(id -un)"
+export IFSO_API_USER="$ME" IFSO_WORKER_USER="$ME" # key owners: the test user stands in for ifso-api and ifso-worker
 unset IFSO_BACKUP_CMD
 
 # --- fakes. Behaviour switches are files in $T/ctl so each case can set them.
@@ -59,7 +61,7 @@ mkdir -p "$T/opt/releases"
 # --- settings (testnet): no secrets, only file shapes
 write_env() { # write_env <chain id> <hex>
   printf 'NODE_ENV=production\nCHAIN_ID=%s\nESCROW_ADDRESS=0x%040d\nRHC_RPC_URLS=https://rpc.invalid.test\nTELEGRAM_BOT_TOKEN=\n' "$1" 1 >"$T/etc/common.env"
-  printf 'PORT=8080\nRELAYER_KEYSTORE=%s/keys/relayer.json\nRELAYER_PASSWORD_FILE=%s/keys/relayer.password\n' "$T/etc" "$T/etc" >"$T/etc/api.env"
+  printf 'PORT=8080\nTRUST_PROXY=caddy\nRELAYER_KEYSTORE=%s/keys/relayer.json\nRELAYER_PASSWORD_FILE=%s/keys/relayer.password\n' "$T/etc" "$T/etc" >"$T/etc/api.env"
   printf 'RESOLVER_ADDRESS=0x%040d\nKEEPER_KEYSTORE=%s/keys/keeper.json\nKEEPER_PASSWORD_FILE=%s/keys/keeper.password\nRESOLVER_KEYSTORE=%s/keys/resolver.json\nRESOLVER_PASSWORD_FILE=%s/keys/resolver.password\n' 2 "$T/etc" "$T/etc" "$T/etc" "$T/etc" >"$T/etc/worker.env"
   printf 'DATABASE_URL=postgres://x\n' >"$T/etc/db.env"
   printf '%s' "$2" >"$T/ctl/chain-hex"
@@ -93,6 +95,16 @@ write_env 46630 0xb626
 chmod 644 "$T/etc/keys/keeper.password"
 run "$S1"; check "a world-readable key file is refused (64)" test "$RC" = 64
 chmod 600 "$T/etc/keys/keeper.password"
+sed -i.bak '/^TRUST_PROXY=/d' "$T/etc/api.env"
+run "$S1"; check "TRUST_PROXY unset for the api role in production is refused (64)" test "$RC" = 64
+check "  ... and says why" has "TRUST_PROXY is unset" "$OUT"
+echo "TRUST_PROXY=none" >>"$T/etc/api.env"
+run "$S1"; check "TRUST_PROXY=none in production is refused (64)" test "$RC" = 64
+write_env 46630 0xb626
+IFSO_WORKER_USER=ifso-worker-not-me run "$S1"; check "a keeper/resolver key not owned by the worker user is refused (64)" test "$RC" = 64
+check "  ... and names the owner it wants" has "not ifso-worker-not-me" "$OUT"
+IFSO_API_USER=ifso-api-not-me run "$S1"; check "a relayer key not owned by the api user is refused (64)" test "$RC" = 64
+run --check; check "WEB_ORIGINS empty in production: a warning, not a failure" bash -c '[ "$1" != 64 ] && grep -q "WEB_ORIGINS is empty" <<<"$2"' _ "$RC" "$OUT"
 echo 0x1 >"$T/ctl/chain-hex"
 run "$S1"; check "an RPC on the wrong chain is refused, nothing switched (75)" test "$RC" = 75
 reset
@@ -180,6 +192,21 @@ check "env.example sections: common holds the escrow, api the relayer, worker th
   split() { awk -v want="$1" "/^# \[section: / { s = \$3; sub(/\]\$/, \"\", s); on = (s == want); next } on { print }" "$2/env.example"; }
   split common "$1" | grep -q "^ESCROW_ADDRESS=" && split api "$1" | grep -q "^RELAYER_KEYSTORE=" &&
   split worker "$1" | grep -q "^KEEPER_KEYSTORE=" && split worker "$1" | grep -q "^RESOLVER_ADDRESS="' _ "$HERE"
+check "env.example api section: TRUST_PROXY=caddy and HOST=127.0.0.1 (review R2-M1)" bash -c '
+  split() { awk -v want="$1" "/^# \[section: / { s = \$3; sub(/\]\$/, \"\", s); on = (s == want); next } on { print }" "$2/env.example"; }
+  split api "$1" | grep -qx "TRUST_PROXY=caddy" && split api "$1" | grep -qx "HOST=127.0.0.1" && ! split common "$1" | grep -q "^TRUST_PROXY="' _ "$HERE"
+check "each role runs as its own user; only the worker can see keeper/resolver keys, only the api the relayer key (R2-L3)" bash -c '
+  d="$1/systemd"
+  for r in api bot worker; do grep -qx "User=ifso-$r" "$d/ifso-$r.service" && grep -qx "Group=ifso-$r" "$d/ifso-$r.service" || exit 1; done
+  for k in keeper resolver; do grep -q "^InaccessiblePaths=.*/keys/$k.json" "$d/ifso-api.service" && grep -q "^InaccessiblePaths=.*/keys/$k.json" "$d/ifso-bot.service" || exit 1; done
+  grep -q "^InaccessiblePaths=.*/keys/relayer.json" "$d/ifso-worker.service" && grep -q "^InaccessiblePaths=.*/keys/relayer.json" "$d/ifso-bot.service" &&
+  ! grep -q "^InaccessiblePaths=.*/keys/relayer" "$d/ifso-api.service" && ! grep -qE "^InaccessiblePaths=.*/keys/(keeper|resolver)" "$d/ifso-worker.service" &&
+  ! grep -q "^User=ifso\$" "$d/ifso-api.service" "$d/ifso-bot.service" "$d/ifso-worker.service"' _ "$HERE"
+check "provision.sh hands relayer keys to ifso-api and keeper/resolver keys to ifso-worker (R2-L3)" bash -c '
+  p="$1/provision.sh"
+  grep -q "relayer.json | relayer.password) owner=ifso-api" "$p" &&
+  grep -q "keeper.json | keeper.password | resolver.json | resolver.password) owner=ifso-worker" "$p" &&
+  grep -q "for u in ifso-api ifso-bot ifso-worker" "$p" && grep -q "install -d -o root -g root -m 0711 \"\$KEYS_DIR\"" "$p"' _ "$HERE"
 check "env.example holds no real secret values" bash -c '! grep -E "^(TELEGRAM_BOT_TOKEN|OPS_BOT_TOKEN|ODDS_API_KEY|PYTH_API_KEY|ALCHEMY_KEY|TELEGRAM_WEBHOOK_SECRET|ZERODEV_PROJECT_ID)=.+" "$1/env.example"' _ "$HERE"
 check "no leftovers from the project these scripts were adapted from" bash -c 'w="lem""niscate"; ! grep -rIil "$w" "$1" --exclude=deploy-local.test.sh' _ "$HERE"
 

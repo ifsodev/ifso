@@ -8,6 +8,8 @@ export const DEFAULT_RPC_URLS = "https://rpc.mainnet.chain.robinhood.com,https:/
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(8080),
+  // Address the API listens on. The VPS template sets 127.0.0.1 (only Caddy, on the same host, reaches it).
+  HOST: z.string().default("0.0.0.0"),
   PUBLIC_APP_URL: z.string().url().default("https://ifso.app"),
   WEB_ORIGINS: z.string().default(""), // extra browser origins allowed to call the API (comma separated); PUBLIC_APP_URL is always allowed
   CHAIN_ID: z.coerce.number().default(4663),
@@ -120,7 +122,11 @@ export function missingFor(role: Role, src: Record<string, string | undefined>):
   if (api || bot || worker) want("DATABASE_URL", "ESCROW_ADDRESS");
   if (api || worker) want("REDIS_URL");
   if (api) need.push(...hotKeyNeeds(src, "RELAYER"));
-  if (api && src.NODE_ENV === "production") want("IP_HASH_SALT");
+  if (api && src.NODE_ENV === "production") {
+    want("IP_HASH_SALT");
+    // Review R2-M1: behind a proxy, "none" makes every client share the proxy's address (one rate-limit bucket for all).
+    if (!present(src, "TRUST_PROXY") || src.TRUST_PROXY!.trim() === "none") need.push("TRUST_PROXY");
+  }
   if (role === "bot") want("TELEGRAM_BOT_TOKEN"); // in "all" the bot is optional
   if (worker) {
     need.push(...hotKeyNeeds(src, "KEEPER"));
