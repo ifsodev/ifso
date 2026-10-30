@@ -21,6 +21,8 @@ import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 ///     forge script script/Deploy.s.sol --rpc-url <rpc> --account <keystore name> --broadcast --slow
 ///     (or --ledger). Robinhood Chain (4663 / 46630) additionally needs IFSO_ARMED=1 and the file
 ///     contracts/.armed-<chainid>; without both the script refuses before anything is signed.
+///     Exception: IFSO_FORK_DRYRUN=1 against a LOCAL anvil fork of 4663 (script/fork-dryrun.sh); the node must
+///     prove it is anvil, so the flag does nothing against a real RPC.
 ///
 /// Env:
 ///   OWNER_MULTISIG     2-of-3 multisig that will own evaluator / resolver / router / escrow
@@ -35,14 +37,20 @@ import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 ///   GIT_COMMIT        commit sha recorded in the deployment file (the wrapper scripts pass it)
 ///   IFSO_WRITE_DEPLOYMENT   "0" skips writing the deployment file (tests)
 contract Deploy is DeployBase {
-    // Robinhood Chain mainnet (verified on-chain 2026-10-25)
+    // Robinhood Chain mainnet (verified on-chain 2026-10-25; feeds and Stock Tokens re-proved on a fork 2026-10-30)
     address internal constant RHC_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
     address internal constant RHC_PYTH = 0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a;
+    // Chainlink PROXY addresses (never the aggregator behind them: an upgrade moves the proxy to a new aggregator)
     address internal constant FEED_ETH_USD = 0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9;
-    address internal constant FEED_SPY = 0x78BCB218fA04B9b3a278eBc865Ed320BF8DEFBAc;
+    address internal constant FEED_SPY = 0x319724394D3A0e3669269846abE664Cd621f9f6A;
+    address internal constant FEED_NVDA = 0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15;
+    address internal constant FEED_TSLA = 0x4A1166a659A55625345e9515b32adECea5547C38;
+    address internal constant FEED_AAPL = 0x6B22A786bAa607d76728168703a39Ea9C99f2cD0;
+    // ERC-8056 Stock Tokens paired with the feeds above
     address internal constant TOKEN_SPY = 0x117cc2133c37B721F49dE2A7a74833232B3B4C0C;
-    // NVDA / TSLA / AAPL feeds are known (0x379E.., 0x7A6b.., 0xBb11..); their Stock Token addresses come from
-    // the Robinhood asset list and are registered by the owner multisig in a follow-up batch (see README).
+    address internal constant TOKEN_NVDA = 0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC;
+    address internal constant TOKEN_TSLA = 0x322F0929c4625eD5bAd873c95208D54E1c003b2d;
+    address internal constant TOKEN_AAPL = 0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9;
 
     uint64 internal constant DISPUTE_WINDOW = 2 hours;
     uint64 internal constant PANEL_WINDOW = 72 hours;
@@ -131,13 +139,16 @@ contract Deploy is DeployBase {
         if (keccak256(bytes(vm.envOr("IFSO_WRITE_DEPLOYMENT", string("1")))) != keccak256("0")) _write(d, x);
     }
 
-    /// @dev Feeds registered at deploy. Mainnet: ETH/USD and SPY (with its Stock Token). Local: one mock feed.
+    /// @dev Feeds registered at deploy. Mainnet: ETH/USD + SPY, NVDA, TSLA, AAPL (each with its Stock Token).
+    ///      Local: one mock feed.
     function _feeds() internal returns (address[] memory feeds, address[] memory tokens) {
         if (block.chainid == RHC_MAINNET) {
-            feeds = new address[](2);
-            tokens = new address[](2);
-            (feeds[0], feeds[1]) = (FEED_ETH_USD, FEED_SPY);
-            (tokens[0], tokens[1]) = (address(0), TOKEN_SPY);
+            feeds = new address[](5);
+            tokens = new address[](5);
+            (feeds[0], feeds[1], feeds[2], feeds[3], feeds[4]) =
+            (FEED_ETH_USD, FEED_SPY, FEED_NVDA, FEED_TSLA, FEED_AAPL);
+            (tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]) =
+            (address(0), TOKEN_SPY, TOKEN_NVDA, TOKEN_TSLA, TOKEN_AAPL);
         } else if (block.chainid == 31337) {
             feeds = new address[](1);
             tokens = new address[](1);
@@ -152,7 +163,7 @@ contract Deploy is DeployBase {
 
     // ------------------------------------------------------------------ deployment record
     function _write(Deployed memory d, Expect memory x) internal {
-        string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
+        string memory path = _deploymentPath();
         string memory json = string.concat(
             "{\n",
             _kv("chainId", vm.toString(block.chainid), false),

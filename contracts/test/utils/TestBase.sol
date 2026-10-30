@@ -14,6 +14,7 @@ interface Vm {
 
     function warp(uint256 newTimestamp) external;
     function prank(address sender) external;
+    function prank(address sender, address origin) external;
     function startPrank(address sender) external;
     function stopPrank() external;
     function deal(address who, uint256 newBalance) external;
@@ -51,6 +52,18 @@ interface Vm {
     function readDir(string calldata path) external view returns (DirEntry[] memory entries);
     function parseJsonAddressArray(string calldata json, string calldata key) external pure returns (address[] memory);
     function parseJsonString(string calldata json, string calldata key) external pure returns (string memory);
+    // fork + storage cheatcodes (fork proofs, test/fork)
+    function createSelectFork(string calldata urlOrAlias) external returns (uint256 forkId);
+    function createSelectFork(string calldata urlOrAlias, uint256 blockNumber) external returns (uint256 forkId);
+    function load(address target, bytes32 slot) external view returns (bytes32 data);
+    function store(address target, bytes32 slot, bytes32 value) external;
+    function mockCall(address callee, bytes calldata data, bytes calldata returnData) external;
+    function clearMockedCalls() external;
+    function skip(bool skipTest) external;
+    function rpc(string calldata method, string calldata params) external returns (bytes memory data);
+    function getBlockNumber() external view returns (uint256 height);
+    function getBlockTimestamp() external view returns (uint256 timestamp);
+    function expectRevert(bytes4 revertData, address reverter) external;
 }
 
 abstract contract TestBase {

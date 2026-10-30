@@ -27,6 +27,7 @@ abstract contract DeployBase {
 
     error NotArmed(uint256 chainId);
     error CheckFailed(string what);
+    error NotForkDryRun();
 
     /// @notice Everything the deployment is expected to look like, read back by the assertions.
     struct Expect {
@@ -54,11 +55,40 @@ abstract contract DeployBase {
 
     /// @notice Refuses to run on Robinhood Chain (4663 / 46630) unless IFSO_ARMED=1 AND the file
     ///         `contracts/.armed-<chainid>` exists (gitignored; created by hand right before a real deploy).
-    function _requireArmed() internal view {
+    ///         The only other way through is a fork dry run (see `_isForkDryRun`).
+    function _requireArmed() internal {
         if (!_isRealChain()) return;
+        if (_isForkDryRun()) return;
         bool envArmed = keccak256(bytes(vm.envOr("IFSO_ARMED", string("0")))) == keccak256("1");
         bool fileArmed = vm.exists(string.concat(".armed-", vm.toString(block.chainid)));
         if (!envArmed || !fileArmed) revert NotArmed(block.chainid);
+    }
+
+    /// @notice Fork dry run: IFSO_FORK_DRYRUN=1 on chain 4663 is accepted ONLY when the connected node is a local
+    ///         anvil fork. A fork keeps the real chain id (4663), so the chain id cannot tell a fork from the real
+    ///         network; the node can: `web3_clientVersion` must start with "anvil/" and the anvil-only
+    ///         `anvil_nodeInfo` method must answer. A real RPC fails both (the second one reverts the script).
+    ///         script/fork-dryrun.sh runs it against `anvil --fork-url <public RPC> -p <port>` on 127.0.0.1.
+    function _isForkDryRun() internal returns (bool) {
+        if (block.chainid != RHC_MAINNET) return false;
+        if (keccak256(bytes(vm.envOr("IFSO_FORK_DRYRUN", string("0")))) != keccak256("1")) return false;
+        // vm.rpc returns the JSON result ABI-encoded: a JSON string comes back as abi.encode(string)
+        bytes memory client = bytes(abi.decode(vm.rpc("web3_clientVersion", "[]"), (string)));
+        bytes memory prefix = bytes("anvil/");
+        if (client.length < prefix.length) revert NotForkDryRun();
+        for (uint256 i; i < prefix.length; ++i) {
+            if (client[i] != prefix[i]) revert NotForkDryRun();
+        }
+        vm.rpc("anvil_nodeInfo", "[]"); // reverts on any non-anvil node
+        return true;
+    }
+
+    /// @notice Where the deployment record lives: `deployments/<chainid>.json`, or `deployments/<chainid>-fork.json`
+    ///         for a fork dry run (gitignored), so a dry run can never look like a real deployment record.
+    function _deploymentPath() internal returns (string memory) {
+        string memory id = vm.toString(block.chainid);
+        if (_isForkDryRun()) return string.concat("deployments/", id, "-fork.json");
+        return string.concat("deployments/", id, ".json");
     }
 
     function _check(bool ok, string memory what) internal pure {

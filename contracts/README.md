@@ -39,13 +39,29 @@ bash script/verify-sourcify.sh 4663                       # Sourcify v2, prints 
 The script deploys the four contracts, registers the feeds and the resolver, sets the launch cap, starts the
 two-step ownership transfer of every contract to the owner multisig, asserts the result (USDG decimals == 6,
 pending owners, fees, cap, feeds, resolver panel and bond, fee recipients) and writes
-`deployments/<chainid>.json`. Then from the owner multisig: `acceptOwnership()` on all four contracts, and register
-the Stock Token feeds with their token addresses (`setFeed(feed, true, token)`).
+`deployments/<chainid>.json`. Then from the owner multisig: `acceptOwnership()` on all four contracts. On 4663 the
+deploy registers the ETH/USD feed and the SPY, NVDA, TSLA and AAPL feeds with their Stock Tokens; feeds are always
+Chainlink proxy addresses, never the aggregator behind a proxy.
 
 Local rehearsal (anvil, throwaway keystore, never an anvil default key):
 
 ```bash
 anvil -p 8645 --silent & bash script/local-deploy.sh 8645
+```
+
+Fork proofs against real Robinhood Chain state (USDG EIP-3009 and permit, Chainlink rounds, Stock Token multipliers,
+Pyth Core). They skip when `RHC_FORK_RPC` is unset; `RHC_FORK_BLOCK` pins a block (the public RPC keeps only minutes
+of state, so the proofs are written to hold at any later block):
+
+```bash
+RHC_FORK_RPC=https://rpc.mainnet.chain.robinhood.com forge test --match-path 'test/fork/*' -vv
+```
+
+Full deploy dry run on a local anvil fork of 4663 (the chain id stays 4663; `IFSO_FORK_DRYRUN=1` passes the armed
+guard only when the node proves it is anvil; the record goes to the gitignored `deployments/4663-fork.json`):
+
+```bash
+anvil --fork-url https://rpc.mainnet.chain.robinhood.com -p 8645 --silent & bash script/fork-dryrun.sh 8645
 ```
 
 ## Checks run in CI

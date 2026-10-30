@@ -13,8 +13,8 @@ import {FeeRouter} from "../src/FeeRouter.sol";
 ///   forge script script/PostDeployCheck.s.sol --rpc-url <rpc>
 contract PostDeployCheck is DeployBase {
     /// @notice Loads the deployment file for the connected chain and asserts every recorded value on chain.
-    function run() external view {
-        string memory json = vm.readFile(string.concat("deployments/", vm.toString(block.chainid), ".json"));
+    function run() external {
+        string memory json = vm.readFile(_deploymentPath());
         Expect memory x;
         x.deployer = vm.parseJsonAddress(json, ".deployer");
         x.ownerMultisig = vm.parseJsonAddress(json, ".config.ownerMultisig");
