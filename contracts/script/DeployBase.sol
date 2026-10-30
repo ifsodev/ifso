@@ -14,6 +14,10 @@ interface IDecimals {
 interface ISafeLike {
     function getThreshold() external view returns (uint256);
     function getOwners() external view returns (address[] memory);
+    function getModulesPaginated(address start, uint256 pageSize)
+        external
+        view
+        returns (address[] memory array, address next);
 }
 
 /// @notice Shared pieces of the deploy and post-deploy scripts: the armed-flag guard and the assertions.
@@ -24,6 +28,21 @@ abstract contract DeployBase {
     uint256 internal constant RHC_TESTNET = 46630;
     /// @dev forge's placeholder sender when no wallet is given: never a real deployer.
     address internal constant FORGE_DEFAULT_SENDER = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38;
+    /// @dev Launch cap ceiling on Robinhood Chain (DECISIONS #6: 1,000 USDG per escrow side for the first 14 days).
+    uint96 internal constant LAUNCH_CAP_CEILING = 1_000e6;
+
+    // Official Safe contracts, checked on 4663 (codesize + codehash, docs/research chain facts, 2026-10-30).
+    address internal constant SAFE_L2_141 = 0x29fcB43b46531BcA003ddC8FCB67FFE91900C762;
+    address internal constant SAFE_L2_130 = 0x3E5c63644E683549055b9Be8653de26E0B4CD36E;
+    address internal constant SAFE_L2_130_EIP155 = 0xfb1bffC9d739B8D520DaF37dF666da4C687191EA;
+    /// @dev Runtime codehash of a SafeProxy made by the official 1.4.1 / 1.3.0 factories (measured on a 4663 fork).
+    bytes32 internal constant SAFE_PROXY_141_CODEHASH =
+        0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c; // not-a-key: codehash
+    bytes32 internal constant SAFE_PROXY_130_CODEHASH =
+        0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000; // not-a-key: codehash
+    /// @dev The Safe transaction guard slot.
+    bytes32 internal constant SAFE_GUARD_SLOT = keccak256("guard_manager.guard.address");
+    address internal constant SAFE_SENTINEL = address(0x1);
 
     error NotArmed(uint256 chainId);
     error CheckFailed(string what);
@@ -53,11 +72,12 @@ abstract contract DeployBase {
         return block.chainid == RHC_MAINNET || block.chainid == RHC_TESTNET;
     }
 
-    /// @notice Refuses to run on Robinhood Chain (4663 / 46630) unless IFSO_ARMED=1 AND the file
-    ///         `contracts/.armed-<chainid>` exists (gitignored; created by hand right before a real deploy).
-    ///         The only other way through is a fork dry run (see `_isForkDryRun`).
+    /// @notice Refuses to run on ANY chain but a local anvil (31337) unless IFSO_ARMED=1 AND the file
+    ///         `contracts/.armed-<chainid>` exists (gitignored; created by hand right before a real deploy). Covers
+    ///         Robinhood Chain and every other real network a mistaken --rpc-url could point at (R1-I6).
+    ///         The only other way through is a fork dry run of 4663 (see `_isForkDryRun`).
     function _requireArmed() internal {
-        if (!_isRealChain()) return;
+        if (block.chainid == 31337) return;
         if (_isForkDryRun()) return;
         bool envArmed = keccak256(bytes(vm.envOr("IFSO_ARMED", string("0")))) == keccak256("1");
         bool fileArmed = vm.exists(string.concat(".armed-", vm.toString(block.chainid)));
@@ -108,17 +128,37 @@ abstract contract DeployBase {
         _check(handedOver || pendingHandover, string.concat(name, ": owner/pendingOwner is not the multisig"));
     }
 
-    /// @dev On real chains the owner and the panel must be multisigs: contract code that is not an EIP-7702
-    ///      delegation, threshold >= 2. (Full Safe singleton/codehash proof is part of the release gate.)
+    /// @dev On real chains the owner and the panel must be real Safes (R1-L4): an official SafeProxy (runtime
+    ///      codehash), pointing at an official SafeL2 1.4.1 / 1.3.0 singleton, threshold >= 2, no module enabled
+    ///      (a module bypasses the threshold) and no transaction guard. An EOA, an EIP-7702 delegated EOA or a
+    ///      look-alike contract fails the codehash check.
     function _checkMultisig(address a, string memory name) internal view {
         if (!_isRealChain()) return;
-        bytes memory code = a.code;
-        _check(code.length > 0, string.concat(name, ": no code (an EOA)"));
+        _check(a.code.length > 0, string.concat(name, ": no code (an EOA)"));
+        bytes32 h = a.codehash;
         _check(
-            !(code.length == 23 && code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00),
-            string.concat(name, ": EIP-7702 delegated EOA")
+            h == SAFE_PROXY_141_CODEHASH || h == SAFE_PROXY_130_CODEHASH,
+            string.concat(name, ": not an official SafeProxy (codehash)")
+        );
+        address singleton = address(uint160(uint256(vm.load(a, bytes32(0)))));
+        _check(
+            singleton == SAFE_L2_141 || singleton == SAFE_L2_130 || singleton == SAFE_L2_130_EIP155,
+            string.concat(name, ": singleton is not an official SafeL2 1.4.1 / 1.3.0")
         );
         _check(ISafeLike(a).getThreshold() >= 2, string.concat(name, ": threshold < 2"));
+        (address[] memory modules,) = ISafeLike(a).getModulesPaginated(SAFE_SENTINEL, 1);
+        _check(modules.length == 0, string.concat(name, ": a Safe module is enabled"));
+        _check(vm.load(a, SAFE_GUARD_SLOT) == bytes32(0), string.concat(name, ": a Safe guard is set"));
+    }
+
+    function _checkPythOff(address pyth) internal view {
+        _check(!_isRealChain() || pyth == address(0), "Pyth must be off (pyth = 0) on RHC in v1");
+    }
+
+    /// @dev On Robinhood Chain the launch cap must be on and at most 1,000 USDG (R1-L4); MAX_AMOUNT=0 fails.
+    function _checkLaunchCap(uint96 maxAmount) internal view {
+        if (!_isRealChain()) return;
+        _check(maxAmount != 0 && maxAmount <= LAUNCH_CAP_CEILING, "launch cap must be 1..1,000 USDG on RHC");
     }
 
     /// @notice Post-deploy assertions (DEP-2). Reverts with the first mismatch.
@@ -146,10 +186,14 @@ abstract contract DeployBase {
         _check(escrow.creationFee() == x.creationFee, "escrow.creationFee");
         _check(escrow.resolverFee() == x.resolverFee, "escrow.resolverFee");
         _check(escrow.maxAmount() == x.maxAmount, "escrow.maxAmount (launch cap)");
+        _checkLaunchCap(escrow.maxAmount());
         _check(!escrow.creationPaused(), "escrow paused");
 
         // evaluator registry
         _check(address(evaluator.pyth()) == x.pyth, "evaluator.pyth");
+        // R1-L2: Pyth stays off in v1 on Robinhood Chain. The adapter is immutable, so with pyth = 0 no owner call
+        // can switch the unproven path on; enabling it is a new evaluator + escrow deploy and a new review round.
+        _checkPythOff(x.pyth);
         _check(address(evaluator.sequencerUptimeFeed()) == x.seqFeed, "evaluator.sequencerUptimeFeed");
         _check(evaluator.resolverAllowed(address(resolver)), "resolver not registered in evaluator");
         for (uint256 i; i < x.feeds.length; ++i) {

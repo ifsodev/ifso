@@ -30,7 +30,8 @@ import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 ///   RESOLVER_CREATOR   hot key of the resolver service allowed to register questions
 ///   FEE_WORK / FEE_TREASURY / FEE_PERKS / FEE_BURN   fee split destinations (80/10/5/5)
 ///   USDG       default: RHC USDG on 4663; a fresh MockUSDG on 31337; REQUIRED on every other chain
-///   PYTH       default: RHC Pyth Core on 4663, else 0 (Pyth stays off until the owner allows a price id)
+///   PYTH       default 0 everywhere. On 4663 / 46630 it MUST be 0 in v1 (asserted): the adapter is immutable,
+///              so no owner call can switch the unproven Pyth path on (review round 1, L2)
 ///   SEQ_UPTIME_FEED   default 0 (Robinhood Chain has no sequencer uptime feed)
 ///   MAX_AMOUNT        launch cap per escrow side, default 1_000e6 (1,000 USDG)
 ///   CREATION_FEE (default 250000) · RESOLVER_FEE (default 500000) · RESOLVER_BOND (default 100e6)
@@ -39,7 +40,6 @@ import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 contract Deploy is DeployBase {
     // Robinhood Chain mainnet (verified on-chain 2026-10-25; feeds and Stock Tokens re-proved on a fork 2026-10-30)
     address internal constant RHC_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
-    address internal constant RHC_PYTH = 0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a;
     // Chainlink PROXY addresses (never the aggregator behind them: an upgrade moves the proxy to a new aggregator)
     address internal constant FEED_ETH_USD = 0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9;
     address internal constant FEED_SPY = 0x319724394D3A0e3669269846abE664Cd621f9f6A;
@@ -75,7 +75,7 @@ contract Deploy is DeployBase {
         ];
         if (block.chainid == RHC_MAINNET) {
             x.usdg = vm.envOr("USDG", RHC_USDG);
-            x.pyth = vm.envOr("PYTH", RHC_PYTH);
+            x.pyth = vm.envOr("PYTH", address(0));
         } else if (block.chainid == 31337) {
             x.usdg = vm.envOr("USDG", address(0)); // 0 => deploy a MockUSDG
             x.pyth = vm.envOr("PYTH", address(0));

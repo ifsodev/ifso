@@ -17,6 +17,29 @@ contract DryRunProbe is DeployBase {
     function armed() external {
         _requireArmed();
     }
+
+    function multisig(address a) external view {
+        _checkMultisig(a, "owner");
+    }
+}
+
+interface ISafeProxyFactory {
+    function createProxyWithNonce(address singleton, bytes memory initializer, uint256 saltNonce)
+        external
+        returns (address proxy);
+}
+
+interface ISafeSetup {
+    function setup(
+        address[] calldata owners,
+        uint256 threshold,
+        address to,
+        bytes calldata data,
+        address fallbackHandler,
+        address paymentToken,
+        uint256 payment,
+        address paymentReceiver
+    ) external;
 }
 
 /// @notice R7 Stock Token pairing, R8 sequencer uptime feed, R9 Pyth Core on 4663.
@@ -55,7 +78,8 @@ contract ForkMiscTest is ForkBase {
             vm.clearMockedCalls();
         }
 
-        // an escrow created on the live multiplier VOIDs (money comes back) when a change lands before settlement
+        // an escrow created on the live multiplier VOIDs (money comes back) when a change took effect at or before
+        // the deciding round; a change that took effect after it leaves the decided result standing (R1-L1)
         (, Round memory r, Round memory next) = _window(FEED_SPY, 3);
         uint64 dl = uint64(r.updatedAt + (next.updatedAt - r.updatedAt) / 2);
         vm.warp(dl - 1 hours);
@@ -66,10 +90,14 @@ contract ForkMiscTest is ForkBase {
         uint256 id = _createFunded(_named(sc, 10e6, exp));
         vm.warp(forkNow);
         uint256 m0 = IERC8056(TOKEN_SPY).uiMultiplier();
-        vm.mockCall(TOKEN_SPY, abi.encodeWithSignature("effectiveAt()"), abi.encode(forkNow - 1));
         vm.mockCall(TOKEN_SPY, abi.encodeWithSignature("newUIMultiplier()"), abi.encode(m0 + 1));
+        uint256 snap = vm.snapshotState();
+        vm.mockCall(TOKEN_SPY, abi.encodeWithSignature("effectiveAt()"), abi.encode(forkNow));
+        assertTrue(escrow.settle(id, abi.encode(r.id), false) == Verdict.TRUE, "change after the deciding round");
+        vm.revertToState(snap);
+        vm.mockCall(TOKEN_SPY, abi.encodeWithSignature("effectiveAt()"), abi.encode(uint256(r.updatedAt)));
         uint256 before = usdg.balanceOf(sender);
-        assertTrue(escrow.settle(id, abi.encode(r.id), false) == Verdict.VOID, "scheduled change took effect: VOID");
+        assertTrue(escrow.settle(id, abi.encode(r.id), false) == Verdict.VOID, "change at the deciding round: VOID");
         assertTrue(_status(id) == Status.RETURNED, "one-sided VOID returns the money");
         assertEq(usdg.balanceOf(sender) - before, 10e6, "comes back to the sender");
         vm.clearMockedCalls();
@@ -118,6 +146,56 @@ contract ForkMiscTest is ForkBase {
 
         assertEq(address(evaluator.pyth()), PYTH, "adapter wired to Pyth Core");
         assertFalse(evaluator.pythIdAllowed(ethUsd), "Pyth off by default: no price id allowed");
+    }
+
+    // ================================================================ R1-L4 Safe proof
+    /// @dev Real Safes made by the official factories on the 4663 fork pass; a 1-of-3, a Safe with a module, a
+    ///      Safe with a guard and a proxy on a non-official singleton fail.
+    function testFork_R1_L4_SafeCheck() public {
+        DryRunProbe p = new DryRunProbe();
+        address s141 =
+            _safe(0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67, 0x29fcB43b46531BcA003ddC8FCB67FFE91900C762, 2, 1);
+        address s130 =
+            _safe(0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2, 0x3E5c63644E683549055b9Be8653de26E0B4CD36E, 2, 2);
+        p.multisig(s141);
+        p.multisig(s130);
+
+        address one =
+            _safe(0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67, 0x29fcB43b46531BcA003ddC8FCB67FFE91900C762, 1, 3);
+        vm.expectRevert(abi.encodeWithSelector(DeployBase.CheckFailed.selector, "owner: threshold < 2"));
+        p.multisig(one);
+
+        uint256 snap = vm.snapshotState();
+        // modules[SENTINEL] = module (Safe storage slot 1), as a setup-time enableModule would leave it
+        vm.store(s141, keccak256(abi.encode(address(1), uint256(1))), bytes32(uint256(uint160(address(0xD0D0)))));
+        vm.store(s141, keccak256(abi.encode(address(0xD0D0), uint256(1))), bytes32(uint256(1)));
+        vm.expectRevert(abi.encodeWithSelector(DeployBase.CheckFailed.selector, "owner: a Safe module is enabled"));
+        p.multisig(s141);
+        vm.revertToState(snap);
+
+        snap = vm.snapshotState();
+        vm.store(s141, keccak256("guard_manager.guard.address"), bytes32(uint256(uint160(address(0x6A6A)))));
+        vm.expectRevert(abi.encodeWithSelector(DeployBase.CheckFailed.selector, "owner: a Safe guard is set"));
+        p.multisig(s141);
+        vm.revertToState(snap);
+
+        // an official proxy pointed at a non-official singleton (e.g. the non-L2 or a copied implementation)
+        vm.store(s141, bytes32(0), bytes32(uint256(uint160(0x41675C099F32341bf84BFc5382aF534df5C7461a))));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeployBase.CheckFailed.selector, "owner: singleton is not an official SafeL2 1.4.1 / 1.3.0"
+            )
+        );
+        p.multisig(s141);
+    }
+
+    function _safe(address factory, address singleton, uint256 threshold, uint256 salt) internal returns (address) {
+        address[] memory owners = new address[](3);
+        (owners[0], owners[1], owners[2]) = (address(0x0E01), address(0x0E02), address(0x0E03));
+        bytes memory init = abi.encodeCall(
+            ISafeSetup.setup, (owners, threshold, address(0), "", address(0), address(0), 0, address(0))
+        );
+        return ISafeProxyFactory(factory).createProxyWithNonce(singleton, init, uint256(keccak256("ifso")) + salt);
     }
 
     // ================================================================ R10 guard
