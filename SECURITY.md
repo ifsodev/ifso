@@ -53,8 +53,11 @@ function can move, redirect or freeze escrowed USDG (invariant R7, `contracts/IN
   bond. Its keys never hold user funds.
 - **Referee**: chosen per payment by the sender; can only release to the recipient or return to the sender.
 - **USDG issuer**: can freeze any address, including the escrow contract. A freeze of the escrow stops every exit.
-- **Oracles**: Chainlink feeds (and Pyth if the owner allows a price id) decide PRICE conditions; a price within
-  about 0.5% of the level can resolve either way because of the feed's deviation threshold.
+  A frozen refund address of one side of a challenge never holds the other side's money: each side is paid on its
+  own and a side that cannot receive is left for `claimVoid`.
+- **Oracles**: Chainlink feeds decide PRICE conditions; a price within about 0.5% of the level can resolve either
+  way because of the feed's deviation threshold. The Pyth adapter is shipped but not wired on Robinhood Chain in v1
+  (`pyth = 0`, immutable, asserted by the deploy script); turning it on is a new deploy and a new review round.
 - **Sequencer**: may refuse some addresses; every payment has an alternate refund address and refunds are open to
   anyone after expiry.
 
@@ -66,12 +69,17 @@ function can move, redirect or freeze escrowed USDG (invariant R7, `contracts/IN
 | No sequencer uptime feed on Robinhood Chain | None is published on the chain today; the evaluator takes it as an immutable, the deploy defaults to none and asserts the configured value. AT_DEADLINE uses round-id proofs and a hold window, so a sequencer outage delays settlement but cannot pick a stale price; expiry refunds still work. |
 | USDG issuer freeze of the escrow contract | Outside the protocol's control; disclosed on every create and claim page. |
 | Claim links work like cash | Whoever holds the link first can claim; mitigated by expiries, cancellable payments and private sending. |
+| Relayed decisions and refund-address changes use one nonce per signer (R1-I1) | Signatures relayed out of order fail and must be signed again; no funds are at risk. The app signs one at a time. |
+| No ERC-6492 in signature checks (R1-I2) | A passkey account that is not deployed yet cannot sign `decideBySig` until it is deployed; claims do not need it (the link key signs). EIP-7702 delegated EOAs are checked through ERC-1271. |
+| `_multiplierChanged` uses try/catch (R1-I3) | An unreadable multiplier fails closed (VOID). Out-of-gas griefing of the catch was checked: the 1/64 left to the caller cannot complete the refund, so it cannot force a wrong verdict. |
+| A caller of `refund` on a VOIDed challenge chooses which preset destination each side is paid to | Only that side's own preset destinations are possible; a side whose chosen destination cannot receive is left owed and anyone can pay it later with `claimVoid`. |
 | Read-only reentrancy during `settle` | The Pyth fee refund sends ETH to the caller before the escrow record is updated; every state-changing entry point is `nonReentrant`, so only view reads see the old record. Integrators should not read escrow state inside that callback. |
 
 ## Audit history
 | Date | Review | Scope | Result |
 |---|---|---|---|
 | 2026-10-30 | Internal hardening pass | launch cap, invariants (10,000 x 50), deploy safety, CI, Slither allowlist | No open High or Medium in the contracts; findings and reasons in `contracts/slither.allow` |
+| 2026-10-30 | Internal security review, round 1 of 3 | contracts, deploy scripts, app services | 0 High, 8 Medium, 4 Low, 6 Info. Contract fixes: M1 (challenge accept window vs `maxStale`), M2 (no two-sided TOUCH), M3 (OUTCOME expiry covers the panel window), M4 (each side of a VOID paid on its own, `claimVoid`), M5 on-chain part (no-op decisions and refund changes revert), L1 (multiplier judged at the deciding price's time), L2 (Pyth not wired on RHC), L4 (cap and Safe checks in the deploy assertions), I6 (deploy guard on every non-local chain). Each finding has `test_R1_*` regression tests. App findings (M5 rate limits, M6, M7, M8, L3) are tracked for the app services |
 
 ## Incident response (short form)
 1. Owner multisig pauses new entries (`setCreationPaused(true)`); exits keep working.
