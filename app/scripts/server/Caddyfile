@@ -1,0 +1,32 @@
+# /etc/caddy/Caddyfile for Ifso (installed by provision.sh).
+# The site address is the environment variable DOMAIN (set in /etc/ifso/caddy.env, loaded by a systemd drop-in for
+# caddy.service). The domain is not bought yet: with DOMAIN unset this serves plain HTTP on port 80 only, which is fine for
+# a first smoke test and nothing else. Once DOMAIN=api.<your-domain> and its DNS record points at this server (Cloudflare:
+# grey cloud, "DNS only"), Caddy fetches and renews the HTTPS certificate by itself (ports 80 and 443 must be open).
+#
+# Only the API (127.0.0.1:8080) is public. The bot and the worker listen on nothing. The API reads the client address from
+# X-Forwarded-For, which Caddy sets itself (it discards any value a client sends); the Cloudflare headers a client could
+# forge are removed before the request reaches the API.
+
+{$DOMAIN::80} {
+	encode zstd gzip
+	request_body {
+		max_size 1MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	log {
+		output file /var/log/caddy/ifso-api.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
+	reverse_proxy 127.0.0.1:8080 {
+		header_up -CF-Connecting-IP
+		header_up -CF-IPCountry
+	}
+}

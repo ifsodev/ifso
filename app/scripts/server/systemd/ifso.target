@@ -1,0 +1,9 @@
+# Every Ifso service. `systemctl restart ifso.target` restarts each enabled ifso-*.service (they are PartOf it).
+[Unit]
+Description=Ifso backend services
+Documentation=file:/opt/ifso/current/app/scripts/server/README.md
+Wants=network-online.target postgresql.service redis-server.service
+After=network-online.target postgresql.service redis-server.service
+
+[Install]
+WantedBy=multi-user.target

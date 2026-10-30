@@ -1,0 +1,26 @@
+# Applies database migrations (`bun run db:migrate`) from the current release. Started by deploy.sh before the
+# services restart. Idempotent: migrations already applied are skipped.
+[Unit]
+Description=Ifso database migrations
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=ifso
+Group=ifso
+WorkingDirectory=/opt/ifso/current/app
+Environment=HOME=/var/lib/ifso
+EnvironmentFile=/etc/ifso/common.env
+EnvironmentFile=/etc/ifso/db.env
+ExecStart=/usr/local/bin/bun run db:migrate
+TimeoutStartSec=180
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ifso-migrate
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ifso
+UMask=0077

@@ -1,0 +1,12 @@
+# Runs ifso-backup.service every day at 03:15 UTC. Persistent: a run missed while the server was off happens at the next
+# boot. List with: systemctl list-timers ifso-backup.timer
+[Unit]
+Description=Daily Ifso database backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

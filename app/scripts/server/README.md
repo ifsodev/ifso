@@ -1,0 +1,107 @@
+# Hosting the Ifso backend on one server
+
+These scripts set up one Ubuntu 24.04 server (Cherry Servers VPS, 2 to 4 GB of memory) to run the whole backend: the API, the Telegram bot and the worker (keeper, price watcher, resolver, indexer, notifier), plus Postgres 16, Redis 7 and Caddy for HTTPS. Nothing here runs by itself and nothing has been run yet.
+
+| File | What it is |
+|---|---|
+| `provision.sh` | One-time setup of a fresh server. Can be run again. |
+| `deploy.sh` | Puts one exact commit live, checks it, and goes back by itself if it fails. Installed on the server as `ifso-deploy`. |
+| `systemd/` | The services (`ifso-api`, `ifso-bot`, `ifso-worker`), the migration step, and the daily backup timer. |
+| `Caddyfile` | The HTTPS front door. The domain is a variable, `DOMAIN`. |
+| `backup.sh` | Daily database backup, 14 days kept. Installed as `ifso-backup`. |
+| `env.example` | Every setting, per service, with no secret values. |
+| `deploy-local.test.sh` | Proves the deploy logic on your own computer, no server needed. |
+
+The server holds three kinds of secret: the database and Redis passwords (made for you), the Telegram tokens, and the three hot-wallet key files. Treat all of it as private: never paste any of it into a chat, a ticket or git.
+
+## Words you will see
+
+- **Profile**: `testnet` (chain 46630, play money) or `mainnet` (chain 4663, real money). A server has one profile for life. Use a separate server for the other one.
+- **sha**: the 40-character id of one commit. You always deploy a sha, never a branch name, because a sha cannot move.
+- **Hot keys**: three wallets the backend signs with: the relayer (pays gas for claims), the keeper (settles and refunds) and the resolver (registers questions, proposes results). They are encrypted key files plus a password file each. Keep only small amounts in them.
+
+## Step by step
+
+### 1. Order the server and log in
+Order Ubuntu 24.04 (64-bit) at Cherry Servers, add your SSH public key in their panel, then log in as root: `ssh root@<the server's address>`. Do not set a password login.
+
+### 2. Run the setup
+Copy this folder to the server (from your computer: `scp -r app/scripts/server root@<address>:/root/ifso-server`), then on the server:
+
+```bash
+cd /root/ifso-server
+PROFILE=testnet bash provision.sh
+```
+
+Use `PROFILE=mainnet` only on the day you go live. If the domain is already bought add `DOMAIN=api.<your-domain>`; if not, leave it out (the API is then served over plain HTTP on port 80, fine for a smoke test only). At the end it prints a **public deploy key**.
+
+### 3. Let the server read the code
+In the git host (the repository's Settings, Deploy keys) add the printed public key, read-only. Then on the server:
+
+```bash
+runuser -u ifso -- git clone <repository-ssh-url> /opt/ifso/repo
+```
+
+(If you gave `REPO_URL` to the setup and the key was not added yet, the clone failed; run the line above now. If `/opt/ifso/repo` already exists as an empty folder, run `runuser -u ifso -- git -C /opt/ifso/repo remote add origin <url>` instead.)
+
+### 4. Fill in the settings
+```bash
+nano /etc/ifso/common.env     # chain id, contract addresses, Telegram bot token
+nano /etc/ifso/api.env        # nothing to fill in unless you use the Telegram webhook
+nano /etc/ifso/worker.env     # resolver contract address, outcome-source keys
+```
+Replace every `CHANGE_ME`. The deploy refuses to run while one is left. Leave a value empty to switch a feature off. `CHAIN_ID` must be 46630 for testnet and 4663 for mainnet. The database and Redis settings are already written for you in `/etc/ifso/db.env`; do not touch it.
+
+### 5. Put the three key files in place
+Create the key files on your own computer (never on a screen share or in a chat), then copy each one up:
+
+```bash
+scp relayer.json relayer.password keeper.json keeper.password resolver.json resolver.password root@<address>:/etc/ifso/keys/
+```
+Then on the server run `bash /root/ifso-server/provision.sh --fix-key-perms`. It hands the files to the service user and makes them readable by no one else. Send a little gas (and, for the resolver, a little USDG) to the three addresses; the API's `/readyz` stays red until the balances are above the minimums.
+
+### 6. First deploy
+On your computer: `git rev-parse HEAD` (after you pushed) gives the sha. On the server:
+
+```bash
+ifso-deploy <that 40-character sha>
+```
+It checks the settings, fetches the code, installs it, backs up the database, runs the migrations, starts the services and waits until `/readyz` answers 200. On success it prints `done: <sha> is live and healthy`.
+
+### 7. Point the domain at the server (when you have one)
+Add an A record `api` -> the server's address in your DNS. On Cloudflare click the cloud so it is **grey** (DNS only). Put `DOMAIN=api.<your-domain>` in the setup again (`DOMAIN=... PROFILE=testnet bash provision.sh`); Caddy gets the HTTPS certificate by itself within a minute or two. Then try `https://api.<your-domain>/healthz`.
+
+## Day to day
+
+| I want to | Command (on the server, as root) |
+|---|---|
+| Deploy a new version | `ifso-deploy <sha>` |
+| Check everything is healthy | `ifso-deploy --check` |
+| Go back to the last good version | `ifso-deploy $(cat /var/lib/ifso/previous.sha)` |
+| See the logs | `journalctl -u ifso-api -u ifso-worker -u ifso-bot -n 100 --no-pager` |
+| Restart everything | `systemctl restart ifso-api ifso-worker ifso-bot` |
+| Stop everything | `systemctl stop ifso.target` |
+| Back up now | `systemctl start ifso-backup.service` |
+
+What `ifso-deploy` exit codes mean: `0` live and healthy; `75` it stopped before changing anything (network, bad sha, missing file): fix the cause and run it again; `1` the new version failed and the previous one is back; `2` the new version failed **and** going back failed too: read the logs, this one needs a person.
+
+Migrations only go forward. A rollback puts the old code back but does not undo database changes, which is why every deploy takes a backup first. Write migrations so the previous version still works with them.
+
+## Things to know
+
+- **Run one worker.** Two workers would race to send the same transactions. Do not copy the worker unit.
+- **Bot or webhook, not both.** `ifso-bot` listens by long polling. If you instead set `TELEGRAM_WEBHOOK_SECRET` in `api.env` (the API then serves the webhook), run `systemctl disable --now ifso-bot` and clear `TELEGRAM_BOT_TOKEN` handling accordingly. With a token set in `common.env` the deploy restarts `ifso-bot`; with it empty the bot is skipped.
+- **The API port.** The API listens on 8080 on all interfaces, but the firewall only opens 22, 80 and 443, so only Caddy reaches it.
+- **Backups** are in `/var/backups/ifso` (daily at 03:15 UTC, the newest 14 kept). They live on the same disk as the database, so also copy them somewhere else now and then (`scp root@<address>:/var/backups/ifso/<file> .`). Restore into an empty database: `runuser -u postgres -- pg_restore --clean --if-exists --no-owner --role=ifso -d ifso_<profile> <file>`.
+- **Clock**: the server runs in UTC with automatic time sync; the keeper and resolver depend on it.
+- **sudo**: Ubuntu 24.04 has the classic `sudo`, later Ubuntu releases use `sudo-rs`. Both strip most environment variables, so these scripts read every setting from `/etc/ifso` files. If you let a helper account run deploys, give it exactly one sudoers rule for `/usr/local/sbin/ifso-deploy`, check it with `visudo -cf <file>` and try it with `sudo -l -U <user>` before relying on it.
+- **Security updates** install by themselves; the server may need a reboot now and then (`reboot`; the services come back on their own).
+- **Mainnet**: do not run the mainnet profile until the testnet one has been deployed, checked with `ifso-deploy --check`, and a rollback has been rehearsed once (deploy an older sha, then the newer one).
+
+## Trying the deploy logic on your computer
+
+```bash
+bash app/scripts/server/deploy-local.test.sh        # 54 checks, a few seconds, touches nothing outside a temp folder
+shellcheck app/scripts/server/*.sh                  # brew install shellcheck
+```
+`deploy.sh --dry-run <sha>` does the same kind of rehearsal by hand: no root, systemd calls only printed.

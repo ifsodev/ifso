@@ -1,0 +1,43 @@
+# Ifso bot role (Telegram bot, long polling). Installed to /etc/systemd/system by provision.sh; started and stopped with ifso.target.
+# Secrets come only from the root-owned env files (mode 0600, read by systemd as root); nothing is on a command line.
+[Unit]
+Description=Ifso bot (Telegram bot, long polling)
+Documentation=file:/opt/ifso/current/app/scripts/server/README.md
+PartOf=ifso.target
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ifso
+Group=ifso
+WorkingDirectory=/opt/ifso/current/app
+Environment=HOME=/var/lib/ifso
+EnvironmentFile=/etc/ifso/common.env
+EnvironmentFile=/etc/ifso/db.env
+EnvironmentFile=/etc/ifso/bot.env
+ExecStart=/usr/local/bin/bun src/main.ts bot
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+MemoryMax=384M
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ifso-bot
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ifso
+UMask=0077
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=ifso.target

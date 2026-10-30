@@ -27,4 +27,5 @@ bunx tsc --noEmit
 | `src/ops/` | `/healthz` + `/readyz` probes, ops alerts (deduped, log-only unless `ALERTS_ARMED=1`), monitors |
 | `src/client/claimPage.ts` | Browser claim flow (fragment read + wipe, chain-rendered details, sign, relay) |
 | `src/abi/` | ABIs generated from the Solidity sources (`contracts/tools/solcjs-compile.mjs --abi-ts-out`) |
+| `scripts/server/` | Server scripts for one Ubuntu 24.04 VPS: provision, deploy with rollback, systemd units, Caddy, backups; see its `README.md` |
 | `scripts/print-vectors.ts` | Prints the parity vectors asserted by `contracts/test/Vectors.t.sol` |

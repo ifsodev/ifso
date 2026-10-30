@@ -1,0 +1,15 @@
+# Daily database backup (backup.sh installed as /usr/local/sbin/ifso-backup). By hand:
+#   systemctl start ifso-backup.service && journalctl -u ifso-backup -n 20
+[Unit]
+Description=Ifso database backup
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ifso-backup
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ifso-backup
