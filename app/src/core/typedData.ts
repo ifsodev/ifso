@@ -1,6 +1,7 @@
 // EIP-712 definitions shared by the web app, bot relayer and tests. Type strings MUST match the
 // Solidity typehashes in IfsoEscrow.sol (checked by test/typedData.test.ts against the .sol source).
 import type { Address, Hex } from "viem";
+import { acceptAuthNonce } from "./condition";
 import { ACTION_DECLINE, ACTION_OK, ACTION_REFEREE_RELEASE, ACTION_REFEREE_RETURN } from "./types";
 
 export const IFSO_DOMAIN_NAME = "IFSO";
@@ -102,4 +103,34 @@ export function createAuthorizationTypedData(args: {
       nonce: args.nonce,
     },
   };
+}
+
+/** What the claim-link key signs (the client does this; see core/link.signClaim). */
+export function claimTypedData(a: { chainId: number; escrow: Address; id: bigint; recipient: Address; conditionHash: Hex }) {
+  return { domain: ifsoDomain(a.chainId, a.escrow), types: claimTypes, primaryType: "Claim" as const, message: { id: a.id, recipient: a.recipient, conditionHash: a.conditionHash } };
+}
+
+/** What the claim-link key signs to let an acceptor join a link challenge. */
+export function acceptTypedData(a: { chainId: number; escrow: Address; id: bigint; acceptor: Address; conditionHash: Hex }) {
+  return { domain: ifsoDomain(a.chainId, a.escrow), types: acceptTypes, primaryType: "Accept" as const, message: { id: a.id, acceptor: a.acceptor, conditionHash: a.conditionHash } };
+}
+
+/** A wallet's relayed decision (tap OK / decline / referee). `nonce` = escrow.nonces(signer) read right before signing. */
+export function decisionTypedData(a: { chainId: number; escrow: Address; id: bigint; action: number; nonce: bigint; deadline: bigint }) {
+  return { domain: ifsoDomain(a.chainId, a.escrow), types: decisionTypes, primaryType: "Decision" as const, message: { id: a.id, action: a.action, nonce: a.nonce, deadline: a.deadline } };
+}
+
+/** The sender's relayed refund-address change. `nonce` = escrow.nonces(sender). */
+export function refundRedirectTypedData(a: { chainId: number; escrow: Address; id: bigint; refundTo: Address; altRefundTo: Address; nonce: bigint; deadline: bigint }) {
+  return { domain: ifsoDomain(a.chainId, a.escrow), types: refundRedirectTypes, primaryType: "RefundRedirect" as const, message: { id: a.id, refundTo: a.refundTo, altRefundTo: a.altRefundTo, nonce: a.nonce, deadline: a.deadline } };
+}
+
+/** EIP-2612 permit for the one-transaction create (`createWithPermit`, the sender's own wallet sends it). `nonce` = usdg.nonces(owner). */
+export function createPermitTypedData(a: { chainId: number; usdg: Address; owner: Address; escrow: Address; value: bigint; nonce: bigint; deadline: bigint }) {
+  return { domain: usdgDomain(a.chainId, a.usdg), types: permitTypes, primaryType: "Permit" as const, message: { owner: a.owner, spender: a.escrow, value: a.value, nonce: a.nonce, deadline: a.deadline } };
+}
+
+/** The acceptor's own USDG authorization for a gasless accept; the nonce binds it to this escrow, acceptor and refund address. */
+export function acceptAuthorizationTypedData(a: { chainId: number; usdg: Address; escrow: Address; id: bigint; acceptor: Address; counterRefundTo: Address; counterAmount: bigint; validAfter: bigint; validBefore: bigint }) {
+  return createAuthorizationTypedData({ chainId: a.chainId, usdg: a.usdg, escrow: a.escrow, from: a.acceptor, value: a.counterAmount, validAfter: a.validAfter, validBefore: a.validBefore, nonce: acceptAuthNonce(a.id, a.acceptor, a.counterRefundTo) });
 }

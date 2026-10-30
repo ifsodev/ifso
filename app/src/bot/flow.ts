@@ -150,3 +150,11 @@ export async function handleMine(e: FlowEnv, a: { tgId: bigint; chatId: bigint }
   const lines = rows.map((r) => copy.bot.mineLine(formatUsdg(BigInt(r.amount)), (Status[r.status] ?? "").toLowerCase(), r.expiry.toISOString().slice(0, 10)));
   return { text: lines.join("\n"), buttons: [[{ text: copy.bot.openButton, url: `${e.publicAppUrl}/mine` }]] };
 }
+
+/** `/link` (private chats only): hands out a one-time URL button; the site proves wallet ownership against it. */
+export async function handleLink(e: FlowEnv, a: { tgId: bigint; username?: string | null; isPrivate: boolean }): Promise<Reply> {
+  if (!a.isPrivate) return { text: copy.bot.linkPrivateOnly };
+  await e.store.upsertUser(a.tgId, { username: a.username ?? null });
+  const { token } = await e.store.createLinkRequest(a.tgId, nowOf(e));
+  return { text: copy.bot.linkIntro, buttons: [[{ text: copy.bot.linkButton, url: `${e.publicAppUrl}/link#${token}` }]] };
+}

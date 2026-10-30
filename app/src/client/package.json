@@ -1,0 +1,11 @@
+{
+  "name": "@ifso/client",
+  "version": "0.1.0",
+  "description": "Browser-safe client for the IFSO API: claim links, typed-data builders, build checks, region rule",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": { ".": "./index.ts" },
+  "peerDependencies": { "viem": "2.57.11" },
+  "sideEffects": false
+}

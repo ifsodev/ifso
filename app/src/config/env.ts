@@ -9,6 +9,7 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(8080),
   PUBLIC_APP_URL: z.string().url().default("https://ifso.app"),
+  WEB_ORIGINS: z.string().default(""), // extra browser origins allowed to call the API (comma separated); PUBLIC_APP_URL is always allowed
   CHAIN_ID: z.coerce.number().default(4663),
   RHC_RPC_URLS: z.string().default(DEFAULT_RPC_URLS), // comma separated, tried in this order
   RHC_WS_URL: z.string().optional(),

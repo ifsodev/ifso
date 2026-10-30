@@ -8,7 +8,7 @@ import { copy } from "../core/copy";
 import { SEED_FEEDS } from "../config/chain";
 import { listFixtureMatches } from "../api/fixtures";
 import type { Deps } from "../workers/deps";
-import { handleAnswer, handleCommand, handleMine, handleTz, type FixtureLookup, type FlowEnv, type Reply } from "./flow";
+import { handleAnswer, handleCommand, handleLink, handleMine, handleTz, type FixtureLookup, type FlowEnv, type Reply } from "./flow";
 import { drizzleBotStore, type BotStore } from "./store";
 
 export interface BotOptions {
@@ -74,6 +74,12 @@ export function createBot(deps: Deps, opts: BotOptions = {}): Bot | undefined {
   bot.command("mine", async (ctx) => {
     if (!ctx.from || !ctx.chat) return;
     await send(ctx, await handleMine(flow, { tgId: BigInt(ctx.from.id), chatId: BigInt(ctx.chat.id) }));
+  });
+
+  bot.command("link", async (ctx) => {
+    if (!ctx.from || !ctx.chat) return;
+    if (tooMany(ctx.from.id)) return void (await ctx.reply(copy.bot.busy));
+    await send(ctx, await handleLink(flow, { tgId: BigInt(ctx.from.id), username: ctx.from.username, isPrivate: ctx.chat.type === "private" }));
   });
 
   bot.command("tz", async (ctx) => {

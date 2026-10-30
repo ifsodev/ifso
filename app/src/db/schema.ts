@@ -26,6 +26,15 @@ export const tgUsers = pgTable("tg_users", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** One-time /link requests: the bot hands out a random token (kept only as a hash) and the site proves wallet ownership against it. */
+export const linkRequests = pgTable("link_requests", {
+  tokenHash: text("token_hash").primaryKey(),
+  tgId: bigint("tg_id", { mode: "bigint" }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Drafts built from the bot or the web form, before the sender signs. Never contains a link secret. */
 export const intents = pgTable(
   "intents",

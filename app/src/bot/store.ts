@@ -1,6 +1,8 @@
 // Storage the bot needs, behind an interface so the command flow is testable without a database.
 import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
-import { escrows, intents, tgUsers, watchers } from "../db/schema";
+import { escrows, intents, linkRequests, tgUsers, watchers } from "../db/schema";
+import { LINK_TOKEN_TTL_SEC } from "../core/linkWallet";
+import { newLinkToken, tokenHash } from "../api/linkToken";
 import type { Db } from "../db/client";
 
 export interface BotUser {
@@ -36,6 +38,8 @@ export interface BotStore {
   getIntent(id: string): Promise<IntentRow | undefined>;
   updateIntent(id: string, patch: IntentPatch): Promise<void>;
   mine(tgId: bigint, chatId: bigint): Promise<MineRow[]>;
+  /** a one-time token for the /link flow; only its hash is stored */
+  createLinkRequest(tgId: bigint, nowMs: number): Promise<{ token: string }>;
 }
 
 export function drizzleBotStore(db: Db): BotStore {
@@ -64,6 +68,11 @@ export function drizzleBotStore(db: Db): BotStore {
     },
     async updateIntent(id, patch) {
       await db.update(intents).set(patch).where(eq(intents.id, id));
+    },
+    async createLinkRequest(tgId, nowMs) {
+      const token = newLinkToken();
+      await db.insert(linkRequests).values({ tokenHash: tokenHash(token), tgId, expiresAt: new Date(nowMs + LINK_TOKEN_TTL_SEC * 1000) });
+      return { token };
     },
     async mine(tgId, chatId) {
       const ws = await db.select({ id: watchers.escrowId }).from(watchers).where(eq(watchers.tgChatId, chatId));

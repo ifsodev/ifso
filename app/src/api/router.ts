@@ -5,6 +5,7 @@ import { getAddress, type Address, type Hex } from "viem";
 import { erc8056Abi, ifsoEscrowAbi, usdgAbi } from "../abi";
 import { BuildError, DEFAULTS, buildParams, type BuildInput } from "../core/builder";
 import { conditionHash, createAuthNonce, escrowId } from "../core/condition";
+import { paramsFromJson } from "../core/paramsJson";
 import { verifiedAcceptSigner, verifiedCreateSigner, verifiedDecisionSigner, verifiedRedirectSigner } from "./signers";
 import { copy } from "../core/copy";
 import { stockPriceConditionAllowed } from "../core/geo";
@@ -24,6 +25,7 @@ import { findFixture } from "./fixtures";
 import { holderTier, tierConfig } from "./perks";
 import { parseCsv, totals, validateRows } from "./batchPlan";
 import { userStats } from "./stats";
+import { LinkError, linkWallet, rememberSender } from "./linkWallet";
 import { LIMITS, perksFor, TIER_RANK, type Tier } from "../core/perks";
 
 export interface Ctx {
@@ -40,38 +42,7 @@ const uint = z.string().regex(/^\d+$/).transform((s) => BigInt(s));
 
 export const jsonSafe = <T>(v: T): unknown => JSON.parse(JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? x.toString() : x)));
 
-export function paramsFromJson(j: Record<string, any>): CreateParams {
-  const c = j.condition;
-  return {
-    amount: BigInt(j.amount),
-    counterAmount: BigInt(j.counterAmount),
-    recipient: j.recipient,
-    linkKey: j.linkKey,
-    refundTo: j.refundTo,
-    altRefundTo: j.altRefundTo,
-    expiry: BigInt(j.expiry),
-    acceptBy: BigInt(j.acceptBy),
-    twoSided: Boolean(j.twoSided),
-    cancellable: Boolean(j.cancellable),
-    salt: j.salt,
-    condition: {
-      kind: Number(c.kind),
-      mode: Number(c.mode),
-      op: Number(c.op),
-      source: Number(c.source),
-      target: c.target,
-      stockToken: c.stockToken,
-      key: c.key,
-      threshold: BigInt(c.threshold),
-      multiplier: BigInt(c.multiplier),
-      outcomeMask: BigInt(c.outcomeMask),
-      start: BigInt(c.start),
-      deadline: BigInt(c.deadline),
-      maxStale: Number(c.maxStale),
-      holdWindow: Number(c.holdWindow),
-    },
-  };
-}
+export { paramsFromJson };
 
 function tickers(): Set<string> {
   return new Set(SEED_FEEDS.map((f) => f.ticker));
@@ -358,7 +329,10 @@ export const appRouter = t.router({
         { kind: "create", escrowId: escrowId(input.from, p.salt).toString(), ipHash },
       );
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "create failed" });
-      if (input.intentId) await ctx.deps.db.update(intents).set({ state: "submitted", txHash: r.hash }).where(eq(intents.id, input.intentId));
+      if (input.intentId) {
+        await ctx.deps.db.update(intents).set({ state: "submitted", txHash: r.hash }).where(eq(intents.id, input.intentId));
+        await rememberSender(ctx.deps, input.intentId, input.from).catch(() => {}); // notifications are a convenience: never fail a create over them
+      }
       return { txHash: r.hash, id: escrowId(input.from, p.salt).toString() };
     }),
 
@@ -373,6 +347,23 @@ export const appRouter = t.router({
     await registerForFundedSender(ctx, input.questionId, input.sender, fee + BigInt(Math.round(ctx.deps.env.SPONSOR_MIN_AMOUNT_USDG * 1e6)));
     return { ok: true };
   }),
+
+  /**
+   * Link the connected wallet to a Telegram account. The bot's /link button opens the site with a one-time token in the
+   * URL fragment; the site has the wallet sign `linkWalletMessage(token)` (EIP-191 personal_sign) and calls this.
+   */
+  linkWallet: t.procedure
+    .input(z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), address: addr, signature: hex }))
+    .mutation(async ({ input, ctx }) => {
+      const ipHash = RateLimiter.ipHash(ctx.ip, ctx.deps.env.IP_HASH_SALT);
+      if (!(await ctx.limiter.hit(`link:${ipHash}`, 30, 3600))) throw tooMany("too many attempts, try again later");
+      try {
+        return await linkWallet(ctx.deps, input);
+      } catch (e) {
+        if (e instanceof LinkError) throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+        throw e;
+      }
+    }),
 
   /** Claim page: everything shown is read from the chain, not from the URL (anti-phishing). */
   escrow: t.procedure.input(z.object({ id: uint })).query(async ({ input, ctx }) => {

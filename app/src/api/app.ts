@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
+import { cors } from "hono/cors";
 import { trpcServer } from "@hono/trpc-server";
 import { eq } from "drizzle-orm";
 import { webhookCallback, type Bot } from "grammy";
@@ -11,17 +12,29 @@ import { RateLimiter } from "./rateLimit";
 import { readiness, type Probe } from "../ops/health";
 import { userStats } from "./stats";
 import { webhookPath } from "../bot/webhook";
+import { stockPriceConditionAllowed } from "../core/geo";
 
 export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: Record<string, Probe> = {}) {
   const app = new Hono();
   // strict headers; the claim page itself (web app) additionally ships a CSP with no third-party scripts
   app.use("*", secureHeaders({ referrerPolicy: "no-referrer", xFrameOptions: "DENY" }));
 
+  // browser calls from the web app only (exact origins, no credentials); anything else gets no CORS headers
+  const origins = new Set([new URL(deps.env.PUBLIC_APP_URL).origin, ...deps.env.WEB_ORIGINS.split(",").map((o) => o.trim().replace(/\/$/, "")).filter(Boolean)]);
+  app.use("*", cors({ origin: (o) => (origins.has(o) ? o : null), allowMethods: ["GET", "POST", "OPTIONS"], allowHeaders: ["content-type", "trpc-accept"], maxAge: 600 }));
+
   app.get("/healthz", (c) => c.json({ ok: true, chainId: deps.clients.chain.id, escrow: deps.clients.escrow ?? null }));
 
   app.get("/readyz", async (c) => {
     const r = await readiness(probes);
     return c.json(r, r.ok ? 200 : 503);
+  });
+
+  // region rule for the site: the country comes from the trusted edge header only; unknown = not allowed
+  app.get("/geo", (c) => {
+    const country = trustedCountry(c.req.raw.headers, deps.env.TRUST_PROXY);
+    c.header("cache-control", "no-store");
+    return c.json({ country: country ?? null, stockPriceConditionsAllowed: stockPriceConditionAllowed(country) });
   });
 
   // real-user counter (indexed chain events only, our own wallets excluded). ?since=YYYY-MM-DD

@@ -43,6 +43,13 @@
       "when": 1793397409936,
       "tag": "0005_chain_event_block_time",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793398300732,
+      "tag": "0006_link_requests",
+      "breakpoints": true
     }
   ]
 }
