@@ -27,7 +27,7 @@ import { Kind, ZERO_ADDRESS, ZERO_BYTES32, emptyCondition, type Condition, type 
 import type { Deps } from "../../src/workers/deps";
 import { pgBin, startPg } from "./pg";
 
-export const ANVIL_PORT = 8745;
+export const ANVIL_PORT = Number(process.env.IFSO_TEST_ANVIL_PORT ?? 8745);
 export const RPC = `http://127.0.0.1:${ANVIL_PORT}`;
 const CONTRACTS = join(import.meta.dir, "../../../contracts");
 const FOUNDRY_BIN = join(process.env.HOME ?? "", ".foundry/bin");
