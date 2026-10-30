@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Vm} from "../test/utils/TestBase.sol";
+import {DeployBase} from "./DeployBase.sol";
 import {IfsoEscrow} from "../src/IfsoEscrow.sol";
 import {IfsoConditionEvaluator} from "../src/IfsoConditionEvaluator.sol";
 import {IfsoOutcomeResolver} from "../src/IfsoOutcomeResolver.sol";
@@ -10,23 +10,31 @@ import {IUSDG} from "../src/interfaces/IUSDG.sol";
 import {IPyth} from "../src/interfaces/IPyth.sol";
 import {AggregatorV3Interface} from "../src/interfaces/AggregatorV3Interface.sol";
 import {IIfsoConditionEvaluator} from "../src/interfaces/IIfsoConditionEvaluator.sol";
+import {MockUSDG} from "../src/mocks/MockUSDG.sol";
+import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 
-/// @notice Deploys IFSO to Robinhood Chain (4663) from a FRESH deployer, wires the registry, then hands every
-///         contract to the brand multisig (2-step: the Safe must call acceptOwnership()).
+/// @notice Deploys IFSO, wires the registry, sets the launch cap, hands every contract to the owner multisig
+///         (2-step: the multisig must call acceptOwnership()), asserts the result and writes
+///         `deployments/<chainid>.json`.
 ///
-///   forge script script/Deploy.s.sol --rpc-url rhc --broadcast --slow
+///   The script reads NO private key. The signer comes from the forge CLI:
+///     forge script script/Deploy.s.sol --rpc-url <rpc> --account <keystore name> --broadcast --slow
+///     (or --ledger). Robinhood Chain (4663 / 46630) additionally needs IFSO_ARMED=1 and the file
+///     contracts/.armed-<chainid>; without both the script refuses before anything is signed.
 ///
 /// Env:
-///   DEPLOYER_PK        fresh key, funded with a little ETH (never reused across brands)
-///   OWNER_SAFE         brand Safe (2-of-3) that will own evaluator / resolver / router / escrow
-///   PANEL_SAFE         outcome fallback panel Safe (separate signer set)
+///   OWNER_MULTISIG     2-of-3 multisig that will own evaluator / resolver / router / escrow
+///   PANEL_MULTISIG     outcome fallback panel multisig (separate signer set)
 ///   RESOLVER_CREATOR   hot key of the resolver service allowed to register questions
 ///   FEE_WORK / FEE_TREASURY / FEE_PERKS / FEE_BURN   fee split destinations (80/10/5/5)
-///   USDG (default RHC USDG) · PYTH (default RHC Pyth Core) · SEQ_UPTIME_FEED (default 0 = disabled, (U))
-///   CREATION_FEE (default 250000 = 0.25 USDG) · RESOLVER_FEE (default 500000) · RESOLVER_BOND (default 100 USDG)
-contract Deploy {
-    Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
-
+///   USDG       default: RHC USDG on 4663; a fresh MockUSDG on 31337; REQUIRED on every other chain
+///   PYTH       default: RHC Pyth Core on 4663, else 0 (Pyth stays off until the owner allows a price id)
+///   SEQ_UPTIME_FEED   default 0 (Robinhood Chain has no sequencer uptime feed)
+///   MAX_AMOUNT        launch cap per escrow side, default 1_000e6 (1,000 USDG)
+///   CREATION_FEE (default 250000) · RESOLVER_FEE (default 500000) · RESOLVER_BOND (default 100e6)
+///   GIT_COMMIT        commit sha recorded in the deployment file (the wrapper scripts pass it)
+///   IFSO_WRITE_DEPLOYMENT   "0" skips writing the deployment file (tests)
+contract Deploy is DeployBase {
     // Robinhood Chain mainnet (verified on-chain 2026-10-25)
     address internal constant RHC_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
     address internal constant RHC_PYTH = 0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a;
@@ -34,73 +42,266 @@ contract Deploy {
     address internal constant FEED_SPY = 0x78BCB218fA04B9b3a278eBc865Ed320BF8DEFBAc;
     address internal constant TOKEN_SPY = 0x117cc2133c37B721F49dE2A7a74833232B3B4C0C;
     // NVDA / TSLA / AAPL feeds are known (0x379E.., 0x7A6b.., 0xBb11..); their Stock Token addresses come from
-    // api.robinhood.com/rhj/assets and are registered by the Safe in a follow-up batch (see README).
+    // the Robinhood asset list and are registered by the owner multisig in a follow-up batch (see README).
 
-    struct Config {
-        uint256 pk;
-        address deployer;
-        address ownerSafe;
-        address panelSafe;
-        address creator;
-        address usdg;
-        address pyth;
-        address seqFeed;
-        uint96 creationFee;
-        uint96 resolverFee;
-        uint96 bond;
+    uint64 internal constant DISPUTE_WINDOW = 2 hours;
+    uint64 internal constant PANEL_WINDOW = 72 hours;
+
+    struct Deployed {
+        IfsoConditionEvaluator evaluator;
+        IfsoOutcomeResolver resolver;
+        FeeRouter router;
+        IfsoEscrow escrow;
+        bool mockUsdg;
     }
 
-    function _config() internal view returns (Config memory c) {
-        c.pk = vm.envUint("DEPLOYER_PK");
-        c.deployer = vm.addr(c.pk);
-        c.ownerSafe = vm.envAddress("OWNER_SAFE");
-        c.panelSafe = vm.envAddress("PANEL_SAFE");
-        c.creator = vm.envAddress("RESOLVER_CREATOR");
-        c.usdg = vm.envOr("USDG", RHC_USDG);
-        c.pyth = vm.envOr("PYTH", RHC_PYTH);
-        c.seqFeed = vm.envOr("SEQ_UPTIME_FEED", address(0));
-        c.creationFee = uint96(vm.envOr("CREATION_FEE", uint256(250_000)));
-        c.resolverFee = uint96(vm.envOr("RESOLVER_FEE", uint256(500_000)));
-        c.bond = uint96(vm.envOr("RESOLVER_BOND", uint256(100e6)));
-    }
-
-    function run()
-        external
-        returns (IfsoConditionEvaluator evaluator, IfsoOutcomeResolver resolver, FeeRouter router, IfsoEscrow escrow)
-    {
-        Config memory c = _config();
-        vm.startBroadcast(c.pk);
-        evaluator = new IfsoConditionEvaluator(c.deployer, IPyth(c.pyth), AggregatorV3Interface(c.seqFeed));
-        resolver = new IfsoOutcomeResolver(c.deployer, c.usdg, 2 hours, 72 hours, c.bond, c.panelSafe);
-        router = _router(c);
-        escrow = new IfsoEscrow(
-            c.ownerSafe,
-            IUSDG(c.usdg),
-            IIfsoConditionEvaluator(address(evaluator)),
-            address(router),
-            c.creationFee,
-            c.resolverFee
-        );
-
-        evaluator.setFeed(FEED_ETH_USD, true, address(0));
-        if (block.chainid == 4663) evaluator.setFeed(FEED_SPY, true, TOKEN_SPY);
-        evaluator.setResolver(address(resolver), true);
-        resolver.setCreator(c.creator, true);
-
-        evaluator.transferOwnership(c.ownerSafe);
-        resolver.transferOwnership(c.ownerSafe);
-        router.transferOwnership(c.ownerSafe);
-        vm.stopBroadcast();
-    }
-
-    function _router(Config memory c) internal returns (FeeRouter) {
-        return new FeeRouter(
-            c.deployer,
-            c.usdg,
+    function _expect() internal view returns (Expect memory x) {
+        x.ownerMultisig = vm.envAddress("OWNER_MULTISIG");
+        x.panel = vm.envAddress("PANEL_MULTISIG");
+        x.creator = vm.envAddress("RESOLVER_CREATOR");
+        x.feeRecipients = [
             vm.envAddress("FEE_WORK"),
             vm.envAddress("FEE_TREASURY"),
             vm.envAddress("FEE_PERKS"),
             vm.envAddress("FEE_BURN")
+        ];
+        if (block.chainid == RHC_MAINNET) {
+            x.usdg = vm.envOr("USDG", RHC_USDG);
+            x.pyth = vm.envOr("PYTH", RHC_PYTH);
+        } else if (block.chainid == 31337) {
+            x.usdg = vm.envOr("USDG", address(0)); // 0 => deploy a MockUSDG
+            x.pyth = vm.envOr("PYTH", address(0));
+        } else {
+            x.usdg = vm.envAddress("USDG");
+            x.pyth = vm.envOr("PYTH", address(0));
+        }
+        x.seqFeed = vm.envOr("SEQ_UPTIME_FEED", address(0));
+        x.creationFee = uint96(vm.envOr("CREATION_FEE", uint256(250_000)));
+        x.resolverFee = uint96(vm.envOr("RESOLVER_FEE", uint256(500_000)));
+        x.bond = uint96(vm.envOr("RESOLVER_BOND", uint256(100e6)));
+        x.maxAmount = uint96(vm.envOr("MAX_AMOUNT", uint256(1_000e6)));
+        x.disputeWindow = DISPUTE_WINDOW;
+        x.panelWindow = PANEL_WINDOW;
+    }
+
+    /// @notice Deploys, wires, hands over to the multisig and asserts. See the contract header for flags and env.
+    /// @return d The deployed contracts.
+    function run() external returns (Deployed memory d) {
+        _requireArmed(); // first statement: nothing is read or signed on a real chain before this passes
+        Expect memory x = _expect();
+
+        vm.startBroadcast();
+        (, x.deployer,) = vm.readCallers();
+        if (_isRealChain()) _check(x.deployer != FORGE_DEFAULT_SENDER, "no signer: pass --account or --ledger");
+
+        if (x.usdg == address(0)) {
+            x.usdg = address(new MockUSDG()); // local chain only
+            d.mockUsdg = true;
+        }
+        (x.feeds, x.feedTokens) = _feeds();
+
+        d.evaluator = new IfsoConditionEvaluator(x.deployer, IPyth(x.pyth), AggregatorV3Interface(x.seqFeed));
+        d.resolver = new IfsoOutcomeResolver(x.deployer, x.usdg, x.disputeWindow, x.panelWindow, x.bond, x.panel);
+        d.router = new FeeRouter(
+            x.deployer, x.usdg, x.feeRecipients[0], x.feeRecipients[1], x.feeRecipients[2], x.feeRecipients[3]
         );
+        d.escrow = new IfsoEscrow(
+            x.deployer,
+            IUSDG(x.usdg),
+            IIfsoConditionEvaluator(address(d.evaluator)),
+            address(d.router),
+            x.creationFee,
+            x.resolverFee
+        );
+
+        for (uint256 i; i < x.feeds.length; ++i) {
+            d.evaluator.setFeed(x.feeds[i], true, x.feedTokens[i]);
+        }
+        d.evaluator.setResolver(address(d.resolver), true);
+        d.resolver.setCreator(x.creator, true);
+        d.escrow.setMaxAmount(x.maxAmount);
+
+        d.evaluator.transferOwnership(x.ownerMultisig);
+        d.resolver.transferOwnership(x.ownerMultisig);
+        d.router.transferOwnership(x.ownerMultisig);
+        d.escrow.transferOwnership(x.ownerMultisig);
+        vm.stopBroadcast();
+
+        _assertDeployment(d.evaluator, d.resolver, d.router, d.escrow, x);
+        if (keccak256(bytes(vm.envOr("IFSO_WRITE_DEPLOYMENT", string("1")))) != keccak256("0")) _write(d, x);
+    }
+
+    /// @dev Feeds registered at deploy. Mainnet: ETH/USD and SPY (with its Stock Token). Local: one mock feed.
+    function _feeds() internal returns (address[] memory feeds, address[] memory tokens) {
+        if (block.chainid == RHC_MAINNET) {
+            feeds = new address[](2);
+            tokens = new address[](2);
+            (feeds[0], feeds[1]) = (FEED_ETH_USD, FEED_SPY);
+            (tokens[0], tokens[1]) = (address(0), TOKEN_SPY);
+        } else if (block.chainid == 31337) {
+            feeds = new address[](1);
+            tokens = new address[](1);
+            feeds[0] = address(new MockAggregator("ETH / USD"));
+        } else {
+            address f = vm.envOr("FEED_ETH_USD", address(0));
+            feeds = new address[](f == address(0) ? 0 : 1);
+            tokens = new address[](feeds.length);
+            if (f != address(0)) feeds[0] = f;
+        }
+    }
+
+    // ------------------------------------------------------------------ deployment record
+    function _write(Deployed memory d, Expect memory x) internal {
+        string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
+        string memory json = string.concat(
+            "{\n",
+            _kv("chainId", vm.toString(block.chainid), false),
+            _kv("commit", vm.envOr("GIT_COMMIT", string("unknown")), true),
+            _kv("deployer", vm.toString(x.deployer), true),
+            _kv("deployBlockAtSimulation", vm.toString(block.number), false),
+            '  "contracts": {\n',
+            _contracts(d, x),
+            "  },\n",
+            _config(x),
+            '  "txs": []\n}\n'
+        );
+        vm.writeFile(path, json);
+    }
+
+    function _contracts(Deployed memory d, Expect memory x) internal pure returns (string memory) {
+        string memory s = string.concat(
+            _entry(
+                "IfsoConditionEvaluator",
+                address(d.evaluator),
+                string.concat(_q(x.deployer), ", ", _q(x.pyth), ", ", _q(x.seqFeed)),
+                false
+            ),
+            _entry(
+                "IfsoOutcomeResolver",
+                address(d.resolver),
+                string.concat(
+                    _q(x.deployer),
+                    ", ",
+                    _q(x.usdg),
+                    ", ",
+                    _n(x.disputeWindow),
+                    ", ",
+                    _n(x.panelWindow),
+                    ", ",
+                    _n(x.bond),
+                    ", ",
+                    _q(x.panel)
+                ),
+                false
+            )
+        );
+        s = string.concat(
+            s,
+            _entry(
+                "FeeRouter",
+                address(d.router),
+                string.concat(
+                    _q(x.deployer),
+                    ", ",
+                    _q(x.usdg),
+                    ", ",
+                    _q(x.feeRecipients[0]),
+                    ", ",
+                    _q(x.feeRecipients[1]),
+                    ", ",
+                    _q(x.feeRecipients[2]),
+                    ", ",
+                    _q(x.feeRecipients[3])
+                ),
+                false
+            ),
+            _entry(
+                "IfsoEscrow",
+                address(d.escrow),
+                string.concat(
+                    _q(x.deployer),
+                    ", ",
+                    _q(x.usdg),
+                    ", ",
+                    _q(address(d.evaluator)),
+                    ", ",
+                    _q(address(d.router)),
+                    ", ",
+                    _n(x.creationFee),
+                    ", ",
+                    _n(x.resolverFee)
+                ),
+                !d.mockUsdg
+            )
+        );
+        if (d.mockUsdg) s = string.concat(s, _entry("MockUSDG", x.usdg, "", true));
+        return s;
+    }
+
+    function _config(Expect memory x) internal pure returns (string memory) {
+        string memory feeds;
+        string memory tokens;
+        for (uint256 i; i < x.feeds.length; ++i) {
+            feeds = string.concat(feeds, i == 0 ? "" : ", ", _q(x.feeds[i]));
+            tokens = string.concat(tokens, i == 0 ? "" : ", ", _q(x.feedTokens[i]));
+        }
+        return string.concat(
+            '  "config": {\n',
+            string.concat(
+                _kv2("ownerMultisig", _q(x.ownerMultisig)),
+                _kv2("panelMultisig", _q(x.panel)),
+                _kv2("resolverCreator", _q(x.creator)),
+                _kv2("usdg", _q(x.usdg)),
+                _kv2("pyth", _q(x.pyth)),
+                _kv2("sequencerUptimeFeed", _q(x.seqFeed))
+            ),
+            string.concat(
+                _kv2("feeWork", _q(x.feeRecipients[0])),
+                _kv2("feeTreasury", _q(x.feeRecipients[1])),
+                _kv2("feePerks", _q(x.feeRecipients[2])),
+                _kv2("feeBurn", _q(x.feeRecipients[3])),
+                _kv2("creationFee", _n(x.creationFee)),
+                _kv2("resolverFee", _n(x.resolverFee))
+            ),
+            string.concat(
+                _kv2("resolverBond", _n(x.bond)),
+                _kv2("maxAmount", _n(x.maxAmount)),
+                _kv2("disputeWindow", _n(x.disputeWindow)),
+                _kv2("panelWindow", _n(x.panelWindow)),
+                '    "feeds": [',
+                feeds,
+                "],\n",
+                '    "feedStockTokens": [',
+                tokens,
+                "]\n"
+            ),
+            "  },\n"
+        );
+    }
+
+    function _entry(string memory name, address a, string memory args, bool last)
+        internal
+        pure
+        returns (string memory)
+    {
+        return string.concat(
+            '    "', name, '": { "address": ', _q(a), ', "constructorArgs": [', args, "] }", last ? "\n" : ",\n"
+        );
+    }
+
+    function _kv(string memory k, string memory v, bool quoted) internal pure returns (string memory) {
+        return string.concat('  "', k, '": ', quoted ? string.concat('"', v, '"') : v, ",\n");
+    }
+
+    function _kv2(string memory k, string memory v) internal pure returns (string memory) {
+        return string.concat('    "', k, '": ', v, ",\n");
+    }
+
+    function _q(address a) internal pure returns (string memory) {
+        return string.concat('"', vm.toString(a), '"');
+    }
+
+    function _n(uint256 v) internal pure returns (string memory) {
+        return vm.toString(v);
     }
 }
