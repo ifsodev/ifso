@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import "../utils/IfsoFixture.sol";
-import {EscrowHandler} from "./EscrowHandler.sol";
+import {EscrowHandler, World} from "./EscrowHandler.sol";
 
 /// @notice Handler-based invariants for IfsoEscrow (contracts/INVARIANTS.md, R4-R7).
 ///         Default profile: a quick pass. `FOUNDRY_PROFILE=invariant`: 10,000 runs x depth 50.
@@ -16,7 +16,9 @@ contract EscrowInvariantsTest is IfsoFixture {
 
     function setUp() public override {
         super.setUp();
-        handler = new EscrowHandler(escrow, evaluator, usdg, owner);
+        handler = new EscrowHandler(
+            escrow, evaluator, usdg, owner, World(nvdaFeed, nvda, resolver, creator, keeper, recipient, panel)
+        );
         vm.prank(owner);
         escrow.setMaxAmount(1_000e6);
     }
@@ -28,7 +30,7 @@ contract EscrowInvariantsTest is IfsoFixture {
     }
 
     function targetSelectors() public view returns (FuzzSelector[] memory s) {
-        bytes4[] memory sel = new bytes4[](16);
+        bytes4[] memory sel = new bytes4[](24);
         sel[0] = EscrowHandler.createTime.selector;
         sel[1] = EscrowHandler.createApprove.selector;
         sel[2] = EscrowHandler.createChallenge.selector;
@@ -45,6 +47,14 @@ contract EscrowInvariantsTest is IfsoFixture {
         sel[13] = EscrowHandler.donate.selector;
         sel[14] = EscrowHandler.ownerAction.selector;
         sel[15] = EscrowHandler.createTime.selector; // creates weighted up so runs hold many escrows
+        sel[16] = EscrowHandler.createPrice.selector;
+        sel[17] = EscrowHandler.createOutcome.selector;
+        sel[18] = EscrowHandler.pushPrice.selector;
+        sel[19] = EscrowHandler.settlePrice.selector;
+        sel[20] = EscrowHandler.resolverStep.selector;
+        sel[21] = EscrowHandler.freeze.selector;
+        sel[22] = EscrowHandler.setCounterRefund.selector;
+        sel[23] = EscrowHandler.claimVoid.selector;
         s = new FuzzSelector[](1);
         s[0] = FuzzSelector(address(handler), sel);
     }
@@ -56,6 +66,9 @@ contract EscrowInvariantsTest is IfsoFixture {
             if (e.status == Status.OPEN || e.status == Status.MET) {
                 sum += e.amount;
                 if (e.flags & 2 != 0) sum += e.counterAmount; // F_ACCEPTED
+            } else if (e.status == Status.VOIDED) {
+                if (e.flags & 32 != 0) sum += e.amount; //        F_SENDER_OWED (R1-M4)
+                if (e.flags & 64 != 0) sum += e.counterAmount; // F_COUNTER_OWED
             }
         }
     }
@@ -70,10 +83,17 @@ contract EscrowInvariantsTest is IfsoFixture {
         assertFalse(handler.statusRegressed(), string.concat("status regressed ", handler.regressionNote()));
     }
 
-    /// R6: every OPEN/MET escrow past its expiry can be refunded by any caller, paused or not.
-    ///     Checks the escrows already expired at this point of the run, on a throwaway state copy.
+    /// R6: every OPEN/MET escrow past its expiry can be refunded by any caller, paused or not. With USDG freezes in
+    ///     play: an accepted challenge always refunds (each side on its own, R1-M4); any other escrow refunds unless
+    ///     every destination of its sender side is frozen (the sender's own money). Owed VOID sides are claimable as
+    ///     soon as their destination can receive. Checks the escrows already expired now, on a throwaway state copy.
     function invariant_RefundAlwaysPossibleAfterExpiry() public {
-        _refundAllExpired(block.timestamp);
+        _refundAllExpired(block.timestamp, false);
+    }
+
+    /// R1-M1 / R1-M2: no challenge whose result could be known before acceptBy was ever created.
+    function invariant_NoKnowableChallengeCreated() public view {
+        assertFalse(handler.challengeRuleBroken(), "a TOUCH challenge or acceptBy + maxStale >= deadline was created");
     }
 
     /// R6 (end of every run): jump past every expiry and refund everything that is still open.
@@ -84,27 +104,50 @@ contract EscrowInvariantsTest is IfsoFixture {
             uint64 x = escrow.getEscrow(ids[i]).expiry;
             if (x > maxExpiry) maxExpiry = x;
         }
-        _refundAllExpired(maxExpiry > block.timestamp ? maxExpiry : block.timestamp);
+        uint256 end = maxExpiry > block.timestamp ? maxExpiry : block.timestamp;
+        _refundAllExpired(end, false); // with the run's freezes still in place
+        _refundAllExpired(end, true); //  after the issuer lifts them: everything leaves
     }
 
-    function _refundAllExpired(uint256 at) internal {
+    function _refundAllExpired(uint256 at, bool unfreeze) internal {
         uint256 snap = vm.snapshotState();
         vm.warp(at);
         vm.prank(owner);
         escrow.setCreationPaused(true);
+        if (unfreeze) handler.unfreezeAll(); // the issuer lifts the freezes: then every unit must be able to leave
         uint256[] memory ids = handler.allIds();
         for (uint256 i; i < ids.length; ++i) {
             IIfsoEscrow.Escrow memory e = escrow.getEscrow(ids[i]);
             if ((e.status != Status.OPEN && e.status != Status.MET) || block.timestamp < e.expiry) continue;
             vm.prank(address(uint160(0xCA11E5 + i))); // a stranger
-            escrow.refund(ids[i], false, false);
+            try escrow.refund(ids[i], false, false) {}
+            catch {
+                assertFalse(e.flags & 3 == 3, "an accepted challenge's refund reverted (one side held the other)");
+                assertTrue(usdg.blocked(e.refundTo), "refund reverted with a payable primary destination");
+                if (e.altRefundTo == address(0) || usdg.blocked(e.altRefundTo)) continue; // sender's own money
+                escrow.refund(ids[i], true, false);
+            }
             Status s = escrow.getEscrow(ids[i]).status;
             assertTrue(s == Status.RETURNED || s == Status.VOIDED, "refund ends the escrow");
         }
-        if (at >= _maxExpiry(ids)) {
+        _claimOwed(ids);
+        if (unfreeze && at >= _maxExpiry(ids)) {
             assertEq(usdg.balanceOf(address(escrow)), handler.donated(), "everything owed went out");
         }
         vm.revertToState(snap);
+    }
+
+    /// @dev Every owed VOID side whose destination can receive is paid by a stranger (R1-M4).
+    function _claimOwed(uint256[] memory ids) internal {
+        for (uint256 i; i < ids.length; ++i) {
+            IIfsoEscrow.Escrow memory e = escrow.getEscrow(ids[i]);
+            if (e.status != Status.VOIDED) continue;
+            if (e.flags & 32 != 0 && !usdg.blocked(e.refundTo)) escrow.claimVoid(ids[i], false, false);
+            if (e.flags & 64 != 0 && !usdg.blocked(e.counterRefundTo)) escrow.claimVoid(ids[i], true, false);
+            e = escrow.getEscrow(ids[i]);
+            if (e.flags & 32 != 0) assertTrue(usdg.blocked(e.refundTo), "owed sender side not claimable");
+            if (e.flags & 64 != 0) assertTrue(usdg.blocked(e.counterRefundTo), "owed acceptor side not claimable");
+        }
     }
 
     function _maxExpiry(uint256[] memory ids) internal view returns (uint256 m) {
@@ -166,6 +209,43 @@ contract EscrowInvariantsTest is IfsoFixture {
         invariant_BalanceMatchesObligations();
         invariant_NoStatusRegression();
         invariant_OwnerCannotMoveFunds();
+        afterInvariant();
+    }
+
+    /// @notice The R1 handler paths (PRICE, OUTCOME, freezes, claimVoid) are reachable and succeed.
+    function test_HandlerReachesR1Paths() public {
+        handler.createPrice(0, 10e6, 1 days, 0, 0, false); //      0 AT_DEADLINE one-sided
+        handler.createPrice(1, 10e6, 1 days, 0, 1, false); //      1 TOUCH one-sided
+        handler.createPrice(2, 30e6, 2 days, 3_600, 4, false); //  2 AT_DEADLINE challenge, acceptBy now + 1 h
+        handler.createPrice(0, 10e6, 2 days, 3_600, 5, false); //  refused: two-sided TOUCH
+        handler.createPrice(0, 10e6, 2 days, 50 hours - 1, 4, false); // refused: acceptBy = deadline (bounded 2 h + 2 d)
+        handler.createOutcome(0, 10e6, 3 hours, 0, false, false); // 3 OUTCOME one-sided
+        handler.createChallenge(0, 10e6, 10e6, 1 days, 3 days, false); // 4 referee challenge
+        assertEq(handler.idsLength(), 5, "two knowable challenges refused");
+        invariant_NoKnowableChallengeCreated();
+        handler.accept(2, 0);
+        handler.accept(4, 0);
+        handler.pushPrice(100); // 250: crosses
+        handler.settlePrice(1, 0); // TOUCH settles TRUE
+        assertTrue(escrow.getEscrow(handler.ids(1)).status == Status.RELEASED, "touch released");
+        // the challenge sender points its refund at an address the issuer then freezes; expiry VOIDs it
+        handler.setRefund(4, 8); // freezable[4]
+        handler.freeze(4, true);
+        vm.warp(block.timestamp + 5 days);
+        handler.refund(4, false, false, address(0xCAFE));
+        IIfsoEscrow.Escrow memory e = escrow.getEscrow(handler.ids(4));
+        assertTrue(e.status == Status.VOIDED && e.flags & 32 != 0, "sender side owed, acceptor paid");
+        handler.claimVoid(4, false, false); // still frozen: no-op
+        handler.freeze(4, false);
+        handler.claimVoid(4, false, false);
+        handler.resolverStep(0, 0, 1); // propose on the question
+        string[5] memory k = ["createPrice", "settlePrice", "freeze", "claimVoid", "refund"];
+        k[0] = "create";
+        for (uint256 i; i < k.length; ++i) {
+            assertGt(handler.calls(bytes32(bytes(k[i]))), 0, k[i]);
+        }
+        invariant_BalanceMatchesObligations();
+        invariant_NoStatusRegression();
         afterInvariant();
     }
 
