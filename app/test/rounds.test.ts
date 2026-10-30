@@ -72,7 +72,7 @@ describe("lastRoundAtOrBefore", () => {
 
   test("matches a brute-force scan on 300 random feeds with random phases and gaps", async () => {
     let seed = 7;
-    const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff), seed % n);
+    const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff), (seed >> 8) % n);
     for (let k = 0; k < 300; k++) {
       const startPhase = rnd(3); // 0, 1 or 2: includes phase-0 feeds
       const phases: Record<number, Array<[number, number]>> = {};

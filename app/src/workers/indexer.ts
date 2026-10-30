@@ -34,7 +34,7 @@ export async function indexerTick(deps: Deps, notify: Notify, opts: { confirmati
   if (!escrow) return;
   const pc = deps.clients.publicClient;
   const confirmations = opts.confirmations ?? deps.env.CONFIRMATIONS;
-  const tip = await pc.getBlockNumber();
+  const tip = await pc.getBlockNumber({ cacheTime: 0 });
   const head = tip - confirmations;
 
   let cur = await loadCursor(deps);

@@ -87,6 +87,12 @@ const startOf = (e: Row) => {
  *  (the indexer can learn of an escrow a few blocks after the round that crossed), so look at those once. */
 const scanned = new Set<string>();
 
+/** Forget in-memory state (a process restart, for tests). The cursors in the database stay. */
+export function resetWatcherState() {
+  scanned.clear();
+  attempts.clear();
+}
+
 async function watchFeed(deps: Deps, feed: Address, list: Row[], _nowTs: bigint) {
   const src = cachedSource(deps, feed);
   let cursor = await loadCursor(deps, feed);
@@ -94,6 +100,7 @@ async function watchFeed(deps: Deps, feed: Address, list: Row[], _nowTs: bigint)
     const earliest = list.map(startOf).reduce((a, b) => (a < b ? a : b));
     cursor = await startingPoint(src, earliest);
     if (cursor === undefined) return;
+    await saveCursor(deps, feed, cursor);
     for (const e of list) scanned.add(`${feed}:${e.id}`);
   }
   const settled = new Set<string>();

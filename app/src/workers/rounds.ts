@@ -77,6 +77,7 @@ type Probe = { state: "ok"; round: Round } | { state: "new" } | { state: "missin
  *  phase-0 feeds report ids like 191); an older phase starts from its first round (id 1) and gallops up. */
 export async function lastRoundAtOrBefore(src: RoundSource, ts: bigint): Promise<Round | undefined> {
   const latest = await src.latest();
+  if (latest.updatedAt === 0n || latest.answer <= 0n) return undefined; // a feed that has never printed
   const top = phaseOf(latest.roundId);
   const topAgg = aggOf(latest.roundId);
   const probe = (p: bigint) => async (k: bigint): Promise<Probe> => {

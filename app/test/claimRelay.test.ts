@@ -28,6 +28,8 @@ function stubDeps(escrowOverrides: Record<string, unknown> = {}, env: Record<str
       publicClient: {
         readContract: async ({ functionName }: { functionName: string }) => (functionName === "getEscrow" ? e : { kind: 1 }),
         simulateContract: async (req: unknown) => ({ request: req }),
+        estimateContractGas: async () => 100_000n,
+        getGasPrice: async () => 1_000_000n,
         waitForTransactionReceipt: async () => ({ status: "success" }),
       },
     },
