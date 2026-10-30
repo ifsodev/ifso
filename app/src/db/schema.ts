@@ -174,6 +174,7 @@ export const relayTxs = pgTable(
 export const cursors = pgTable("cursors", {
   name: text("name").primaryKey(),
   block: bigint("block", { mode: "bigint" }).notNull(),
+  hash: text("hash"), //   main: hash of `block` when it was indexed (a mismatch later = reorg). watch:<feed>: decimal round id of the last handled round
 });
 
 /** Which Telegram chats to notify about which escrows (sender side; recipients opt in from the claim page). */

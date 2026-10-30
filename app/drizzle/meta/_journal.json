@@ -15,6 +15,13 @@
       "when": 1793391653659,
       "tag": "0001_bot_tz_intent_expiry",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793392359742,
+      "tag": "0002_cursor_block_hash",
+      "breakpoints": true
     }
   ]
 }

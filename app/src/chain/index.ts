@@ -18,9 +18,11 @@ export function makeClients(env: Env, rpc: Omit<RpcOptions, "chain"> = {}) {
   const chain = chainFor(env);
   const urls = rpcUrls(env);
   const transport = makeTransport(urls, { ...rpc, chain });
-  const publicClient = createPublicClient({ chain, transport });
+  // RHC makes ~10 blocks a second: poll for receipts every 250 ms, not viem's 4 s default
+  const pollingInterval = 250;
+  const publicClient = createPublicClient({ chain, transport, pollingInterval });
   // wallets send through the same ordered fallback
-  const wallet = (account?: Account) => (account ? createWalletClient({ chain, transport, account }) : undefined);
+  const wallet = (account?: Account) => (account ? createWalletClient({ chain, transport, account, pollingInterval }) : undefined);
   return {
     chain,
     publicClient,

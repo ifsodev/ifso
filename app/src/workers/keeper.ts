@@ -1,19 +1,24 @@
 // Keeper: settle what is decidable, refund what expired. Every call it makes is permissionless on-chain, so
 // anyone (recipient, sender, a third party) can do the same; this worker only makes it automatic.
 // No Chainlink Automation or Gelato on RHC mainnet (verified 2026-10-25), hence a self-hosted BullMQ tick.
-import { and, eq, inArray, lte } from "drizzle-orm";
+//
+// Decisions use CHAIN time (the latest block timestamp), the same clock the contract reads. Each pass builds a plan
+// (what to call, and whether the keeper believes it will succeed), then either sends it (simulate, estimate, send)
+// or, with KEEPER_SHADOW=1, logs the plan next to the eth_call answer and sends nothing.
+import { and, asc, eq, gt, inArray, lt, lte } from "drizzle-orm";
 import { encodeAbiParameters, type Address, type Hex } from "viem";
-import { erc8056Abi, ifsoEscrowAbi, ifsoOutcomeResolverAbi } from "../abi";
-import { evaluatePrice } from "../core/price";
-import { Kind, PRICE_AT_DEADLINE, SRC_PYTH, Status, Verdict, type Condition } from "../core/types";
+import { erc8056Abi, ifsoConditionEvaluatorAbi, ifsoEscrowAbi, ifsoOutcomeResolverAbi } from "../abi";
+import { Kind, PRICE_AT_DEADLINE, SRC_PYTH, Status, Verdict, ZERO_ADDRESS, type Condition } from "../core/types";
 import { escrows } from "../db/schema";
 import { required } from "../chain";
-import { roundsAround } from "./rounds";
-import { sendCall } from "./tx";
-import type { Deps } from "./deps";
+import { cachedSource, decideAtDeadline } from "./rounds";
+import { isShadow, sendCall, shadowCall, type ContractCall, type SendResult } from "./tx";
+import { raise, type Deps } from "./deps";
 import { fetchPythUpdate } from "./pyth";
 
 const BATCH = 50;
+const RESOLVER_FINAL = 4;
+const RESOLVER_VOID = 5;
 
 export function conditionFromJson(j: Record<string, unknown>): Condition {
   const b = (k: string) => BigInt(String(j[k] ?? 0));
@@ -35,59 +40,142 @@ export function conditionFromJson(j: Record<string, unknown>): Condition {
   };
 }
 
+/** The latest block's timestamp: the clock `settle` and `refund` are judged against. */
+export async function chainNow(deps: Deps): Promise<bigint> {
+  const b = await deps.clients.publicClient.getBlock({ blockTag: "latest" });
+  return b.timestamp;
+}
+
+export interface Plan {
+  meta: { kind: string; escrowId: string };
+  call: ContractCall;
+  /** The keeper expects this call to succeed. false: a probe, only executed in shadow mode to compare with eth_call. */
+  send: boolean;
+  /** The verdict the keeper expects the evaluator to return (settle plans). */
+  verdict?: Verdict;
+  reason: string;
+  /** Extra data for the evaluator probe in shadow mode. */
+  probe?: { condition: Condition; activeFrom: bigint; proof: Hex };
+}
+
 export async function keeperTick(deps: Deps) {
-  const now = new Date();
-  await settleTime(deps, now);
-  await settlePrice(deps, now);
-  await settleOutcome(deps);
-  await refundExpired(deps, now);
-}
-
-async function settle(deps: Deps, id: string, proof: Hex = "0x", value = 0n) {
-  const escrow = required(deps.clients.escrow, "ESCROW_ADDRESS");
-  return sendCall(deps, deps.clients.keeper, { address: escrow, abi: ifsoEscrowAbi, functionName: "settle", args: [BigInt(id), proof, false], value }, { kind: "settle", escrowId: id });
-}
-
-async function settleTime(deps: Deps, now: Date) {
-  const due = await deps.db
-    .select({ id: escrows.id })
-    .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.TIME), lte(escrows.deadline, now)))
-    .limit(BATCH);
-  for (const e of due) await settle(deps, e.id);
-}
-
-async function settlePrice(deps: Deps, now: Date) {
-  const due = await deps.db
-    .select()
-    .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.PRICE), lte(escrows.deadline, now)))
-    .limit(BATCH);
-  for (const e of due) {
-    if (e.twoSided && !e.accepted) continue;
-    const c = conditionFromJson(e.condition as Record<string, unknown>);
-    if (c.mode !== PRICE_AT_DEADLINE) continue; // TOUCH is driven by the price watcher; untouched => expiry refund
-    if (c.source === SRC_PYTH) {
-      const upd = await fetchPythUpdate(deps, c.key, Number(c.deadline));
-      if (upd) await settle(deps, e.id, encodeAbiParameters([{ type: "bytes[]" }], [upd.data]), upd.fee);
-      continue;
+  const nowTs = await chainNow(deps);
+  const now = new Date(Number(nowTs) * 1000);
+  for (const pass of [settleTime, settlePrice, settleOutcome, refundExpired]) {
+    try {
+      await pass(deps, now, nowTs);
+    } catch (e) {
+      deps.log("keeper pass failed", { pass: pass.name, error: String((e as Error)?.message ?? e).slice(0, 300) });
+      await raise(deps, `keeper-pass-${pass.name}`, `keeper pass ${pass.name} failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
     }
-    const multiplier = c.stockToken !== "0x0000000000000000000000000000000000000000"
-      ? await deps.clients.publicClient.readContract({ address: c.stockToken, abi: erc8056Abi, functionName: "uiMultiplier" })
-      : 0n;
-    const rounds = await roundsAround(deps, c.target, c.deadline - BigInt(c.maxStale) - 3600n);
-    const ev = evaluatePrice(c, rounds, { now: BigInt(Math.floor(now.getTime() / 1000)), createdAt: BigInt(Math.floor(e.activeFrom.getTime() / 1000)), currentMultiplier: multiplier });
-    if (ev.verdict === Verdict.PENDING || ev.proofRoundId === undefined) continue;
-    deps.log("price decidable", { id: e.id, verdict: Verdict[ev.verdict], reason: ev.reason });
-    await settle(deps, e.id, encodeAbiParameters([{ type: "uint80" }], [ev.proofRoundId]));
   }
 }
 
-async function settleOutcome(deps: Deps) {
+const settleCall = (deps: Deps, id: string, proof: Hex, value = 0n): ContractCall => ({
+  address: required(deps.clients.escrow, "ESCROW_ADDRESS"),
+  abi: ifsoEscrowAbi as never,
+  functionName: "settle",
+  args: [BigInt(id), proof, false],
+  value,
+});
+
+/** Send (or, in shadow mode, compare) one plan. Returns the result of the send; plans with send=false only run in shadow mode. */
+export async function execute(deps: Deps, plan: Plan, wallet = deps.clients.keeper): Promise<SendResult | undefined> {
+  if (isShadow(deps)) {
+    const res = await shadowCall(deps, wallet, plan.call, plan.meta, { send: plan.send, verdict: plan.verdict === undefined ? undefined : Verdict[plan.verdict], reason: plan.reason });
+    let evaluated: Verdict | undefined;
+    if (plan.probe && wallet?.account) evaluated = await evaluatorVerdict(deps, wallet.account.address, plan.probe);
+    const verdictMismatch = plan.verdict !== undefined && evaluated !== undefined && plan.send && plan.verdict !== evaluated;
+    const callMismatch = plan.send !== Boolean(res.simulated);
+    if (evaluated !== undefined) deps.log("shadow verdict", { escrowId: plan.meta.escrowId, kind: plan.meta.kind, decided: plan.verdict === undefined ? undefined : Verdict[plan.verdict], ethCall: Verdict[evaluated] });
+    if (callMismatch || verdictMismatch) {
+      deps.log("shadow MISMATCH", { escrowId: plan.meta.escrowId, kind: plan.meta.kind, send: plan.send, ethCallOk: res.simulated, decided: plan.verdict, evaluated });
+      await raise(deps, "shadow-mismatch", `keeper decision and eth_call disagree for escrow ${plan.meta.escrowId} (${plan.meta.kind})`);
+    }
+    return res;
+  }
+  if (!plan.send) return undefined;
+  const r = await sendCall(deps, wallet, plan.call, plan.meta);
+  if (!r.ok) deps.log(`${plan.meta.kind} failed`, { escrowId: plan.meta.escrowId, error: r.error });
+  return r;
+}
+
+async function evaluatorVerdict(deps: Deps, from: Address, p: { condition: Condition; activeFrom: bigint; proof: Hex }): Promise<Verdict | undefined> {
+  try {
+    const escrow = required(deps.clients.escrow, "ESCROW_ADDRESS");
+    const evaluator = deps.clients.evaluator ?? (await deps.clients.publicClient.readContract({ address: escrow, abi: ifsoEscrowAbi, functionName: "evaluator" }));
+    const { result } = await deps.clients.publicClient.simulateContract({
+      address: evaluator as Address,
+      abi: ifsoConditionEvaluatorAbi,
+      functionName: "evaluate",
+      args: [p.condition as never, p.activeFrom, p.proof, from],
+      account: from,
+    } as never);
+    return Number(result) as Verdict;
+  } catch {
+    return undefined; // reverted (BadProof, UnprovableRound, ...): the call comparison already covers it
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------- TIME
+async function settleTime(deps: Deps, now: Date) {
+  const due = await deps.db
+    .select()
+    .from(escrows)
+    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.TIME), lte(escrows.deadline, now), gt(escrows.expiry, now)))
+    .orderBy(asc(escrows.deadline))
+    .limit(BATCH);
+  for (const e of due) {
+    if (e.twoSided && !e.accepted) continue;
+    await guarded(deps, e.id, () => execute(deps, { meta: { kind: "settle", escrowId: e.id }, call: settleCall(deps, e.id, "0x"), send: true, verdict: Verdict.TRUE, reason: "deadline reached" }));
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------- PRICE
+/** Plan for one PRICE AT_DEADLINE escrow, or undefined when there is nothing to compare or send yet. */
+export async function planPrice(deps: Deps, e: typeof escrows.$inferSelect, nowTs: bigint): Promise<Plan | undefined> {
+  const c = conditionFromJson(e.condition as Record<string, unknown>);
+  if (c.mode !== PRICE_AT_DEADLINE) return undefined; // TOUCH is driven by the price watcher; untouched => expiry refund
+  const activeFrom = BigInt(Math.floor(e.activeFrom.getTime() / 1000));
+  if (c.source === SRC_PYTH) {
+    const upd = await fetchPythUpdate(deps, c.key, Number(c.deadline));
+    if (!upd) return undefined;
+    const proof = encodeAbiParameters([{ type: "bytes[]" }], [upd.data]);
+    return { meta: { kind: "settle", escrowId: e.id }, call: settleCall(deps, e.id, proof, upd.fee), send: true, reason: "pyth update", probe: { condition: c, activeFrom, proof } };
+  }
+  const multiplier = c.stockToken !== ZERO_ADDRESS ? await deps.clients.publicClient.readContract({ address: c.stockToken, abi: erc8056Abi, functionName: "uiMultiplier" }) : 0n;
+  const ev = await decideAtDeadline(cachedSource(deps, c.target), c, { now: nowTs, createdAt: activeFrom, currentMultiplier: multiplier });
+  const proofId = ev.proofRoundId ?? ev.ref?.roundId;
+  if (proofId === undefined) return undefined;
+  const proof = encodeAbiParameters([{ type: "uint80" }], [proofId]);
+  const send = ev.verdict !== Verdict.PENDING && ev.proofRoundId !== undefined;
+  return { meta: { kind: "settle", escrowId: e.id }, call: settleCall(deps, e.id, proof), send, verdict: send ? ev.verdict : undefined, reason: ev.reason, probe: { condition: c, activeFrom, proof } };
+}
+
+async function settlePrice(deps: Deps, now: Date, nowTs: bigint) {
+  const due = await deps.db
+    .select()
+    .from(escrows)
+    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.PRICE), lte(escrows.deadline, now), gt(escrows.expiry, now)))
+    .orderBy(asc(escrows.deadline))
+    .limit(BATCH);
+  for (const e of due) {
+    if (e.twoSided && !e.accepted) continue;
+    await guarded(deps, e.id, async () => {
+      const plan = await planPrice(deps, e, nowTs);
+      if (!plan) return;
+      if (plan.send) deps.log("price decidable", { id: e.id, verdict: plan.verdict === undefined ? undefined : Verdict[plan.verdict], reason: plan.reason });
+      await execute(deps, plan);
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------- OUTCOME
+async function settleOutcome(deps: Deps, now: Date) {
   const open = await deps.db
     .select({ id: escrows.id, questionId: escrows.questionId, condition: escrows.condition, twoSided: escrows.twoSided, accepted: escrows.accepted })
     .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.OUTCOME)))
+    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.OUTCOME), gt(escrows.expiry, now)))
     .limit(500);
   const byQ = new Map<string, typeof open>();
   for (const e of open) {
@@ -97,32 +185,52 @@ async function settleOutcome(deps: Deps) {
   for (const [qid, list] of byQ) {
     const resolver = conditionFromJson(list[0]!.condition as Record<string, unknown>).target;
     const [state] = await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "outcomeOf", args: [qid as Hex] });
-    if (state !== 4 && state !== 5) continue; // FINAL or VOID
-    for (const e of list.slice(0, BATCH)) await settle(deps, e.id);
+    if (state !== RESOLVER_FINAL && state !== RESOLVER_VOID) continue;
+    for (const e of list.slice(0, BATCH)) {
+      await guarded(deps, e.id, () => execute(deps, { meta: { kind: "settle", escrowId: e.id }, call: settleCall(deps, e.id, "0x"), send: true, reason: "resolver final" }));
+    }
   }
 }
 
+// ---------------------------------------------------------------------------------------------------- refunds
 async function refundExpired(deps: Deps, now: Date) {
   const escrow = required(deps.clients.escrow, "ESCROW_ADDRESS");
+  const refundCall = (id: string, alt: boolean): ContractCall => ({ address: escrow, abi: ifsoEscrowAbi as never, functionName: "refund", args: [BigInt(id), alt, false] });
   const expired = await deps.db
     .select({ id: escrows.id, alt: escrows.altRefundTo })
     .from(escrows)
     .where(and(inArray(escrows.status, [Status.OPEN, Status.MET]), lte(escrows.expiry, now)))
+    .orderBy(asc(escrows.expiry))
     .limit(BATCH);
   for (const e of expired) {
-    const r = await sendCall(deps, deps.clients.keeper, { address: escrow, abi: ifsoEscrowAbi, functionName: "refund", args: [BigInt(e.id), false, false] }, { kind: "refund", escrowId: e.id });
-    // primary destination frozen / screened: use the sender's preset alternate (anyone may choose it)
-    if (!r.ok && e.alt && e.alt !== "0x0000000000000000000000000000000000000000") {
-      await sendCall(deps, deps.clients.keeper, { address: escrow, abi: ifsoEscrowAbi, functionName: "refund", args: [BigInt(e.id), true, false] }, { kind: "refund-alt", escrowId: e.id });
-    }
+    await guarded(deps, e.id, async () => {
+      const r = await execute(deps, { meta: { kind: "refund", escrowId: e.id }, call: refundCall(e.id, false), send: true, reason: "expired" });
+      if (isShadow(deps) || !r || r.ok) return;
+      // primary destination frozen / screened: use the sender's preset alternate (anyone may choose it)
+      if (e.alt && e.alt !== ZERO_ADDRESS) {
+        const alt = await execute(deps, { meta: { kind: "refund-alt", escrowId: e.id }, call: refundCall(e.id, true), send: true, reason: "expired, primary refused" });
+        if (alt && !alt.ok) await raise(deps, `refund-stuck-${e.id}`, `refund of escrow ${e.id} failed on both the primary and the alternate address`);
+      } else {
+        await raise(deps, `refund-stuck-${e.id}`, `refund of escrow ${e.id} failed and the sender has no alternate address: ${r.error ?? "unknown"}`);
+      }
+    });
   }
   // unaccepted challenges past acceptBy
   const unaccepted = await deps.db
     .select({ id: escrows.id })
     .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.twoSided, true), eq(escrows.accepted, false), lte(escrows.acceptBy, now)))
+    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.twoSided, true), eq(escrows.accepted, false), lt(escrows.acceptBy, now)))
     .limit(BATCH);
   for (const e of unaccepted) {
-    await sendCall(deps, deps.clients.keeper, { address: escrow, abi: ifsoEscrowAbi, functionName: "refund", args: [BigInt(e.id), false, false] }, { kind: "refund-unaccepted", escrowId: e.id });
+    await guarded(deps, e.id, () => execute(deps, { meta: { kind: "refund-unaccepted", escrowId: e.id }, call: refundCall(e.id, false), send: true, reason: "not accepted in time" }));
+  }
+}
+
+/** One bad escrow must not stop the sweep. */
+async function guarded(deps: Deps, id: string, fn: () => Promise<unknown>) {
+  try {
+    await fn();
+  } catch (e) {
+    deps.log("keeper escrow failed", { id, error: String((e as Error)?.message ?? e).slice(0, 300) });
   }
 }

@@ -38,7 +38,7 @@ try {
   throw e;
 }
 const { db } = createDb(env.DATABASE_URL);
-const deps: Deps = { env, db, clients, log };
+const deps: Deps = { env, db, clients, log, alert };
 const bot = createBot(deps);
 
 if (role === "api" || role === "all") {

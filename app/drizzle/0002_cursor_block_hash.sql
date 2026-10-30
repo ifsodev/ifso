@@ -1,0 +1,1 @@
+ALTER TABLE "cursors" ADD COLUMN "hash" text;

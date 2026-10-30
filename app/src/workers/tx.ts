@@ -1,3 +1,6 @@
+// The single place a hot key signs and sends. Simulate first (an eth_call that would revert costs nothing),
+// size gas from an estimate with headroom, cap the fee at 1.5x the current gas price, and serialise sends per
+// account inside this process so the keeper sweep and the price watcher never race for one nonce.
 import type { Abi, Address, WalletClient } from "viem";
 import { relayTxs } from "../db/schema";
 import type { Deps } from "./deps";
@@ -10,27 +13,91 @@ export interface ContractCall {
   value?: bigint;
 }
 
+export interface SendResult {
+  ok: boolean;
+  hash?: `0x${string}`;
+  error?: string;
+  /** Shadow mode: the call was simulated and logged, nothing was sent. */
+  shadow?: boolean;
+  /** The simulation (eth_call) succeeded. Set in shadow mode and on the send path. */
+  simulated?: boolean;
+}
+
+export const GAS_HEADROOM_NUM = 13n; // gas limit = estimate x 1.3
+export const GAS_HEADROOM_DEN = 10n;
+export const FEE_CAP_NUM = 3n; //       max fee per gas = current gas price x 1.5
+export const FEE_CAP_DEN = 2n;
+
+const queues = new Map<string, Promise<unknown>>();
+/** Runs `fn` after every earlier job for the same key finished (success or not). */
+export function serialised<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = queues.get(key) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  queues.set(key, next.catch(() => undefined));
+  return next;
+}
+
+/** Simulate a call from the wallet's account without sending (eth_call). */
+export async function simulate(deps: Deps, wallet: WalletClient | undefined, call: ContractCall): Promise<{ ok: boolean; error?: string; request?: unknown }> {
+  if (!wallet?.account) return { ok: false, error: "hot key not configured" };
+  try {
+    const { request } = await deps.clients.publicClient.simulateContract({ ...call, account: wallet.account } as never);
+    return { ok: true, request };
+  } catch (e) {
+    return { ok: false, error: shortError(e) };
+  }
+}
+
 /** Simulate first (no gas burned on calls that would revert), then send and wait. Every attempt is logged. */
 export async function sendCall(
   deps: Deps,
   wallet: WalletClient | undefined,
   call: ContractCall,
   meta: { kind: string; escrowId?: string; questionId?: string; ipHash?: string },
-): Promise<{ ok: boolean; hash?: `0x${string}`; error?: string }> {
+): Promise<SendResult> {
   if (!wallet?.account) return { ok: false, error: "hot key not configured" };
-  try {
-    const { request } = await deps.clients.publicClient.simulateContract({ ...call, account: wallet.account } as never);
-    const hash = await wallet.writeContract(request as never);
-    await deps.db.insert(relayTxs).values({ kind: meta.kind, escrowId: meta.escrowId, questionId: meta.questionId, ipHash: meta.ipHash, txHash: hash, status: "sent" });
-    const rcpt = await deps.clients.publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
-    const ok = rcpt.status === "success";
-    deps.log(`${meta.kind} ${ok ? "mined" : "reverted"}`, { hash, escrowId: meta.escrowId, questionId: meta.questionId });
-    return { ok, hash };
-  } catch (e) {
-    const error = shortError(e);
-    await deps.db.insert(relayTxs).values({ kind: meta.kind, escrowId: meta.escrowId, questionId: meta.questionId, ipHash: meta.ipHash, status: "skipped", error });
-    return { ok: false, error };
-  }
+  const account = wallet.account;
+  return serialised(account.address.toLowerCase(), async () => {
+    const sim = await simulate(deps, wallet, call);
+    if (!sim.ok) {
+      await deps.db.insert(relayTxs).values({ kind: meta.kind, escrowId: meta.escrowId, questionId: meta.questionId, ipHash: meta.ipHash, status: "skipped", error: sim.error });
+      return { ok: false, error: sim.error, simulated: false };
+    }
+    try {
+      const gas = await deps.clients.publicClient.estimateContractGas({ ...call, account } as never);
+      const gasPrice = await deps.clients.publicClient.getGasPrice();
+      const hash = await wallet.writeContract({
+        ...(sim.request as object),
+        gas: (gas * GAS_HEADROOM_NUM) / GAS_HEADROOM_DEN,
+        maxFeePerGas: (gasPrice * FEE_CAP_NUM) / FEE_CAP_DEN,
+        maxPriorityFeePerGas: 0n,
+      } as never);
+      await deps.db.insert(relayTxs).values({ kind: meta.kind, escrowId: meta.escrowId, questionId: meta.questionId, ipHash: meta.ipHash, txHash: hash, status: "sent" });
+      const rcpt = await deps.clients.publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
+      const ok = rcpt.status === "success";
+      deps.log(`${meta.kind} ${ok ? "mined" : "reverted"}`, { hash, escrowId: meta.escrowId, questionId: meta.questionId });
+      return { ok, hash, simulated: true };
+    } catch (e) {
+      const error = shortError(e);
+      await deps.db.insert(relayTxs).values({ kind: meta.kind, escrowId: meta.escrowId, questionId: meta.questionId, ipHash: meta.ipHash, status: "skipped", error });
+      return { ok: false, error, simulated: true };
+    }
+  });
+}
+
+/** KEEPER_SHADOW=1: log what would be sent next to the eth_call answer, send nothing. */
+export const isShadow = (deps: Deps) => deps.env.KEEPER_SHADOW === "1";
+
+export async function shadowCall(
+  deps: Deps,
+  wallet: WalletClient | undefined,
+  call: ContractCall,
+  meta: { kind: string; escrowId?: string },
+  decision: Record<string, unknown>,
+): Promise<SendResult> {
+  const sim = await simulate(deps, wallet, call);
+  deps.log("shadow", { kind: meta.kind, escrowId: meta.escrowId, decision, ethCall: sim.ok ? "ok" : "revert", error: sim.error });
+  return { ok: false, shadow: true, simulated: sim.ok, error: sim.error };
 }
 
 export function shortError(e: unknown): string {
