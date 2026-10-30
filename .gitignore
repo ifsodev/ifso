@@ -1,0 +1,8 @@
+node_modules/
+contracts/out/
+contracts/cache/
+contracts/artifacts/
+contracts/broadcast/
+services/abi-json/
+.env
+*.log

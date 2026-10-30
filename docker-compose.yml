@@ -1,0 +1,9 @@
+# Local dev dependencies for services/ (Postgres + Timescale, Redis for BullMQ).
+services:
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment: { POSTGRES_USER: ifso, POSTGRES_PASSWORD: ifso, POSTGRES_DB: ifso }
+    ports: ["5432:5432"]
+  redis:
+    image: redis:7.4-alpine
+    ports: ["6379:6379"]
