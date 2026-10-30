@@ -72,7 +72,20 @@ const schema = z.object({
   POLYMARKET_MIN_VOLUME_USD: z.coerce.number().default(25000),
   POLYMARKET_MAX_DAYS_OUT: z.coerce.number().default(60),
   SPONSOR_MIN_AMOUNT_USDG: z.coerce.number().default(1),
+
+  // $IFSO holder perks (read on the server from balanceOf; empty token address = locked for everyone, no RPC call)
+  IFSO_TOKEN_ADDRESS: addr.optional(),
+  IFSO_TOKEN_DECIMALS: z.coerce.number().int().min(0).max(36).default(18),
+  HOLDER_MIN_IFSO: z.coerce.number().int().positive().default(100_000),
+  WHALE_MIN_IFSO: z.coerce.number().int().positive().default(1_000_000),
+  PERKS_CACHE_SECONDS: z.coerce.number().min(0).default(30),
+  // our own wallets (relayer, keeper, resolver, deployer, test wallets): left out of the real-user counter
+  INTERNAL_ADDRESSES: z.string().default("").refine((s) => parseAddressList(s).every((a) => /^0x[0-9a-f]{40}$/.test(a)), "INTERNAL_ADDRESSES must be comma separated addresses"),
 });
+
+/** Comma separated addresses, lowercased. */
+export const parseAddressList = (s: string): string[] => s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+export const internalAddresses = (env: Pick<Env, "INTERNAL_ADDRESSES">): string[] => parseAddressList(env.INTERNAL_ADDRESSES);
 
 export type Env = z.infer<typeof schema>;
 export type Role = "api" | "bot" | "worker" | "all";

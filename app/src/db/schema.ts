@@ -154,6 +154,8 @@ export const chainEvents = pgTable(
     name: text("name").notNull(),
     args: jsonb("args").notNull(),
     escrowId: text("escrow_id"),
+    /** Block timestamp (the real-user counter groups by day from this). Null on rows indexed before it existed. */
+    blockTime: timestamp("block_time", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.blockNumber, t.logIndex] }), index("chain_events_escrow_idx").on(t.escrowId)],
 );

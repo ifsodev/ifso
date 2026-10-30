@@ -46,3 +46,19 @@ bunx tsc --noEmit
   end date for Polymarket) and strictly before an at-deadline price deadline. If less than 10 minutes would remain, the builder
   refuses. A market already priced outside 2 to 98 percent cannot be used for a challenge.
 - **Keeper sweeps** skip rows that keep failing (per-escrow backoff, 2 minutes doubling to 6 hours), so a stuck row never hides the rows behind it.
+
+## Holder perks and the real-user counter
+
+- `perks` (tRPC query) returns `{ tier, unlocked, locked, wording, limits }` for a wallet. The tier is computed on the
+  server from the token's `balanceOf` at request time (short cache, `PERKS_CACHE_SECONDS`); a tier sent by a client is
+  ignored. Holder is 100,000 $IFSO and Whale is 1,000,000 (`HOLDER_MIN_IFSO`, `WHALE_MIN_IFSO`). With
+  `IFSO_TOKEN_ADDRESS` empty every perk is locked ("hold 100,000 $IFSO to unlock") and no chain call is made.
+- Perks: bulk / CSV batch planning (`planBatch`) and scheduled payroll planning (`planPayroll`) without a monthly fee,
+  larger batch and schedule limits, and a larger per-wallet relay budget. Core features are never gated. Perks have no
+  cash value and are not a promise of any amount.
+- `GET /stats/users?since=YYYY-MM-DD` and the tRPC `stats` query count real users from indexed chain events: unique
+  senders, unique recipients, unique challenge acceptors, escrows created and USDG volume, in total and per UTC day.
+  Addresses in `INTERNAL_ADDRESSES` (our relayer, keeper, resolver, deployer and test wallets) are left out.
+- `bun scripts/user-count.ts --since 2026-11-01 --escrow <address> [--internal 0x..,0x..] [--rpc <url>] [--json]` prints
+  the same numbers straight from chain logs, with no database. (Volume of a challenge accepted after `--since` on an
+  escrow created before it is not in the script's figure.)

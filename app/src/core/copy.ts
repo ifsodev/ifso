@@ -79,6 +79,20 @@ export const copy = {
       "Stock price conditions aren't available in your region. Dates, results and referee payments still work.",
   },
 
+  perks: {
+    // wording rule: "hold X $IFSO to unlock". Never "buy", price talk or return talk.
+    lockedHolder: (n: string) => `Premium features: hold ${n} $IFSO to unlock.`,
+    lockedWhale: (n: string) => `Higher limits: hold ${n} $IFSO to unlock.`,
+    tokenNotLive: (n: string) => `Premium features: hold ${n} $IFSO to unlock. The token is not live yet.`,
+    batchPerk: "Bulk and CSV payment runs without a monthly fee",
+    payrollPerk: "Scheduled payroll without a monthly fee",
+    limitsHolder: "Larger batches, more scheduled payments and bigger relay budgets",
+    limitsWhale: "The largest batches, scheduled payments and relay budgets",
+    batchTooBig: (max: string) => `This tier allows up to ${max} payments in one batch.`,
+    scheduleTooBig: (max: string) => `This tier allows up to ${max} scheduled payments.`,
+    noCash: "Perks have no cash value and are not a promise of any amount.",
+  },
+
   bot: {
     welcome:
       "IFSO sends money that moves only if something happens. Type /ifso followed by who, how much and the condition. You sign in the web app; the bot never holds your keys or funds.",

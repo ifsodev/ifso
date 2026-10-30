@@ -9,6 +9,7 @@ import type { Deps } from "../workers/deps";
 import { appRouter, jsonSafe } from "./router";
 import { RateLimiter } from "./rateLimit";
 import { readiness, type Probe } from "../ops/health";
+import { userStats } from "./stats";
 import { webhookPath } from "../bot/webhook";
 
 export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: Record<string, Probe> = {}) {
@@ -21,6 +22,13 @@ export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: R
   app.get("/readyz", async (c) => {
     const r = await readiness(probes);
     return c.json(r, r.ok ? 200 : 503);
+  });
+
+  // real-user counter (indexed chain events only, our own wallets excluded). ?since=YYYY-MM-DD
+  app.get("/stats/users", async (c) => {
+    const since = c.req.query("since");
+    if (since !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(since)) return c.json({ error: "since must be YYYY-MM-DD" }, 400);
+    return c.json(await userStats(deps, since ? Math.floor(Date.parse(`${since}T00:00:00Z`) / 1000) : undefined));
   });
 
   // question specs are public (their hash is on-chain); served from the DB

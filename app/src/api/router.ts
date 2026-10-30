@@ -20,6 +20,10 @@ import { PolymarketRefused, planFootballQuestion, planPolymarketQuestion, polyma
 import { ClaimError, readEscrow, relayAccept, relayClaim } from "./claim";
 import { RateLimiter } from "./rateLimit";
 import { findFixture } from "./fixtures";
+import { holderTier, tierConfig } from "./perks";
+import { parseCsv, totals, validateRows } from "./batchPlan";
+import { userStats } from "./stats";
+import { LIMITS, perksFor, TIER_RANK, type Tier } from "../core/perks";
 
 export interface Ctx {
   deps: Deps;
@@ -83,11 +87,13 @@ function gateDraft(ctx: Ctx, d: ConditionDraft | undefined) {
 const tooMany = (message: string) => new TRPCError({ code: "TOO_MANY_REQUESTS", message });
 
 /** Budgets for relayed calls (we pay the gas): per client network and per signing wallet, per hour. */
-async function relayBudget(ctx: Ctx, signer?: Address) {
+export async function relayBudget(ctx: Ctx, signer?: Address) {
   const { env } = ctx.deps;
   const ipHash = RateLimiter.ipHash(ctx.ip, env.IP_HASH_SALT);
   if (!(await ctx.limiter.hit(`relay:ip:${ipHash}`, env.RELAY_PER_IP_PER_HOUR, 3600))) throw tooMany("too many requests from this network, try again later");
-  if (signer && !(await ctx.limiter.hit(`relay:signer:${signer.toLowerCase()}`, env.RELAY_PER_SIGNER_PER_HOUR, 3600))) throw tooMany("too many requests for this wallet, try again later");
+  // holders get a larger per-wallet budget; the tier is read on the server (fails closed to the base budget)
+  const factor = signer ? LIMITS[await holderTier(ctx.deps, signer)].relayBudgetFactor : 1;
+  if (signer && !(await ctx.limiter.hit(`relay:signer:${signer.toLowerCase()}`, env.RELAY_PER_SIGNER_PER_HOUR * factor, 3600))) throw tooMany("too many requests for this wallet, try again later");
   return ipHash;
 }
 
@@ -140,7 +146,66 @@ const buildInput = z.object({
   tzOffsetMin: z.number().int().min(-720).max(840).optional(),
 });
 
+/** A perk endpoint's answer when the wallet is below the tier it needs. Never an error: the page shows it as locked. */
+async function perkGate(ctx: Ctx, wallet: Address, min: Tier) {
+  const tier = await holderTier(ctx.deps, wallet);
+  const state = perksFor(tier, tierConfig(ctx.deps));
+  const allowed = state.tokenLive && TIER_RANK[tier] >= TIER_RANK[min];
+  return { allowed, tier: state.tier, state };
+}
+const lockedAnswer = (g: Awaited<ReturnType<typeof perkGate>>) => ({ ok: false as const, locked: true as const, tier: g.tier, wording: g.state.wording || g.state.note, locked_perks: g.state.locked });
+
+const planRowsInput = z.object({
+  sender: addr,
+  csv: z.string().max(200_000).optional(),
+  items: z.array(z.object({ recipient: z.string().max(80), amountUsdg: z.string().max(30) })).max(5_000).optional(),
+});
+
 export const appRouter = t.router({
+  /**
+   * Holder perks for a wallet. The tier is computed HERE from the token's balanceOf at request time (short cache);
+   * any tier a client sends is ignored. No token address configured = everything locked, no chain call.
+   */
+  perks: t.procedure.input(z.object({ address: addr })).query(async ({ input, ctx }) => {
+    const tier = await holderTier(ctx.deps, input.address);
+    const s = perksFor(tier, tierConfig(ctx.deps));
+    return { tier: s.tier, unlocked: s.unlocked, locked: s.locked, wording: s.wording, limits: s.limits, tokenLive: s.tokenLive, note: s.note };
+  }),
+
+  /** Real-user counter from indexed chain events (our own wallets excluded). `since` = YYYY-MM-DD, optional. */
+  stats: t.procedure.input(z.object({ since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional()).query(async ({ input, ctx }) => {
+    const sinceSec = input?.since ? Math.floor(Date.parse(`${input.since}T00:00:00Z`) / 1000) : undefined;
+    return userStats(ctx.deps, sinceSec);
+  }),
+
+  /** Premium: plan a bulk / CSV createBatch run (validation, totals, per-tier size limit). Sends nothing. */
+  planBatch: t.procedure.input(planRowsInput).mutation(async ({ input, ctx }) => {
+    const g = await perkGate(ctx, input.sender, "holder");
+    if (!g.allowed) return lockedAnswer(g);
+    const parsed = input.csv !== undefined ? parseCsv(input.csv) : { rows: (input.items ?? []).map((x, i) => ({ line: i + 1, ...x })), problems: [] };
+    const max = g.state.limits.batchSize;
+    if (parsed.rows.length > max) return { ok: false as const, locked: false as const, tier: g.tier, limit: max, reason: copy.perks.batchTooBig(String(max)) };
+    const { valid, problems } = validateRows(parsed.rows);
+    const fee = await ctx.deps.clients.publicClient.readContract({ address: required(ctx.deps.clients.escrow, "ESCROW_ADDRESS"), abi: ifsoEscrowAbi, functionName: "feeFor", args: [Kind.TIME] });
+    return { ok: problems.length === 0, locked: false as const, tier: g.tier, limit: max, problems, totals: totals(valid, fee), rows: valid.map((v) => ({ recipient: v.recipient, amount: v.amount.toString() })) };
+  }),
+
+  /** Premium: plan scheduled payroll (rows x runs against the per-tier scheduled-payment limit). Sends nothing. */
+  planPayroll: t.procedure
+    .input(planRowsInput.extend({ runs: z.number().int().min(1).max(60), every: z.enum(["week", "month"]) }))
+    .mutation(async ({ input, ctx }) => {
+      const g = await perkGate(ctx, input.sender, "holder");
+      if (!g.allowed) return lockedAnswer(g);
+      const parsed = input.csv !== undefined ? parseCsv(input.csv) : { rows: (input.items ?? []).map((x, i) => ({ line: i + 1, ...x })), problems: [] };
+      const scheduled = parsed.rows.length * input.runs;
+      const max = g.state.limits.scheduledPayments;
+      if (scheduled > max) return { ok: false as const, locked: false as const, tier: g.tier, limit: max, reason: copy.perks.scheduleTooBig(String(max)) };
+      const { valid, problems } = validateRows(parsed.rows);
+      const fee = await ctx.deps.clients.publicClient.readContract({ address: required(ctx.deps.clients.escrow, "ESCROW_ADDRESS"), abi: ifsoEscrowAbi, functionName: "feeFor", args: [Kind.TIME] });
+      const per = totals(valid, fee);
+      return { ok: problems.length === 0, locked: false as const, tier: g.tier, limit: max, scheduled, every: input.every, runs: input.runs, problems, perRun: per, rows: valid.map((v) => ({ recipient: v.recipient, amount: v.amount.toString() })) };
+    }),
+
   /** Parse free text into a condition draft + preview (no chain writes). */
   parse: t.procedure
     .input(z.object({ text: z.string().min(3).max(300), tzOffsetMin: z.number().int().optional() }))

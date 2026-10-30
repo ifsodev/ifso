@@ -1,0 +1,1 @@
+ALTER TABLE "chain_events" ADD COLUMN "block_time" timestamp with time zone;

@@ -25,8 +25,12 @@ type Notify = (event: NotifyEvent) => Promise<void>;
 
 /** Events dropped by a rewind, so replaying the same transaction in a new block does not notify twice. */
 const droppedKeys = new Set<string>();
+const blockTimes = new Map<string, Date>();
 const eventKey = (tx: string, name: string, id?: string) => `${tx}:${name}:${id ?? ""}`;
-export const resetIndexerState = () => droppedKeys.clear();
+export const resetIndexerState = () => {
+  droppedKeys.clear();
+  blockTimes.clear();
+};
 
 export async function indexerTick(deps: Deps, notify: Notify, opts: { confirmations?: bigint } = {}) {
   const escrow = deps.clients.escrow;
@@ -98,6 +102,7 @@ async function rewind(deps: Deps, cursorBlock: bigint): Promise<{ block: bigint;
     if (q && !ev.escrowId) touchedQuestions.add(q);
   }
   if (droppedKeys.size > 50_000) droppedKeys.clear();
+  blockTimes.clear(); // a reorg can change the time of a block number
 
   await deps.db.transaction(async (tx) => {
     await tx.delete(chainEvents).where(gt(chainEvents.blockNumber, target));
@@ -151,6 +156,22 @@ async function rewind(deps: Deps, cursorBlock: bigint): Promise<{ block: bigint;
   }
 }
 
+/** Timestamp of a block, cached (a chunk of logs mostly shares a few blocks). A failed read leaves the time null. */
+async function blockTimeOf(deps: Deps, n: bigint): Promise<Date | null> {
+  const k = n.toString();
+  const hit = blockTimes.get(k);
+  if (hit) return hit;
+  try {
+    const b = await deps.clients.publicClient.getBlock({ blockNumber: n });
+    const d = new Date(Number(b.timestamp) * 1000);
+    if (blockTimes.size > 5_000) blockTimes.clear();
+    blockTimes.set(k, d);
+    return d;
+  } catch {
+    return null;
+  }
+}
+
 async function handleLog(deps: Deps, log: Log, escrow: Address, notify: Notify) {
   const isEscrow = log.address.toLowerCase() === escrow.toLowerCase();
   let decoded: { eventName: string; args: Record<string, unknown> };
@@ -162,11 +183,12 @@ async function handleLog(deps: Deps, log: Log, escrow: Address, notify: Notify) 
   const args = decoded.args;
   const escrowId = isEscrow && args.id !== undefined ? String(args.id) : undefined;
   const questionId = !isEscrow && args.questionId ? String(args.questionId) : undefined;
+  const blockTime = await blockTimeOf(deps, log.blockNumber!);
   const fresh = await deps.db.transaction(async (tx) => {
     const t = { ...deps, db: tx as unknown as Deps["db"] };
     const inserted = await tx
       .insert(chainEvents)
-      .values({ blockNumber: log.blockNumber!, logIndex: log.logIndex!, txHash: log.transactionHash!, address: log.address, name: decoded.eventName, args: JSON.parse(JSON.stringify(args, (_k, v) => (typeof v === "bigint" ? v.toString() : v))), escrowId })
+      .values({ blockNumber: log.blockNumber!, logIndex: log.logIndex!, txHash: log.transactionHash!, address: log.address, name: decoded.eventName, blockTime, args: JSON.parse(JSON.stringify(args, (_k, v) => (typeof v === "bigint" ? v.toString() : v))), escrowId })
       .onConflictDoNothing()
       .returning({ b: chainEvents.blockNumber });
     if (!inserted.length) return false; // already stored with its state change (same transaction)
