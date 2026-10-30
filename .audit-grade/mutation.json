@@ -1,0 +1,919 @@
+{
+ "killed": 113,
+ "total": 113,
+ "score": 100.0,
+ "results": [
+  {
+   "id": "M1-a",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-M1",
+   "why": "challenge acceptBy + maxStale may equal the deadline",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Challenge_AcceptByPlusMaxStaleEqualDeadline_Refused() (gas: 445182)"
+  },
+  {
+   "id": "M1-b",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-M1",
+   "why": "no acceptBy/maxStale rule for AT_DEADLINE challenges",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_AtDeadlineChallenge_AcceptByMustPrecedeDeadline() (gas: 440002)"
+  },
+  {
+   "id": "M2-a",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-M2",
+   "why": "two-sided TOUCH accepted again",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_TouchChallenge_RefusedAtCreation() (gas: 439846)"
+  },
+  {
+   "id": "M3-a",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-M3",
+   "why": "OUTCOME expiry ignores the panel window",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 492392)"
+  },
+  {
+   "id": "M3-b",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-M3",
+   "why": "OUTCOME expiry ignores the dispute window",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 552911)"
+  },
+  {
+   "id": "M3-c",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-M3",
+   "why": "OUTCOME expiry ignores the settle margin",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 554315)"
+  },
+  {
+   "id": "M4-a",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "a failing sender-side VOID payout reverts the whole VOID again",
+   "status": "KILLED",
+   "killedBy": "[FAIL: EvmError: Revert] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 588369)"
+  },
+  {
+   "id": "M4-b",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "a failing acceptor-side VOID payout reverts the whole VOID again",
+   "status": "KILLED",
+   "killedBy": "[FAIL: EvmError: Revert] test_Void_OwedAcceptorSide_CanRedirectThenIsPaid() (gas: 549623)"
+  },
+  {
+   "id": "M4-c",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "a gas-starved transfer can push a payable side into owed",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"starved side marked owed: 32 != 0\")] test_R1_M4_OutOfGasInsideTransferReverts_NotOwed() (gas: 7039512)"
+  },
+  {
+   "id": "M4-d",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "claimVoid does not clear the owed flag (double payout)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: Error != expected error: TransferFailed() != NotOpen()] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 973993)"
+  },
+  {
+   "id": "M4-e",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "claimVoid works on a side that is not owed",
+   "status": "KILLED",
+   "killedBy": "[FAIL: Error != expected error: TransferFailed() != NotOpen()] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 701023)"
+  },
+  {
+   "id": "M4-f",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "an owed sender side can no longer redirect its refund",
+   "status": "KILLED",
+   "killedBy": "[FAIL: NotOpen()] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 803061)"
+  },
+  {
+   "id": "M4-g",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "an owed acceptor side can no longer redirect its refund",
+   "status": "KILLED",
+   "killedBy": "[FAIL: NotOpen()] test_Void_OwedAcceptorSide_CanRedirectThenIsPaid() (gas: 615409)"
+  },
+  {
+   "id": "M4-h",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "refund addresses can change after the escrow is closed",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 1010358)"
+  },
+  {
+   "id": "M4-i",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M4",
+   "why": "owed flag is set on the wrong side (sender paid owed as counter)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"sender side owed: 0 != 32\")] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 630883)"
+  },
+  {
+   "id": "M5-a",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M5",
+   "why": "a repeated OK is accepted again (relayer-paid no-op)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M5_NoOpRevertsNoChange_RealChangesStillWork() (gas: 400998)"
+  },
+  {
+   "id": "M5-b",
+   "file": "IfsoEscrow.sol",
+   "finding": "R1-M5",
+   "why": "re-setting the same refund addresses is accepted again",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M5_NoOpRevertsNoChange_RealChangesStillWork() (gas: 539958)"
+  },
+  {
+   "id": "L1-a",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-L1",
+   "why": "a later corporate action VOIDs a decided result again",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"deadline price was pre-split and decided: should release\")] test_R1_L1_SplitAfterDeadline_VoidsADecidedResult() (gas: 757404)"
+  },
+  {
+   "id": "L1-b",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-L1",
+   "why": "a change in force before the deciding round no longer VOIDs",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"lazy change at the deciding round: VOID\")] test_R1_L1_ChangeAtOrBeforeDecidingRound_Voids() (gas: 1500752)"
+  },
+  {
+   "id": "L1-c",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-L1",
+   "why": "a differing multiplier is accepted whatever its schedule",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"VOID on corporate action\")] test_MultiplierChange_Voids() (gas: 721103)"
+  },
+  {
+   "id": "L1-d",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-L1",
+   "why": "a differing multiplier always VOIDs, even when scheduled after",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"change after the deciding round: decided result stands\")] test_R1_L1_AppliedChangeAfterDecidingRound_StillReleases() (gas: 784325)"
+  },
+  {
+   "id": "L1-e",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-L1",
+   "why": "an unreadable multiplier no longer fails closed",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"VOID, not RELEASED, when the multiplier is unreadable\")] test_Multiplier_UnreadableFailsClosedToVoid() (gas: 777827)"
+  },
+  {
+   "id": "L1-f",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "R1-L1",
+   "why": "a schedule change at the deciding round's exact second is ignored",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"applied change at the deciding round: VOID\")] test_R1_L1_ChangeAtOrBeforeDecidingRound_Voids() (gas: 1682293)"
+  },
+  {
+   "id": "E-cross-gte",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "GTE becomes strict",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"inclusive comparators\")] test_AtDeadline_EqualityCountsForGteAndLte() (gas: 1180040)"
+  },
+  {
+   "id": "E-cross-lte",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "LTE becomes strict",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"inclusive comparators\")] test_AtDeadline_EqualityCountsForGteAndLte() (gas: 1203674)"
+  },
+  {
+   "id": "E-time",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "TIME unlocks one second late",
+   "status": "KILLED",
+   "killedBy": "[FAIL: ConditionPending()] test_Cap_LoweredDoesNotBlockExits() (gas: 2514776)"
+  },
+  {
+   "id": "E-after-deadline",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "AT_DEADLINE can settle at the deadline second",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_AtDeadline_NotSettleableAtTheDeadlineSecond() (gas: 670825)"
+  },
+  {
+   "id": "E-round-after",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "a round stamped exactly at the deadline is refused",
+   "status": "KILLED",
+   "killedBy": "[FAIL: ConditionPending()] test_AtDeadline_EarlierRoundIsNotLastWhenNextIsAtTheDeadline() (gas: 786643)"
+  },
+  {
+   "id": "E-last-round",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "the last-round-before-deadline check is off by one",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_AtDeadline_EarlierRoundIsNotLastWhenNextIsAtTheDeadline() (gas: 767752)"
+  },
+  {
+   "id": "E-stale",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "a round exactly maxStale old counts as stale",
+   "status": "KILLED",
+   "killedBy": "[FAIL: ConditionPending()] test_AtDeadline_RoundExactlyMaxStaleOldIsFresh() (gas: 623431)"
+  },
+  {
+   "id": "E-hold",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "a print exactly at the hold limit VOIDs",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"decided on the print at the limit\")] test_AtDeadline_PrintExactlyAtTheHoldLimitDecides() (gas: 769263)"
+  },
+  {
+   "id": "E-hold-wait",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "no print is VOIDed one second early",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_AtDeadline_NoPrint_PendingUntilTheHoldLimitThenVoid() (gas: 653214)"
+  },
+  {
+   "id": "E-touch-from",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "TOUCH ignores the acceptance time",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Touch_RoundBeforeCreationOrNotCrossing_Pending() (gas: 655610)"
+  },
+  {
+   "id": "E-touch-window",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "TOUCH accepts rounds before the window",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Touch_RoundBeforeCreationOrNotCrossing_Pending() (gas: 655652)"
+  },
+  {
+   "id": "E-sequencer-grace",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "sequencer grace period boundary",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Sequencer_GraceBoundaryToTheSecond() (gas: 705134)"
+  },
+  {
+   "id": "E-sequencer-down",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "a down sequencer is ignored",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Sequencer_ReportedDownBlocksEvenWhenStartedLongAgo() (gas: 721958)"
+  },
+  {
+   "id": "E-outcome-swap",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "OUTCOME TRUE and FALSE swapped",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"panel outcome HOME\")] test_Dispute_PanelSidesWithDisputer() (gas: 746679)"
+  },
+  {
+   "id": "E-outcome-void",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "outcome 0 no longer means VOID",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"outcome 0 is VOID\")] test_Outcome_FinalZeroEvaluatesToVoid() (gas: 382421)"
+  },
+  {
+   "id": "E-pyth-conf",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "wide Pyth confidence band accepted",
+   "status": "KILLED",
+   "killedBy": "[FAIL: BadProof()] test_Pyth_AtDeadline_FirstUpdateAfterDeadline_AndFeeRefund() (gas: 545976)"
+  },
+  {
+   "id": "E-threshold",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "zero threshold accepted at creation",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Validate_ZeroThresholdRefused() (gas: 40439)"
+  },
+  {
+   "id": "E-pairing",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "feed/Stock Token pairing taken from the creator",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Validate_RegistryPairingAndMultiplier() (gas: 423101)"
+  },
+  {
+   "id": "E-expiry-room",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "AT_DEADLINE expiry ignores the hold window",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Validate_ExpiryMustCoverHoldWindow() (gas: 423238)"
+  },
+  {
+   "id": "E-multiplier-snapshot",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "-",
+   "why": "creation multiplier snapshot not checked",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Validate_RegistryPairingAndMultiplier() (gas: 499236)"
+  },
+  {
+   "id": "X-cap-amount",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "cap allows amount == cap + 1 (strict becomes loose)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected"
+  },
+  {
+   "id": "X-cap-counter",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "cap ignores the acceptor stake",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Cap_AboveReverts_AtCapPasses() (gas: 916891)"
+  },
+  {
+   "id": "X-cap-accept",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "accepting a challenge skips the cap in force now",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Cap_AcceptGated() (gas: 466932)"
+  },
+  {
+   "id": "X-fee-kind",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "OUTCOME escrows skip the resolver fee",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"creation + resolver fee: 250000 != 750000\")] test_ResolverFeeChargedForOutcome() (gas: 387785)"
+  },
+  {
+   "id": "X-fee-create",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "create reports a different fee than feeFor",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"creation + resolver fee: 250000 != 750000\")] test_ResolverFeeChargedForOutcome() (gas: 387625)"
+  },
+  {
+   "id": "X-fee-pull",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "the fee is not forwarded to the router (pull)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"router fee == reported fee: 0 != 2000000\")] test_CreateWithAuthorization_SignedValueEqualsPulled_AndStaleFeeFails() (gas: 737931)"
+  },
+  {
+   "id": "X-fee-auth",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "the fee is not forwarded to the router (gasless create)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"creation + resolver fee: 0 != 750000\")] test_ResolverFeeChargedForOutcome() (gas: 355841)"
+  },
+  {
+   "id": "X-fee-cap",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "setFees accepts a fee equal to the cap plus one unit",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_OwnerHasNoPathToEscrowedFunds() (gas: 504085)"
+  },
+  {
+   "id": "X-fee-total",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "batch create pulls the amounts without the fees",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"batch pull == sum of amount + reported fee: 40000000 != 42100000\")] test_CreateBatch_PullsSumOfAmountsAndReportedFees() (gas: 770148)"
+  },
+  {
+   "id": "X-min-amount",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "minimum amount boundary",
+   "status": "KILLED",
+   "killedBy": "[FAIL: InvalidParams()"
+  },
+  {
+   "id": "X-challenge-time",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "a TIME condition allowed for a challenge",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_ChallengeShapeRules() (gas: 356215)"
+  },
+  {
+   "id": "X-challenge-cancel",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "a challenge may be cancellable",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_ChallengeShapeRules() (gas: 417174)"
+  },
+  {
+   "id": "X-acceptby-expiry",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "acceptBy may reach the expiry",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Challenge_AcceptByAtOrAfterExpiryRefused() (gas: 338885)"
+  },
+  {
+   "id": "X-referee-sender",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "the sender may be its own referee",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Referee_CannotBeSenderOrRecipient() (gas: 316531)"
+  },
+  {
+   "id": "X-referee-acceptor",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "the referee may accept the challenge",
+   "status": "KILLED",
+   "killedBy": "[FAIL: Error != expected error: TransferFromFailed() != BadRecipient()] test_Accept_RefereeAsAcceptor_Refused() (gas: 462030)"
+  },
+  {
+   "id": "X-accept-window",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "accept window boundary",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AcceptWindowClosed()] test_Accept_AllowedAtTheAcceptByInstant() (gas: 379673)"
+  },
+  {
+   "id": "X-accept-self",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "the sender may accept its own challenge",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Accept_SenderOwnLinkChallenge_Refused() (gas: 481473)"
+  },
+  {
+   "id": "X-accept-status",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "accept works on a closed escrow",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"balance == obligations: 961553554 != 258720155\")] invariant_BalanceMatchesObligations"
+  },
+  {
+   "id": "X-accept-twice",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "a challenge can be accepted twice",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Accept_Twice_Reverts() (gas: 504438)"
+  },
+  {
+   "id": "X-activefrom",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "acceptance does not restart the TOUCH window",
+   "status": "EQUIVALENT",
+   "detail": "activeFrom only feeds TOUCH windows and two-sided TOUCH is refused (R1-M2)"
+  },
+  {
+   "id": "X-claim-sig",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "claim does not check the link signature",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Link_FrontRunnerCannotRedirect() (gas: 419692)"
+  },
+  {
+   "id": "X-claim-twice",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "a link can be claimed twice",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Link_WrongKeyAndSecondClaimRevert() (gas: 591432)"
+  },
+  {
+   "id": "X-settle-expired",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "settle works at the expiry second",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Settle_RefusedAtTheExpirySecond_RefundAllowed() (gas: 420646)"
+  },
+  {
+   "id": "X-claim-expired",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "claim works at the expiry second",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Link_ClaimAfterExpiryReverts() (gas: 423592)"
+  },
+  {
+   "id": "X-settle-unaccepted",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "a challenge can settle before it is accepted",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M1_AtDeadline_AcceptAfterResultKnown_MarketClosed() (gas: 790821)"
+  },
+  {
+   "id": "X-ok-parties",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "PARTIES mode releases on one OK",
+   "status": "KILLED",
+   "killedBy": "[FAIL: NotOpen()] test_DecideBySig_Eoa_And_Replay() (gas: 549416)"
+  },
+  {
+   "id": "X-decline-who",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "anyone may decline for the recipient",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Parties_RecipientDeclineReturns_SenderCannotSelfRefund() (gas: 378762)"
+  },
+  {
+   "id": "X-referee-who",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "anyone may act as the referee",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Referee_OnlyTwoPaths() (gas: 388483)"
+  },
+  {
+   "id": "X-cancel-who",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "anyone may cancel",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Cancel_OnlyWhenCancellable() (gas: 697873)"
+  },
+  {
+   "id": "X-refund-addr-who",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "anyone may change the refund addresses",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 773823)"
+  },
+  {
+   "id": "X-cancel-accepted",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "an accepted challenge may be cancelled",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_CancelOnlyBeforeAccept() (gas: 494147)"
+  },
+  {
+   "id": "X-refund-early",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "refund works at the expiry second minus one",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Refund_RefusedOneSecondBeforeExpiry() (gas: 398009)"
+  },
+  {
+   "id": "X-refund-unaccepted",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "an unaccepted challenge cannot refund after acceptBy",
+   "status": "KILLED",
+   "killedBy": "[FAIL: NotExpired()] test_Unaccepted_RefundAfterAcceptWindow() (gas: 455452)"
+  },
+  {
+   "id": "X-sig-deadline-decide",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "decideBySig ignores the deadline",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_DecideBySig_Expired() (gas: 403977)"
+  },
+  {
+   "id": "X-sig-deadline-refund",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "setRefundAddressesBySig ignores the deadline",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_RefundRedirectBySig_ExpiredRefused() (gas: 425764)"
+  },
+  {
+   "id": "X-nonce-decide",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "decideBySig nonce never increments (replay)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: Error != expected error: NoChange() != BadSignature()] test_DecideBySig_Eoa_And_Replay() (gas: 432188)"
+  },
+  {
+   "id": "X-nonce-refund",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "setRefundAddressesBySig nonce never increments (replay)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: Error != expected error: NoChange() != BadSignature()] test_RefundRedirectBySig_SenderNeverTransacts() (gas: 456281)"
+  },
+  {
+   "id": "X-release-to",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "release pays the sender",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"to recipient: 1000000000000 != 1000020000000\")] test_Referee_OnlyTwoPaths() (gas: 444970)"
+  },
+  {
+   "id": "X-release-pot",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "a challenge release pays only the sender stake",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"everything exited: 1000000000 != 0\")] test_Cap_LoweredDoesNotBlockExits() (gas: 2872127)"
+  },
+  {
+   "id": "X-return-pot",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "a returned challenge leaves the acceptor stake behind",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"sender side receives both stakes: 20000000 != 40000000\")] test_NamedChallenge_RefereeToSender() (gas: 533436)"
+  },
+  {
+   "id": "X-void-sides",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "VOID pays the sender side with the acceptor amount",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"sender own stake: 30000000 != 20000000\")] test_PanelTimeout_VoidsAndBondsReturn_TwoSidedVoided() (gas: 935352)"
+  },
+  {
+   "id": "X-void-alt",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "alt acceptor destination goes to the wrong party",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"acceptor paid: 0 != 500000000\")] test_R1_M4_OwedCounterSide_SenderPaid_AcceptorClaimsAlt() (gas: 723987)"
+  },
+  {
+   "id": "X-no-alternate",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "alt sender refund with no alternate set pays address 0",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Refund_NoAlternateConfigured() (gas: 417036)"
+  },
+  {
+   "id": "X-refund-self",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "refund address may be the escrow itself",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_RefundAddresses_EscrowItselfRefused() (gas: 378464)"
+  },
+  {
+   "id": "X-paused",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "creation pause ignored on create",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Pause_GatesOnlyNewEntries() (gas: 886973)"
+  },
+  {
+   "id": "X-maxamount-min",
+   "file": "IfsoEscrow.sol",
+   "finding": "-",
+   "why": "setMaxAmount accepts a cap below the minimum",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Cap_OnlyOwner() (gas: 105045)"
+  },
+  {
+   "id": "R-dispute-window",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "dispute window boundary",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Dispute_AfterWindowReverts() (gas: 186593)"
+  },
+  {
+   "id": "R-finalize-early",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "an undisputed proposal finalizes one second early",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_FinalizeOneSecondEarlyRefused() (gas: 297792)"
+  },
+  {
+   "id": "R-panel-window",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "panel can answer after its window",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() (gas: 462462)"
+  },
+  {
+   "id": "R-timeout-early",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "a disputed question times out early",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() (gas: 456574)"
+  },
+  {
+   "id": "R-pot",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "the panel winner gets one bond, not two",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"disputer receives both bonds: 100000000 != 200000000\")] test_Dispute_PanelSidesWithDisputer() (gas: 768957)"
+  },
+  {
+   "id": "R-winner",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "panel winner swapped",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"disputer receives both bonds: 0 != 200000000\")] test_Dispute_PanelSidesWithDisputer() (gas: 762007)"
+  },
+  {
+   "id": "R-timeout-credit",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "a timed-out dispute keeps the disputer bond",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"disputer bond back: 0 != 100000000\")] test_PanelTimeout_VoidsAndBondsReturn_TwoSidedVoided() (gas: 944167)"
+  },
+  {
+   "id": "R-creator",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "anyone can register questions",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_OnlyCreatorsRegisterQuestions_PanelChangeDelayed() (gas: 104279)"
+  },
+  {
+   "id": "R-panel-only",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "anyone can act as the panel",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Dispute_PanelSidesWithDisputer() (gas: 608834)"
+  },
+  {
+   "id": "R-withdraw-reset",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "claimable bond is not zeroed (double withdraw)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: Error != expected error: TransferFailed() != NothingToWithdraw()] test_Resolver_WithdrawBondOnlyOnce() (gas: 389935)"
+  },
+  {
+   "id": "R-panel-delay",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "panel change delay shortened",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelChangeNeedsTheFullDelay() (gas: 94422)"
+  },
+  {
+   "id": "R-panel-apply",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "panel change applies before its delay",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_OnlyCreatorsRegisterQuestions_PanelChangeDelayed() (gas: 121664)"
+  },
+  {
+   "id": "R-propose-early",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "a result may be proposed before earliestResolve",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Undisputed_Finalize_Settles() (gas: 498829)"
+  },
+  {
+   "id": "R-outcome-range",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "propose accepts an outcome above numOutcomes",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_OutcomeAboveRangeRefused() (gas: 240695)"
+  },
+  {
+   "id": "R-bond-snapshot",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "a proposal's bond is not snapshotted",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"disputer matches the snapshotted bond: 250000000 != 100000000\")] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() (gas: 376851)"
+  },
+  {
+   "id": "F-treasury",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "treasury share changed",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"work: 790000 != 800000\")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 362352)"
+  },
+  {
+   "id": "F-perks",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "perks share changed",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"perks 5%: 60000 != 50000\")] test_Distribute_80_10_5_5() (gas: 237023)"
+  },
+  {
+   "id": "F-burn",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "burn share changed",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"burn 5%: 40000 != 50000\")] test_Distribute_80_10_5_5() (gas: 244765)"
+  },
+  {
+   "id": "F-dust",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "the work share forgets the burn share",
+   "status": "KILLED",
+   "killedBy": "[FAIL: TransferFailed()] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 324148)"
+  },
+  {
+   "id": "F-sweep-usdg",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "USDG fee revenue can be swept to the treasury",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_SweepCannotTouchUsdg() (gas: 52260)"
+  },
+  {
+   "id": "F-recipients-zero",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "a zero fee destination is accepted",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 85352)"
+  },
+  {
+   "id": "O-accept-who",
+   "file": "utils/Owned2Step.sol",
+   "finding": "-",
+   "why": "anyone can accept a pending ownership transfer",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_TwoStepOwnership_OnEveryOwnedContract() (gas: 123087)"
+  },
+  {
+   "id": "O-only-owner",
+   "file": "utils/Owned2Step.sol",
+   "finding": "-",
+   "why": "onlyOwner lets anyone through",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 55439)"
+  },
+  {
+   "id": "O-pending-clear",
+   "file": "utils/Owned2Step.sol",
+   "finding": "-",
+   "why": "pending owner is not cleared after accepting",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"pending cleared\")] test_TwoStepOwnership_OnEveryOwnedContract() (gas: 157485)"
+  },
+  {
+   "id": "O-zero-owner",
+   "file": "utils/Owned2Step.sol",
+   "finding": "-",
+   "why": "a zero initial owner is accepted",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_ZeroOwnerRefusedAtDeploy() (gas: 6437)"
+  }
+ ]
+}
