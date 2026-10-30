@@ -99,17 +99,24 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     }
 
     // ------------------------------------------------------------------ admin
+    /// @notice Allows or removes a service key that may register questions.
+    /// @param creator Service key allowed to register questions.
+    /// @param allowed true allows the key, false removes it (questions already registered are unaffected).
     function setCreator(address creator, bool allowed) external onlyOwner {
         isCreator[creator] = allowed;
         emit CreatorSet(creator, allowed);
     }
 
+    /// @notice Sets the bond for NEW proposals and disputes.
+    /// @param bond_ New bond in USDG base units (within MIN_BOND..MAX_BOND).
     function setBondAmount(uint96 bond_) external onlyOwner {
         if (bond_ < MIN_BOND || bond_ > MAX_BOND) revert BondOutOfBounds();
         bondAmount = bond_; // proposals already posted keep their snapshotted bond
         emit BondAmountSet(bond_);
     }
 
+    /// @notice Queues a new fallback panel; it takes effect only after PANEL_CHANGE_DELAY (48 h).
+    /// @param newPanel Panel multisig that takes over after PANEL_CHANGE_DELAY.
     function queuePanel(address newPanel) external onlyOwner {
         if (newPanel == address(0)) revert ZeroAddress();
         pendingPanel = newPanel;
@@ -117,6 +124,7 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
         emit PanelChangeQueued(newPanel, pendingPanelAt);
     }
 
+    /// @notice Anyone applies a queued panel change once its delay has passed.
     function applyPanel() external {
         if (pendingPanel == address(0)) revert NoPendingPanel();
         if (block.timestamp < pendingPanelAt) revert TooEarly();
@@ -130,6 +138,9 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     /// @notice questionId = keccak256(abi.encode(specHash, closeTime, earliestResolve, numOutcomes)).
     /// @param closeTime       when the answer starts to be knowable (kickoff, market close)
     /// @param earliestResolve earliest proposal time (e.g. scheduled full time + buffer)
+    /// @param specHash keccak256 of the question spec document.
+    /// @param numOutcomes Number of outcomes (2..MAX_OUTCOMES); outcome 0 is VOID.
+    /// @param specURI Where the question spec is published.
     function createQuestion(
         bytes32 specHash,
         uint64 closeTime,
@@ -153,6 +164,8 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
 
     /// @notice Anyone may propose after earliestResolve by posting the bond.
     /// @param sourcesHash hash of the evidence bundle (provider ids, fetched-at times, response digests)
+    /// @param questionId Question id (see questionIdFor).
+    /// @param outcome Outcome index proposed or decided.
     function propose(bytes32 questionId, uint8 outcome, bytes32 sourcesHash) external nonReentrant {
         Question storage q = _q[questionId];
         if (q.state != State.OPEN) revert WrongState();
@@ -170,6 +183,8 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     }
 
     /// @notice Anyone may dispute inside the window by matching the proposer's bond.
+    /// @param questionId Question id (see questionIdFor).
+    /// @param evidenceHash keccak256 of the disputer's evidence.
     function dispute(bytes32 questionId, bytes32 evidenceHash) external nonReentrant {
         Question storage q = _q[questionId];
         if (q.state != State.PROPOSED) revert WrongState();
@@ -182,6 +197,7 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     }
 
     /// @notice Anyone finalizes an undisputed proposal once the window has passed.
+    /// @param questionId Question id (see questionIdFor).
     function finalize(bytes32 questionId) external {
         Question storage q = _q[questionId];
         if (q.state != State.PROPOSED) revert WrongState();
@@ -193,6 +209,8 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     }
 
     /// @notice Fallback panel decides a disputed question (outcome 0 = VOID allowed).
+    /// @param questionId Question id (see questionIdFor).
+    /// @param outcome Outcome index proposed or decided.
     function panelResolve(bytes32 questionId, uint8 outcome) external {
         if (msg.sender != panel) revert NotPanel();
         Question storage q = _q[questionId];
@@ -207,6 +225,7 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     }
 
     /// @notice Anyone voids a disputed question the panel did not decide in time; bonds go back.
+    /// @param questionId Question id (see questionIdFor).
     function finalizeTimedOut(bytes32 questionId) external {
         Question storage q = _q[questionId];
         if (q.state != State.DISPUTED) revert WrongState();
@@ -217,6 +236,8 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
         emit PanelTimedOut(questionId);
     }
 
+    /// @notice Withdraws the caller's claimable bonds and rewards.
+    /// @param to Where the claimable bonds are sent.
     function withdrawBond(address to) external nonReentrant {
         uint256 amt = claimableBond[msg.sender];
         if (amt == 0) revert NothingToWithdraw();
@@ -231,20 +252,31 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     }
 
     // ------------------------------------------------------------------ views
+    /// @notice Current state and outcome of a question.
+    /// @param questionId Question id (see questionIdFor).
     function outcomeOf(bytes32 questionId) external view returns (State state, uint8 outcome) {
         Question storage q = _q[questionId];
         return (q.state, q.finalOutcome);
     }
 
+    /// @notice State, outcome, close time and earliest-resolve time of a question.
+    /// @param questionId Question id (see questionIdFor).
     function questionInfo(bytes32 questionId) external view returns (State, uint8, uint64, uint64) {
         Question storage q = _q[questionId];
         return (q.state, q.numOutcomes, q.closeTime, q.earliestResolve);
     }
 
+    /// @notice Full question record.
+    /// @param questionId Question id (see questionIdFor).
     function getQuestion(bytes32 questionId) external view returns (Question memory) {
         return _q[questionId];
     }
 
+    /// @notice Deterministic question id from its spec and timing.
+    /// @param specHash keccak256 of the question spec document.
+    /// @param closeTime When the question closes for new escrows.
+    /// @param earliestResolve Earliest time a result may be proposed.
+    /// @param numOutcomes Number of outcomes (2..MAX_OUTCOMES); outcome 0 is VOID.
     function questionIdFor(bytes32 specHash, uint64 closeTime, uint64 earliestResolve, uint8 numOutcomes)
         external
         pure

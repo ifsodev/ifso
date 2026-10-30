@@ -118,6 +118,9 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     }
 
     // ================================================================== admin (never touches escrows)
+    /// @notice Sets the flat creation and resolver fees for NEW escrows (each capped at 5 USDG).
+    /// @param creationFee_ Flat creation fee in USDG base units (<= 5 USDG).
+    /// @param resolverFee_ Extra flat fee for OUTCOME escrows in USDG base units (<= 5 USDG).
     function setFees(uint96 creationFee_, uint96 resolverFee_) external onlyOwner {
         if (creationFee_ > MAX_CREATION_FEE || resolverFee_ > MAX_RESOLVER_FEE) revert FeeTooHigh();
         creationFee = creationFee_;
@@ -127,6 +130,7 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
 
     /// @notice Pauses NEW escrows and challenge acceptances only. Claims, settles, decisions, cancels and
     ///         refunds keep working while paused.
+    /// @param paused true pauses new escrows and accepts; exits are never paused.
     function setCreationPaused(bool paused) external onlyOwner {
         creationPaused = paused;
         emit CreationPaused(paused);
@@ -143,6 +147,7 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
 
     // ================================================================== create
     /// @notice Create from msg.sender's USDG allowance (EOA approve, or a smart-account batch approve+create).
+    /// @param p Escrow parameters (amounts, recipient or link key, refund addresses, expiry, condition).
     function create(CreateParams calldata p) external nonReentrant returns (uint256 id) {
         uint96 fee;
         (id, fee) = _create(p, msg.sender);
@@ -150,6 +155,11 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     }
 
     /// @notice Create using an EIP-2612 permit (one transaction for an EOA). A front-run permit is tolerated.
+    /// @param p Escrow parameters (amounts, recipient or link key, refund addresses, expiry, condition).
+    /// @param permitDeadline EIP-2612 permit deadline.
+    /// @param v Permit signature v.
+    /// @param r Permit signature r.
+    /// @param s Permit signature s.
     function createWithPermit(CreateParams calldata p, uint256 permitDeadline, uint8 v, bytes32 r, bytes32 s)
         external
         nonReentrant
@@ -165,6 +175,11 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     /// @notice Gasless for the sender: anyone relays a USDG EIP-3009 receiveWithAuthorization signed by `from`
     ///         (65-byte r||s||v in `authSig`). Its nonce MUST equal createAuthNonce(from, p), so the
     ///         authorization only works with these exact params (a copied tx cannot re-point the money).
+    /// @param p Escrow parameters (amounts, recipient or link key, refund addresses, expiry, condition).
+    /// @param from USDG holder that signed the EIP-3009 authorization (becomes the sender).
+    /// @param validAfter EIP-3009 validAfter (unix seconds).
+    /// @param validBefore EIP-3009 validBefore (unix seconds).
+    /// @param authSig 65-byte r||s||v EIP-3009 receiveWithAuthorization signature.
     function createWithAuthorization(
         CreateParams calldata p,
         address from,
@@ -179,6 +194,7 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     }
 
     /// @notice Bulk create (premium payroll-style runs). One allowance pull for the whole batch.
+    /// @param ps One CreateParams per escrow in the batch.
     function createBatch(CreateParams[] calldata ps) external nonReentrant returns (uint256[] memory ids) {
         ids = new uint256[](ps.length);
         uint256 total;
@@ -192,6 +208,9 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
         _pull(msg.sender, total, fees);
     }
 
+    /// @notice EIP-3009 nonce that binds a gasless create to these exact params.
+    /// @param from USDG holder that signed the EIP-3009 authorization (becomes the sender).
+    /// @param p Escrow parameters (amounts, recipient or link key, refund addresses, expiry, condition).
     function createAuthNonce(address from, CreateParams calldata p) public pure returns (bytes32) {
         return keccak256(abi.encode(CREATE_AUTH_TAG, from, keccak256(abi.encode(p))));
     }
@@ -273,12 +292,22 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     // ================================================================== two-sided accept
     /// @notice Invitee accepts a challenge, paying their stake from allowance. Link challenges need the link
     ///         key's Accept signature over the acceptor. Named challenges need msg.sender == recipient.
+    /// @param id Escrow id (see idFor).
+    /// @param linkSig Signature by the claim-link key over the EIP-712 message (empty for named challenges).
+    /// @param counterRefundTo Where the acceptor's own amount goes back on VOID or expiry (0 = the acceptor).
     function accept(uint256 id, bytes calldata linkSig, address counterRefundTo) external nonReentrant {
         Escrow storage e = _accept(id, msg.sender, linkSig, counterRefundTo);
         address(usdg).safeTransferFrom(msg.sender, address(this), e.counterAmount);
     }
 
     /// @notice Gasless accept via EIP-3009; nonce = acceptAuthNonce(id, acceptor, counterRefundTo).
+    /// @param id Escrow id (see idFor).
+    /// @param acceptor Address that joins the challenge and pays the counter amount.
+    /// @param linkSig Signature by the claim-link key over the EIP-712 message (empty for named challenges).
+    /// @param counterRefundTo Where the acceptor's own amount goes back on VOID or expiry (0 = the acceptor).
+    /// @param validAfter EIP-3009 validAfter (unix seconds).
+    /// @param validBefore EIP-3009 validBefore (unix seconds).
+    /// @param authSig 65-byte r||s||v EIP-3009 receiveWithAuthorization signature.
     function acceptWithAuthorization(
         uint256 id,
         address acceptor,
@@ -306,6 +335,10 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
         usdg.receiveWithAuthorization(from, address(this), value, validAfter, validBefore, nonce, v, r, s);
     }
 
+    /// @notice EIP-3009 nonce that binds a gasless accept to this escrow, acceptor and refund address.
+    /// @param id Escrow id (see idFor).
+    /// @param acceptor Address that joins the challenge and pays the counter amount.
+    /// @param counterRefundTo Where the acceptor's own amount goes back on VOID or expiry (0 = the acceptor).
     function acceptAuthNonce(uint256 id, address acceptor, address counterRefundTo) public pure returns (bytes32) {
         return keccak256(abi.encode(ACCEPT_AUTH_TAG, id, acceptor, counterRefundTo));
     }
@@ -341,6 +374,9 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     // ================================================================== claim links
     /// @notice Binds the recipient of a link payment (anyone may submit; the link signature fixes the
     ///         recipient). If the condition is already met, pays immediately.
+    /// @param id Escrow id (see idFor).
+    /// @param recipient Address the payment is bound to.
+    /// @param linkSig Signature by the claim-link key over the EIP-712 message (empty for named challenges).
     function claim(uint256 id, address recipient, bytes calldata linkSig) external nonReentrant {
         Escrow storage e = _escrows[id];
         if (e.linkKey == address(0)) revert NotALink();
@@ -364,6 +400,7 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     /// @notice Anyone (keeper, recipient, sender) settles once the condition is decidable.
     /// @param proof     see IIfsoConditionEvaluator.evaluate
     /// @param senderAlt pay the sender side to its alternate refund address (screened primary)
+    /// @param id Escrow id (see idFor).
     function settle(uint256 id, bytes calldata proof, bool senderAlt)
         external
         payable
@@ -385,22 +422,31 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     /// @notice "Tap OK". Sender or bound recipient.
     ///         PARTIES mode: releases when both have tapped OK. Every other mode: the sender's OK alone
     ///         releases (a concession against itself); the recipient's OK is recorded only.
+    /// @param id Escrow id (see idFor).
     function approve(uint256 id) external nonReentrant {
         _ok(id, msg.sender);
     }
 
     /// @notice Recipient gives the money back to the sender (always allowed: a concession against itself).
+    /// @param id Escrow id (see idFor).
     function decline(uint256 id) external nonReentrant {
         _decline(id, msg.sender);
     }
 
     /// @notice Named referee decides. Only two outcomes exist: release to recipient, or return to sender.
+    /// @param id Escrow id (see idFor).
+    /// @param toRecipient true releases to the recipient, false returns to the sender.
     function refereeDecide(uint256 id, bool toRecipient) external nonReentrant {
         _referee(id, msg.sender, toRecipient);
     }
 
     /// @notice Relayed decision signed (EIP-712 Decision) by the sender, recipient or referee.
     ///         EOA or EIP-1271 smart account (e.g. passkey Kernel) signatures.
+    /// @param id Escrow id (see idFor).
+    /// @param signer Sender, recipient or referee that signed the decision (EOA or EIP-1271 account).
+    /// @param action 1 OK, 2 decline, 3 referee release, 4 referee return.
+    /// @param deadline Signature deadline (unix seconds).
+    /// @param sig EIP-712 signature (EOA) or EIP-1271 signature bytes (smart account).
     function decideBySig(uint256 id, address signer, uint8 action, uint256 deadline, bytes calldata sig)
         external
         nonReentrant
@@ -454,6 +500,7 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
 
     // ================================================================== cancel / refund
     /// @notice Sender cancels a cancellable one-sided payment, or a challenge nobody accepted yet.
+    /// @param id Escrow id (see idFor).
     function cancel(uint256 id) external nonReentrant {
         Escrow storage e = _escrows[id];
         if (msg.sender != e.sender) revert NotAuthorized();
@@ -470,6 +517,9 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
 
     /// @notice ANYONE refunds after expiry (or after an unaccepted challenge's accept window).
     ///         Never paused. The caller may route each side to its preset alternate address.
+    /// @param id Escrow id (see idFor).
+    /// @param senderAlt Send the sender side to its alternate refund address instead of the primary.
+    /// @param counterAlt Send the acceptor side to the acceptor address instead of its refund address.
     function refund(uint256 id, bool senderAlt, bool counterAlt) external nonReentrant {
         Escrow storage e = _escrows[id];
         if (e.status != Status.OPEN && e.status != Status.MET) revert NotOpen();
@@ -485,6 +535,9 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     }
 
     /// @notice Sender changes its refund destinations (e.g. its wallet got screened).
+    /// @param id Escrow id (see idFor).
+    /// @param refundTo Primary refund destination (never 0).
+    /// @param altRefundTo Alternate refund destination (0 = none).
     function setRefundAddresses(uint256 id, address refundTo, address altRefundTo) external nonReentrant {
         Escrow storage e = _escrows[id];
         if (msg.sender != e.sender) revert NotAuthorized();
@@ -493,6 +546,11 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
 
     /// @notice Relayed version: the sender signs, anyone submits. Lets a sender that cannot transact on RHC
     ///         (screened at the sequencer) still steer its refund.
+    /// @param id Escrow id (see idFor).
+    /// @param refundTo Primary refund destination (never 0).
+    /// @param altRefundTo Alternate refund destination (0 = none).
+    /// @param deadline Signature deadline (unix seconds).
+    /// @param sig EIP-712 signature (EOA) or EIP-1271 signature bytes (smart account).
     function setRefundAddressesBySig(
         uint256 id,
         address refundTo,
@@ -521,6 +579,8 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     }
 
     /// @notice Challenge acceptor changes where its own stake is returned on VOID / expiry.
+    /// @param id Escrow id (see idFor).
+    /// @param counterRefundTo Where the acceptor's own amount goes back on VOID or expiry (0 = the acceptor).
     function setCounterRefundTo(uint256 id, address counterRefundTo) external nonReentrant {
         Escrow storage e = _escrows[id];
         if (msg.sender != e.recipient || e.flags & F_ACCEPTED == 0) revert NotAuthorized();
@@ -583,34 +643,62 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     }
 
     // ================================================================== views
+    /// @notice Full escrow record.
+    /// @param id Escrow id (see idFor).
     function getEscrow(uint256 id) external view returns (Escrow memory) {
         return _escrows[id];
     }
 
+    /// @notice Condition the escrow was created with.
+    /// @param id Escrow id (see idFor).
     function getCondition(uint256 id) external view returns (Condition memory) {
         return _conditions[id];
     }
 
+    /// @notice Escrow id for a sender and salt: keccak256(abi.encode(sender, salt)).
+    /// @param sender Escrow creator.
+    /// @param salt Client-chosen salt.
     function idFor(address sender, bytes32 salt) public pure returns (uint256) {
         return uint256(keccak256(abi.encode(sender, salt)));
     }
 
+    /// @notice Flat fee charged at creation for a condition kind (OUTCOME adds the resolver fee).
+    /// @param kind Condition kind.
     function feeFor(Kind kind) public view returns (uint96) {
         return kind == Kind.OUTCOME ? creationFee + resolverFee : creationFee;
     }
 
+    /// @notice EIP-712 digest a claim-link key signs to bind a recipient.
+    /// @param id Escrow id (see idFor).
+    /// @param recipient Address the payment is bound to.
+    /// @param conditionHash keccak256(abi.encode(condition)).
     function hashClaim(uint256 id, address recipient, bytes32 conditionHash) external view returns (bytes32) {
         return _hashTypedData(keccak256(abi.encode(CLAIM_TYPEHASH, id, recipient, conditionHash)));
     }
 
+    /// @notice EIP-712 digest a claim-link key signs to let an acceptor join a link challenge.
+    /// @param id Escrow id (see idFor).
+    /// @param acceptor Address that joins the challenge and pays the counter amount.
+    /// @param conditionHash keccak256(abi.encode(condition)).
     function hashAccept(uint256 id, address acceptor, bytes32 conditionHash) external view returns (bytes32) {
         return _hashTypedData(keccak256(abi.encode(ACCEPT_TYPEHASH, id, acceptor, conditionHash)));
     }
 
+    /// @notice EIP-712 digest for a relayed decision (decideBySig).
+    /// @param id Escrow id (see idFor).
+    /// @param action 1 OK, 2 decline, 3 referee release, 4 referee return.
+    /// @param nonce Signer nonce (see nonces).
+    /// @param deadline Signature deadline (unix seconds).
     function hashDecision(uint256 id, uint8 action, uint256 nonce, uint256 deadline) external view returns (bytes32) {
         return _hashTypedData(keccak256(abi.encode(DECISION_TYPEHASH, id, action, nonce, deadline)));
     }
 
+    /// @notice EIP-712 digest for a relayed refund-address change (setRefundAddressesBySig).
+    /// @param id Escrow id (see idFor).
+    /// @param refundTo Primary refund destination (never 0).
+    /// @param altRefundTo Alternate refund destination (0 = none).
+    /// @param nonce Signer nonce (see nonces).
+    /// @param deadline Signature deadline (unix seconds).
     function hashRefundRedirect(uint256 id, address refundTo, address altRefundTo, uint256 nonce, uint256 deadline)
         external
         view
@@ -620,6 +708,8 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
             _hashTypedData(keccak256(abi.encode(REFUND_REDIRECT_TYPEHASH, id, refundTo, altRefundTo, nonce, deadline)));
     }
 
+    /// @notice Condition hash that link signatures commit to.
+    /// @param c Condition to hash.
     function conditionHashOf(Condition calldata c) external pure returns (bytes32) {
         return keccak256(abi.encode(c));
     }

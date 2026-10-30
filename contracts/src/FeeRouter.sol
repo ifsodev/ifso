@@ -37,6 +37,11 @@ contract FeeRouter is Owned2Step {
         _set(work_, treasury_, perks_, burn_);
     }
 
+    /// @notice Changes the four fee split destinations (80 / 10 / 5 / 5).
+    /// @param work_ Receives 80% (work).
+    /// @param treasury_ Receives 10% (treasury).
+    /// @param perks_ Receives 5% (perks).
+    /// @param burn_ Receives 5% (burn).
     function setRecipients(address work_, address treasury_, address perks_, address burn_) external onlyOwner {
         _set(work_, treasury_, perks_, burn_);
     }
@@ -66,6 +71,7 @@ contract FeeRouter is Owned2Step {
     }
 
     /// @notice Tokens other than USDG sent here by mistake go to the treasury.
+    /// @param token Token to forward (any token except USDG).
     function sweep(address token) external {
         if (token == usdg) revert NotSweepable();
         uint256 bal = IERC20(token).balanceOf(address(this));

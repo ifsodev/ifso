@@ -24,11 +24,14 @@ abstract contract Owned2Step {
         _;
     }
 
+    /// @notice Starts a two-step ownership transfer; the new owner must accept.
+    /// @param newOwner Address that must call acceptOwnership to take over.
     function transferOwnership(address newOwner) external onlyOwner {
         pendingOwner = newOwner;
         emit OwnershipTransferStarted(owner, newOwner);
     }
 
+    /// @notice Pending owner completes the ownership transfer.
     function acceptOwnership() external {
         if (msg.sender != pendingOwner) revert NotPendingOwner();
         emit OwnershipTransferred(owner, msg.sender);

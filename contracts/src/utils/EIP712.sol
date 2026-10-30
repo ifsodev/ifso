@@ -18,6 +18,7 @@ abstract contract EIP712 {
         _cachedDomainSeparator = _buildDomainSeparator();
     }
 
+    /// @notice EIP-712 domain separator of this contract on this chain.
     function DOMAIN_SEPARATOR() public view returns (bytes32) {
         return block.chainid == _cachedChainId ? _cachedDomainSeparator : _buildDomainSeparator();
     }

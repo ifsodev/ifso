@@ -82,18 +82,29 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
     }
 
     // ------------------------------------------------------------------ registry admin (new escrows only)
+    /// @notice Allows or removes a Chainlink feed for NEW escrows and pairs it with its Stock Token.
+    /// @param feed Chainlink AggregatorV3 proxy address.
+    /// @param allowed true allows it for NEW escrows, false stops new escrows from using it (existing ones are unaffected).
+    /// @param stockToken ERC-8056 Stock Token paired with the feed (0 for crypto feeds).
     function setFeed(address feed, bool allowed, address stockToken) external onlyOwner {
         feedAllowed[feed] = allowed;
         feedStockToken[feed] = stockToken;
         emit FeedSet(feed, allowed, stockToken);
     }
 
+    /// @notice Allows or removes a Pyth price id for NEW escrows and pairs it with its Stock Token.
+    /// @param priceId Pyth price id.
+    /// @param allowed true allows it for NEW escrows, false stops new escrows from using it (existing ones are unaffected).
+    /// @param stockToken ERC-8056 Stock Token paired with the feed (0 for crypto feeds).
     function setPythId(bytes32 priceId, bool allowed, address stockToken) external onlyOwner {
         pythIdAllowed[priceId] = allowed;
         pythStockToken[priceId] = stockToken;
         emit PythIdSet(priceId, allowed, stockToken);
     }
 
+    /// @notice Allows or removes an outcome resolver for NEW escrows.
+    /// @param resolver Outcome resolver contract.
+    /// @param allowed true allows it for NEW escrows, false stops new escrows from using it (existing ones are unaffected).
     function setResolver(address resolver, bool allowed) external onlyOwner {
         resolverAllowed[resolver] = allowed;
         emit ResolverSet(resolver, allowed);

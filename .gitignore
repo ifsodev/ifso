@@ -9,3 +9,4 @@ app/abi-json/
 # deploy safety: arming files exist only while a real deploy is armed; local anvil records are throwaway
 contracts/.armed-*
 contracts/deployments/31337.json
+contracts/docs/
