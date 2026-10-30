@@ -29,6 +29,8 @@ jobs:
         run: python3 tools/natspec-check.py
       - name: README deployment table matches deployments/
         run: bash tools/readme-deploy-check.sh
+      - name: every onlyOwner function is listed in SECURITY.md
+        run: bash tools/owner-powers-check.sh
       - name: forge doc builds
         run: forge doc --out "$RUNNER_TEMP/forge-doc"
       - name: tests
