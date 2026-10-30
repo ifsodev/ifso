@@ -8,7 +8,8 @@ interface IIfsoConditionEvaluator {
     ///         with `expiry`. Registry checks (allowed feeds / price ids / resolvers) happen ONLY here,
     ///         so delisting a source never strands an existing escrow.
     /// @param acceptBy two-sided challenges only (0 otherwise): the invitee must not be able to accept once the
-    ///        answer is knowable (PRICE AT_DEADLINE: acceptBy <= deadline; OUTCOME: acceptBy <= closeTime).
+    ///        answer is knowable (PRICE AT_DEADLINE: acceptBy + maxStale < deadline; PRICE TOUCH: refused;
+    ///        OUTCOME: acceptBy <= closeTime).
     function validate(Condition calldata c, uint64 expiry, uint64 acceptBy) external view;
 
     /// @notice Evaluates TIME / PRICE / OUTCOME conditions. APPROVE is resolved inside the escrow.

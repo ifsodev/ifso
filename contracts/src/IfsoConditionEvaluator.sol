@@ -123,9 +123,15 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
             if (expiry < c.deadline + MIN_CLAIM_WINDOW) revert InvalidCondition();
         } else if (c.kind == Kind.PRICE) {
             _validatePrice(c, nowTs, expiry);
-            // a challenge must not be acceptable once the deadline price is knowable (TOUCH windows instead
-            // start at acceptance, enforced in evaluate via activeFrom)
-            if (acceptBy != 0 && c.mode == PRICE_AT_DEADLINE && acceptBy > c.deadline) revert InvalidCondition();
+            // Challenges (acceptBy != 0) must not be acceptable once the deciding price can be known:
+            // - TOUCH is refused (R1-M2): it can never end FALSE, and an invitee could accept after a cross.
+            // - AT_DEADLINE (R1-M1): acceptBy + maxStale < deadline. The deciding round is either the last round
+            //   at/before the deadline that is at most maxStale old (so updatedAt >= deadline - maxStale >
+            //   acceptBy) or the first print after the deadline (> deadline > acceptBy). Either way it is
+            //   written strictly after the last moment anyone can accept, also when the market is closed.
+            if (acceptBy != 0 && (c.mode == PRICE_TOUCH || uint256(acceptBy) + c.maxStale >= c.deadline)) {
+                revert InvalidCondition();
+            }
         } else if (c.kind == Kind.APPROVE) {
             _requireZeroPrice(c);
             if (c.key != bytes32(0) || c.outcomeMask != 0 || c.deadline != 0) revert InvalidCondition();
@@ -148,7 +154,11 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
             if (c.outcomeMask == 0 || c.outcomeMask & 1 != 0 || (c.outcomeMask >> (uint256(n) + 1)) != 0) {
                 revert InvalidCondition();
             }
-            if (expiry < earliest + r.disputeWindow() + MIN_CLAIM_WINDOW) revert InvalidCondition();
+            // R1-M3: room for a proposal at earliestResolve, a dispute, the full panel window and a settle margin,
+            // so a losing side cannot dispute once and wait for the escrow to expire into a VOID
+            if (uint256(expiry) < uint256(earliest) + r.disputeWindow() + r.panelWindow() + MIN_CLAIM_WINDOW) {
+                revert InvalidCondition();
+            }
         } else {
             revert InvalidCondition();
         }
@@ -246,29 +256,37 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
             if (updatedAt < from || updatedAt > c.deadline) return Verdict.PENDING; // round outside window
             if (!_crosses(c, answer)) return Verdict.PENDING;
             _checkSequencer();
-            if (_multiplierChanged(c)) return Verdict.VOID;
+            if (_multiplierChanged(c, updatedAt)) return Verdict.VOID;
             return Verdict.TRUE;
         }
 
         // AT_DEADLINE: strictly after the deadline so no later round can carry updatedAt <= deadline
         if (block.timestamp <= c.deadline) return Verdict.PENDING;
         if (updatedAt > c.deadline) return Verdict.PENDING; // must prove the last round at/before the deadline
-        (bool hasNext, int256 nextAnswer, uint256 nextUpdatedAt) = _next(feed, roundId);
-        if (hasNext && nextUpdatedAt <= c.deadline) return Verdict.PENDING; // not the last round before deadline
-
-        int256 px;
-        if (c.deadline - updatedAt <= c.maxStale) {
-            px = answer; // fresh price in force at the deadline
-        } else if (hasNext) {
-            if (nextUpdatedAt - c.deadline > c.holdWindow) return Verdict.VOID; // no print within hold window
-            px = nextAnswer; // off-hours hold: first print after the deadline
-        } else {
-            if (block.timestamp > uint256(c.deadline) + c.holdWindow) return Verdict.VOID;
-            return Verdict.PENDING; // waiting for the next session's first print
-        }
+        (Verdict early, int256 px, uint256 pxAt) = _deadlinePrice(c, feed, roundId, answer, updatedAt);
+        if (early != Verdict.TRUE) return early; // PENDING or VOID before any price comparison
         _checkSequencer();
-        if (_multiplierChanged(c)) return Verdict.VOID;
+        if (_multiplierChanged(c, pxAt)) return Verdict.VOID;
         return _crosses(c, px) ? Verdict.TRUE : Verdict.FALSE;
+    }
+
+    /// @dev AT_DEADLINE price and its time. Returns TRUE as "price found", else the early PENDING / VOID verdict.
+    function _deadlinePrice(
+        Condition calldata c,
+        AggregatorV3Interface feed,
+        uint80 roundId,
+        int256 answer,
+        uint256 updatedAt
+    ) private view returns (Verdict, int256, uint256) {
+        (bool hasNext, int256 nextAnswer, uint256 nextUpdatedAt) = _next(feed, roundId);
+        if (hasNext && nextUpdatedAt <= c.deadline) return (Verdict.PENDING, 0, 0); // not the last round before
+        if (c.deadline - updatedAt <= c.maxStale) return (Verdict.TRUE, answer, updatedAt); // fresh at the deadline
+        if (hasNext) {
+            if (nextUpdatedAt - c.deadline > c.holdWindow) return (Verdict.VOID, 0, 0); // no print within hold
+            return (Verdict.TRUE, nextAnswer, nextUpdatedAt); // off-hours hold: first print after the deadline
+        }
+        if (block.timestamp > uint256(c.deadline) + c.holdWindow) return (Verdict.VOID, 0, 0);
+        return (Verdict.PENDING, 0, 0); // waiting for the next session's first print
     }
 
     function _round(AggregatorV3Interface feed, uint80 roundId)
@@ -314,7 +332,7 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
             int256 px = _pythTo8(feeds[0].price);
             if (!_crosses(c, px)) return (Verdict.PENDING, fee);
             _checkSequencer();
-            if (_multiplierChanged(c)) return (Verdict.VOID, fee);
+            if (_multiplierChanged(c, feeds[0].price.publishTime)) return (Verdict.VOID, fee);
             return (Verdict.TRUE, fee);
         }
         if (block.timestamp <= c.deadline) return (Verdict.PENDING, fee);
@@ -322,7 +340,7 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
         feeds = pyth.parsePriceFeedUpdatesUnique{value: fee}(updateData, ids, c.deadline, c.deadline + c.holdWindow);
         int256 p = _pythTo8(feeds[0].price);
         _checkSequencer();
-        if (_multiplierChanged(c)) return (Verdict.VOID, fee);
+        if (_multiplierChanged(c, feeds[0].price.publishTime)) return (Verdict.VOID, fee);
         return (_crosses(c, p) ? Verdict.TRUE : Verdict.FALSE, fee);
     }
 
@@ -355,22 +373,35 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
         return c.op == OP_GTE ? px >= c.threshold : px <= c.threshold;
     }
 
-    function _multiplierChanged(Condition calldata c) private view returns (bool) {
+    /// @dev True when the multiplier IN FORCE AT `at` (the deciding price's time) may differ from the creation
+    ///      snapshot. A corporate action that takes effect after the deciding price never VOIDs an already decided
+    ///      result (R1-L1). Fails closed: an unreadable multiplier, or a changed one whose timing cannot be proven
+    ///      to be after `at`, counts as a change.
+    function _multiplierChanged(Condition calldata c, uint256 at) private view returns (bool) {
         if (c.stockToken == address(0)) return false;
-        try IERC8056(c.stockToken).uiMultiplier() returns (uint256 m) {
-            if (m != c.multiplier) return true;
+        uint256 m;
+        try IERC8056(c.stockToken).uiMultiplier() returns (uint256 x) {
+            m = x;
         } catch {
             return true; // cannot verify => do not decide on a possibly re-based price
         }
-        // a scheduled change that already took effect but is not yet reflected counts as a change
-        try IERC8056(c.stockToken).effectiveAt() returns (uint256 at) {
-            if (at != 0 && at <= block.timestamp) {
-                try IERC8056(c.stockToken).newUIMultiplier() returns (uint256 nm) {
-                    if (nm != c.multiplier) return true;
-                } catch {}
-            }
+        uint256 eff;
+        uint256 nm;
+        try IERC8056(c.stockToken).effectiveAt() returns (uint256 x) {
+            eff = x;
         } catch {}
-        return false;
+        if (eff != 0) {
+            try IERC8056(c.stockToken).newUIMultiplier() returns (uint256 x) {
+                nm = x;
+            } catch {
+                return m != c.multiplier || eff <= at; // schedule unreadable: only a provably clean state passes
+            }
+        }
+        // current value equals the snapshot: changed only if a schedule took effect at/before `at` (not yet
+        // reflected by uiMultiplier) with a different value
+        if (m == c.multiplier) return eff != 0 && eff <= at && nm != c.multiplier;
+        // current value differs: acceptable only when it is exactly the scheduled change, effective after `at`
+        return !(eff > at && nm == m);
     }
 
     function _checkSequencer() private view {

@@ -148,25 +148,18 @@ contract ChallengesTest is IfsoFixture {
         assertEq(usdg.balanceOf(sender) - sb, 40e6, "sender side took the pot");
     }
 
-    function test_TouchChallenge_WindowStartsAtAcceptance() public {
+    /// @notice Two-sided TOUCH is refused (R1-M2): TOUCH never ends FALSE, so the sender could never win, and the
+    ///         invitee could accept after a cross. Challenges use AT_DEADLINE (DECISIONS).
+    function test_TouchChallenge_RefusedAtCreation() public {
         uint64 dl = uint64(T0 + 3 days);
         CreateParams memory p =
             _params(_priceTouch(200e8, OP_GTE, uint64(T0), dl), recipient, address(0), 20e6, uint64(dl + 1 days));
         p.twoSided = true;
         p.counterAmount = 20e6;
         p.acceptBy = uint64(T0 + 1 days);
-        uint256 id = _create(p);
-        vm.warp(T0 + 1 hours);
-        uint80 touchedBeforeAccept = nvdaFeed.pushNow(250e8); // invitee watches this happen...
-        vm.warp(T0 + 2 hours);
-        vm.prank(recipient);
-        escrow.accept(id, "", address(0)); // ...then accepts
-        vm.expectRevert(IIfsoEscrow.ConditionPending.selector);
-        escrow.settle(id, _proof(touchedBeforeAccept), false); // the earlier touch does not count
-        vm.warp(T0 + 3 hours);
-        uint80 r = nvdaFeed.pushNow(201e8);
-        escrow.settle(id, _proof(r), false);
-        assertTrue(_status(id) == Status.RELEASED, "touch after acceptance counts");
+        vm.prank(sender);
+        vm.expectRevert(IfsoConditionEvaluator.InvalidCondition.selector);
+        escrow.create(p);
     }
 
     function test_AtDeadlineChallenge_AcceptByMustPrecedeDeadline() public {
