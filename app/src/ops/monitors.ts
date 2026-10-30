@@ -30,7 +30,11 @@ export async function runMonitors(deps: Deps, alert: AlertFn, now = new Date()) 
   const unproposed = await db.select({ id: questions.id }).from(questions).where(and(eq(questions.state, QUESTION_PENDING), lt(questions.earliestResolve, earliest))).limit(5);
   if (unproposed.length) await alert("resolver-unproposed", `questions with no proposal 48 hours after the earliest resolve time: ${unproposed.map((r) => r.id).join(", ")}`);
 
-  const stuck = await db.select({ n: sql<number>`count(*)::int` }).from(questions).where(and(eq(questions.state, QUESTION_DISPUTED), lt(questions.earliestResolve, earliest)));
+  // panel SLA runs from the dispute time (older rows without one fall back to the earliest resolve time)
+  const stuck = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(questions)
+    .where(and(eq(questions.state, QUESTION_DISPUTED), sql`coalesce(${questions.disputedAt}, ${questions.earliestResolve}) < ${earliest.toISOString()}::timestamptz`));
   if ((stuck[0]?.n ?? 0) > 0) await alert("panel-sla", `${stuck[0]!.n} disputed question(s) waiting on the panel for over 48 hours`);
 
   for (const [name, w, min] of [["relayer", clients.relayer, env.MIN_RELAYER_ETH], ["keeper", clients.keeper, env.MIN_KEEPER_ETH], ["resolver", clients.resolver, env.MIN_RESOLVER_ETH]] as const) {

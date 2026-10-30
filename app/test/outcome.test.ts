@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { agree, binaryMask, footballOutcome, hip4Outcome, polymarketOutcome, questionSpecHash, sourcesHash, sportsMask, type SourceReport } from "../src/core/outcome";
+import { keccak256, toHex } from "viem";
+import { agree, canonicalEvidence, binaryMask, footballOutcome, hip4Outcome, polymarketOutcome, questionSpecHash, sourcesHash, sportsMask, type SourceReport } from "../src/core/outcome";
 import { toReport as oddsReport } from "../src/sources/theOddsApi";
 import { toReport as sdbReport } from "../src/sources/theSportsDb";
 
@@ -28,6 +29,45 @@ describe("multi-source agreement", () => {
   test("sourcesHash is order-independent", () => {
     const x = [rep("b", "final", 1), rep("a", "final", 1)];
     expect(sourcesHash(x)).toBe(sourcesHash([...x].reverse()));
+  });
+});
+
+describe("sourcesHash is deterministic (R6)", () => {
+  const evidence = (): SourceReport[] => [
+    { provider: "thesportsdb", fetchedAt: 1_800_000_100, status: "final", outcome: 1, digest: "0xaa" },
+    { provider: "theoddsapi", fetchedAt: 1_800_000_050, status: "final", outcome: 1, digest: "0xbb" },
+  ];
+  test("same evidence gives the same hash, however it is built or ordered", () => {
+    const h = sourcesHash(evidence());
+    expect(sourcesHash(evidence())).toBe(h);
+    expect(sourcesHash([...evidence()].reverse())).toBe(h);
+    expect(sourcesHash(evidence().map((r) => ({ digest: r.digest, outcome: r.outcome, status: r.status, fetchedAt: r.fetchedAt, provider: r.provider })))).toBe(h); // key order
+    expect(agree(evidence()).sourcesHash).toBe(h);
+    expect(agree([...evidence()].reverse()).sourcesHash).toBe(h);
+  });
+  test("it is the keccak of one fixed canonical form", () => {
+    expect(canonicalEvidence(evidence())).toBe('[{"p":"theoddsapi","t":1800000050,"s":"final","o":1,"d":"0xbb"},{"p":"thesportsdb","t":1800000100,"s":"final","o":1,"d":"0xaa"}]');
+    expect(sourcesHash(evidence())).toBe(keccak256(toHex(canonicalEvidence(evidence()))));
+  });
+  test("any change in the evidence changes the hash", () => {
+    const h = sourcesHash(evidence());
+    for (const mutate of [
+      (r: SourceReport[]) => (r[0]!.digest = "0xcc"),
+      (r: SourceReport[]) => (r[0]!.outcome = 2),
+      (r: SourceReport[]) => (r[1]!.fetchedAt += 1),
+      (r: SourceReport[]) => (r[1]!.status = "void"),
+      (r: SourceReport[]) => (r[1]!.provider = "other"),
+    ]) {
+      const r = evidence();
+      mutate(r);
+      expect(sourcesHash(r)).not.toBe(h);
+    }
+  });
+  test("a contradiction is flagged as a conflict, a missing source is not", () => {
+    expect(agree([rep("a", "final", 1), rep("b", "final", 2)]).conflict).toBe(true);
+    expect(agree([rep("a", "final", 1), rep("b", "void")]).conflict).toBe(true);
+    expect(agree([rep("a", "final", 1), rep("b", "pending")]).conflict).toBeUndefined();
+    expect(agree([rep("a", "final", 1)]).conflict).toBeUndefined();
   });
 });
 

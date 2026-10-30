@@ -1,9 +1,7 @@
-// The Postgres side of the bot and notifier (stores behind the interfaces): a fresh cluster on port 5442,
+// The Postgres side of the bot and notifier (stores behind the interfaces): a fresh cluster on a free port,
 // migrated from zero. Skips when pg_ctl is missing.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { pgBin, startPg, type PgCluster } from "./helpers/pg";
 import { createDb } from "../src/db/client";
 import { runMigrations } from "../src/db/migrate";
 import { escrows, intents, questions, tgUsers, watchers } from "../src/db/schema";
@@ -11,30 +9,19 @@ import { drizzleBotStore } from "../src/bot/store";
 import { handleCommand, handleAnswer } from "../src/bot/flow";
 import { drizzleNotifyStore } from "../src/workers/notifier";
 
-const PORT = 5442;
-const bin = ["/opt/homebrew/opt/postgresql@16/bin", "/usr/local/opt/postgresql@16/bin", "/usr/lib/postgresql/16/bin"].find((d) => existsSync(join(d, "pg_ctl"))) ?? Bun.which("pg_ctl")?.replace(/\/pg_ctl$/, "");
-const run = (cmd: string[]) => Bun.spawnSync(cmd, { env: { ...process.env, LC_ALL: "C", LANG: "C" }, stdout: "pipe", stderr: "pipe" });
+const bin = pgBin();
 
 describe.skipIf(!bin)("bot + notifier stores on Postgres", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ifso-botpg-"));
-  const data = join(dir, "data");
-  const url = `postgres://ifso@127.0.0.1:${PORT}/postgres`;
-  let started = false;
-  const { db } = createDb(url);
+  let pg: PgCluster;
+  let db: ReturnType<typeof createDb>["db"];
 
   beforeAll(async () => {
-    const init = run([`${bin}/initdb`, "-D", data, "-U", "ifso", "--auth=trust", "-E", "UTF8", "--locale=C"]);
-    if (init.exitCode !== 0) throw new Error(init.stderr.toString());
-    const start = run([`${bin}/pg_ctl`, "-D", data, "-w", "-l", join(dir, "log"), "-o", `-p ${PORT} -k ${dir} -c listen_addresses=127.0.0.1`, "start"]);
-    if (start.exitCode !== 0) throw new Error(start.stderr.toString() + start.stdout.toString());
-    started = true;
-    await runMigrations(url);
+    pg = startPg("ifso-botpg-");
+    await runMigrations(pg.url);
+    db = createDb(pg.url).db;
   });
 
-  afterAll(() => {
-    if (started) run([`${bin}/pg_ctl`, "-D", data, "-m", "fast", "-w", "stop"]);
-    rmSync(dir, { recursive: true, force: true });
-  });
+  afterAll(() => pg?.stop());
 
   const baseEscrow = (id: string, over: Partial<typeof escrows.$inferInsert> = {}): typeof escrows.$inferInsert => ({
     id, sender: "0xaaaa000000000000000000000000000000000001", amount: "20000000", kind: 1, condition: {}, conditionHash: "0x00", expiry: new Date(Date.now() + 86400_000),

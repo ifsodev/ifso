@@ -37,7 +37,14 @@ export async function fetchScore(apiKey: string, sportKey: string, eventId: stri
   return toReport(f.body.find((e) => e.id === eventId), f.digest, f.fetchedAt);
 }
 
+/** The scores endpoint has no "postponed" flag: an event still not completed a day after kickoff counts as void. */
+export const NOT_COMPLETED_VOID_AFTER = 24 * 3600;
+
 export function toReport(e: OddsApiScore | undefined, digest: `0x${string}`, fetchedAt: number): SourceReport {
+  if (e && !e.completed) {
+    const kickoff = Date.parse(e.commence_time) / 1000;
+    if (Number.isFinite(kickoff) && fetchedAt - kickoff > NOT_COMPLETED_VOID_AFTER) return { provider: "theoddsapi", fetchedAt, status: "void", digest };
+  }
   if (!e || !e.completed || !e.scores) return { provider: "theoddsapi", fetchedAt, status: "pending", digest };
   const home = Number(e.scores.find((s) => s.name === e.home_team)?.score);
   const away = Number(e.scores.find((s) => s.name === e.away_team)?.score);

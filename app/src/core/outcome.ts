@@ -19,6 +19,8 @@ export interface Agreement {
   reason: string;
   sourcesHash: Hex;
   providers: string[];
+  /** true when independent sources contradict each other (as opposed to "not final yet"): alert, never propose */
+  conflict?: boolean;
 }
 
 export function canonicalEvidence(reports: SourceReport[]): string {
@@ -44,11 +46,11 @@ export function agree(reports: SourceReport[], minSources = 2): Agreement {
 
   const finals = rs.filter((r) => r.status === "final");
   const voids = rs.filter((r) => r.status === "void");
-  if (finals.length && voids.length) return { decision: null, reason: "sources disagree (final vs void): hold for review", ...base };
+  if (finals.length && voids.length) return { decision: null, reason: "sources disagree (final vs void): hold for review", conflict: true, ...base };
   if (voids.length >= minSources) return { decision: 0, reason: "postponed / abandoned / invalid per all sources", ...base };
   if (finals.length < minSources) return { decision: null, reason: "not final on enough sources yet", ...base };
   const outcomes = new Set(finals.map((r) => r.outcome));
-  if (outcomes.size !== 1) return { decision: null, reason: "sources disagree on the result: hold for review", ...base };
+  if (outcomes.size !== 1) return { decision: null, reason: "sources disagree on the result: hold for review", conflict: true, ...base };
   const o = finals[0]!.outcome!;
   return { decision: o, reason: `${finals.length} sources agree`, ...base };
 }

@@ -1,0 +1,1056 @@
+{
+  "synthetic": true,
+  "shape": "GET /v4/sports/soccer_epl/scores/?daysFrom=3",
+  "scores": [
+    {
+      "id": "5dbfb2801f8161ab1777f3c2b445ed8f",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-16T19:00:00Z",
+      "completed": true,
+      "home_team": "Manchester United",
+      "away_team": "Fulham",
+      "scores": [
+        {
+          "name": "Manchester United",
+          "score": "1"
+        },
+        {
+          "name": "Fulham",
+          "score": "0"
+        }
+      ],
+      "last_update": "2024-08-16T19:00:00Z",
+      "_derivedFrom": "2069556"
+    },
+    {
+      "id": "72cc68e9dadb24bf7e16dd5c168e7704",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-17T11:30:00Z",
+      "completed": true,
+      "home_team": "Ipswich",
+      "away_team": "Liverpool",
+      "scores": [
+        {
+          "name": "Ipswich",
+          "score": "0"
+        },
+        {
+          "name": "Liverpool",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-08-17T11:30:00Z",
+      "_derivedFrom": "2069557"
+    },
+    {
+      "id": "9ff51788b9b4f295846bd792fb34d2bd",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-17T14:00:00Z",
+      "completed": true,
+      "home_team": "Arsenal",
+      "away_team": "Wolves",
+      "scores": [
+        {
+          "name": "Arsenal",
+          "score": "2"
+        },
+        {
+          "name": "Wolves",
+          "score": "0"
+        }
+      ],
+      "last_update": "2024-08-17T14:00:00Z",
+      "_derivedFrom": "2069558"
+    },
+    {
+      "id": "0575e09297d170a061cfeeebfbc1518f",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-17T14:00:00Z",
+      "completed": true,
+      "home_team": "Everton",
+      "away_team": "Brighton",
+      "scores": [
+        {
+          "name": "Everton",
+          "score": "0"
+        },
+        {
+          "name": "Brighton",
+          "score": "3"
+        }
+      ],
+      "last_update": "2024-08-17T14:00:00Z",
+      "_derivedFrom": "2069559"
+    },
+    {
+      "id": "dafb29de523611479abcb4f98b83e60e",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-17T14:00:00Z",
+      "completed": true,
+      "home_team": "Newcastle",
+      "away_team": "Southampton",
+      "scores": [
+        {
+          "name": "Newcastle",
+          "score": "1"
+        },
+        {
+          "name": "Southampton",
+          "score": "0"
+        }
+      ],
+      "last_update": "2024-08-17T14:00:00Z",
+      "_derivedFrom": "2069560"
+    },
+    {
+      "id": "a8ab5b18d2522e1423681e6b6ccbc08a",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-17T14:00:00Z",
+      "completed": true,
+      "home_team": "Nottingham Forest",
+      "away_team": "Bournemouth",
+      "scores": [
+        {
+          "name": "Nottingham Forest",
+          "score": "1"
+        },
+        {
+          "name": "Bournemouth",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-17T14:00:00Z",
+      "_derivedFrom": "2069561"
+    },
+    {
+      "id": "19649f4d7ea577ef2ab7f5e4738bee73",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-17T16:30:00Z",
+      "completed": true,
+      "home_team": "West Ham",
+      "away_team": "Aston Villa",
+      "scores": [
+        {
+          "name": "West Ham",
+          "score": "1"
+        },
+        {
+          "name": "Aston Villa",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-08-17T16:30:00Z",
+      "_derivedFrom": "2069562"
+    },
+    {
+      "id": "6b8fb230d90b3428028196df47e66c99",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-18T13:00:00Z",
+      "completed": true,
+      "home_team": "Brentford",
+      "away_team": "Crystal Palace",
+      "scores": [
+        {
+          "name": "Brentford",
+          "score": "2"
+        },
+        {
+          "name": "Crystal Palace",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-18T13:00:00Z",
+      "_derivedFrom": "2069563"
+    },
+    {
+      "id": "6c7c2076ea0fd5d76cc966f675f8b050",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-18T15:30:00Z",
+      "completed": true,
+      "home_team": "Chelsea",
+      "away_team": "Manchester City",
+      "scores": [
+        {
+          "name": "Chelsea",
+          "score": "0"
+        },
+        {
+          "name": "Manchester City",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-08-18T15:30:00Z",
+      "_derivedFrom": "2069564"
+    },
+    {
+      "id": "f41f95f4153acf6e819f48c09ac91a8d",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-19T19:00:00Z",
+      "completed": true,
+      "home_team": "Leicester",
+      "away_team": "Tottenham",
+      "scores": [
+        {
+          "name": "Leicester",
+          "score": "1"
+        },
+        {
+          "name": "Tottenham",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-19T19:00:00Z",
+      "_derivedFrom": "2069565"
+    },
+    {
+      "id": "e319f1e41dfefcfa7cd88cc63cfa8669",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-24T11:30:00Z",
+      "completed": true,
+      "home_team": "Brighton",
+      "away_team": "Manchester United",
+      "scores": [
+        {
+          "name": "Brighton",
+          "score": "2"
+        },
+        {
+          "name": "Manchester United",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-24T11:30:00Z",
+      "_derivedFrom": "2069566"
+    },
+    {
+      "id": "1f74c8d6f397187089f4ace56a1bc9c0",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-24T14:00:00Z",
+      "completed": true,
+      "home_team": "Tottenham",
+      "away_team": "Everton",
+      "scores": [
+        {
+          "name": "Tottenham",
+          "score": "4"
+        },
+        {
+          "name": "Everton",
+          "score": "0"
+        }
+      ],
+      "last_update": "2024-08-24T14:00:00Z",
+      "_derivedFrom": "2069568"
+    },
+    {
+      "id": "39d9738083234d9ed62922bce0d1ae1a",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-24T14:00:00Z",
+      "completed": true,
+      "home_team": "Southampton",
+      "away_team": "Nottingham Forest",
+      "scores": [
+        {
+          "name": "Southampton",
+          "score": "0"
+        },
+        {
+          "name": "Nottingham Forest",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-24T14:00:00Z",
+      "_derivedFrom": "2069569"
+    },
+    {
+      "id": "c09939546debd4b57bd4902e4e34984b",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-24T14:00:00Z",
+      "completed": true,
+      "home_team": "Manchester City",
+      "away_team": "Ipswich",
+      "scores": [
+        {
+          "name": "Manchester City",
+          "score": "4"
+        },
+        {
+          "name": "Ipswich",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-24T14:00:00Z",
+      "_derivedFrom": "2069570"
+    },
+    {
+      "id": "1c3461ea70f8fb243cda331bfa00b313",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-24T14:00:00Z",
+      "completed": true,
+      "home_team": "Fulham",
+      "away_team": "Leicester",
+      "scores": [
+        {
+          "name": "Fulham",
+          "score": "2"
+        },
+        {
+          "name": "Leicester",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-24T14:00:00Z",
+      "_derivedFrom": "2069572"
+    },
+    {
+      "id": "1e7431657ce484a8391abb70c4738e1a",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-24T14:00:00Z",
+      "completed": true,
+      "home_team": "Crystal Palace",
+      "away_team": "West Ham",
+      "scores": [
+        {
+          "name": "Crystal Palace",
+          "score": "0"
+        },
+        {
+          "name": "West Ham",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-08-24T14:00:00Z",
+      "_derivedFrom": "2069573"
+    },
+    {
+      "id": "3c651f08ae1b6b72a29be8cca8710a65",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-24T16:30:00Z",
+      "completed": true,
+      "home_team": "Aston Villa",
+      "away_team": "Arsenal",
+      "scores": [
+        {
+          "name": "Aston Villa",
+          "score": "0"
+        },
+        {
+          "name": "Arsenal",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-08-24T16:30:00Z",
+      "_derivedFrom": "2069574"
+    },
+    {
+      "id": "3060bfbec49e5567f883c04fda0a3cdc",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-25T13:00:00Z",
+      "completed": true,
+      "home_team": "Wolves",
+      "away_team": "Chelsea",
+      "scores": [
+        {
+          "name": "Wolves",
+          "score": "2"
+        },
+        {
+          "name": "Chelsea",
+          "score": "6"
+        }
+      ],
+      "last_update": "2024-08-25T13:00:00Z",
+      "_derivedFrom": "2069567"
+    },
+    {
+      "id": "3645312b30c1d2cc4b0380ee15feabaa",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-25T15:30:00Z",
+      "completed": true,
+      "home_team": "Liverpool",
+      "away_team": "Brentford",
+      "scores": [
+        {
+          "name": "Liverpool",
+          "score": "2"
+        },
+        {
+          "name": "Brentford",
+          "score": "0"
+        }
+      ],
+      "last_update": "2024-08-25T15:30:00Z",
+      "_derivedFrom": "2069571"
+    },
+    {
+      "id": "af965e6d86bf01a671849530ce311d80",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-25T13:00:00Z",
+      "completed": true,
+      "home_team": "Bournemouth",
+      "away_team": "Newcastle",
+      "scores": [
+        {
+          "name": "Bournemouth",
+          "score": "1"
+        },
+        {
+          "name": "Newcastle",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-25T13:00:00Z",
+      "_derivedFrom": "2069575"
+    },
+    {
+      "id": "539b9759f86fd1895a5238245866020b",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-31T16:30:00Z",
+      "completed": true,
+      "home_team": "West Ham",
+      "away_team": "Manchester City",
+      "scores": [
+        {
+          "name": "West Ham",
+          "score": "1"
+        },
+        {
+          "name": "Manchester City",
+          "score": "3"
+        }
+      ],
+      "last_update": "2024-08-31T16:30:00Z",
+      "_derivedFrom": "2069577"
+    },
+    {
+      "id": "3670c75bc36ddb113975e8e5b9c5d8a3",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-31T14:00:00Z",
+      "completed": true,
+      "home_team": "Nottingham Forest",
+      "away_team": "Wolves",
+      "scores": [
+        {
+          "name": "Nottingham Forest",
+          "score": "1"
+        },
+        {
+          "name": "Wolves",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-31T14:00:00Z",
+      "_derivedFrom": "2069578"
+    },
+    {
+      "id": "556ab401a298aeb150481bf83dd52350",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-31T14:00:00Z",
+      "completed": true,
+      "home_team": "Ipswich",
+      "away_team": "Fulham",
+      "scores": [
+        {
+          "name": "Ipswich",
+          "score": "1"
+        },
+        {
+          "name": "Fulham",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-31T14:00:00Z",
+      "_derivedFrom": "2069581"
+    },
+    {
+      "id": "f48f3c78e9407135bfbd57152c67dae5",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-31T14:00:00Z",
+      "completed": true,
+      "home_team": "Everton",
+      "away_team": "Bournemouth",
+      "scores": [
+        {
+          "name": "Everton",
+          "score": "2"
+        },
+        {
+          "name": "Bournemouth",
+          "score": "3"
+        }
+      ],
+      "last_update": "2024-08-31T14:00:00Z",
+      "_derivedFrom": "2069582"
+    },
+    {
+      "id": "eb3fb0291b285d7fd42a7e1444e388ac",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-31T11:30:00Z",
+      "completed": true,
+      "home_team": "Arsenal",
+      "away_team": "Brighton",
+      "scores": [
+        {
+          "name": "Arsenal",
+          "score": "1"
+        },
+        {
+          "name": "Brighton",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-31T11:30:00Z",
+      "_derivedFrom": "2069583"
+    },
+    {
+      "id": "9047536d4f5b0c2cc5d4431aeabae36d",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-31T14:00:00Z",
+      "completed": true,
+      "home_team": "Brentford",
+      "away_team": "Southampton",
+      "scores": [
+        {
+          "name": "Brentford",
+          "score": "3"
+        },
+        {
+          "name": "Southampton",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-08-31T14:00:00Z",
+      "_derivedFrom": "2069584"
+    },
+    {
+      "id": "fceab34925f6e260aa4a991a2d4564ef",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-08-31T14:00:00Z",
+      "completed": true,
+      "home_team": "Leicester",
+      "away_team": "Aston Villa",
+      "scores": [
+        {
+          "name": "Leicester",
+          "score": "1"
+        },
+        {
+          "name": "Aston Villa",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-08-31T14:00:00Z",
+      "_derivedFrom": "2069585"
+    },
+    {
+      "id": "2162db55f15ec7b5671014e84219ff7d",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-01T12:30:00Z",
+      "completed": true,
+      "home_team": "Chelsea",
+      "away_team": "Crystal Palace",
+      "scores": [
+        {
+          "name": "Chelsea",
+          "score": "1"
+        },
+        {
+          "name": "Crystal Palace",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-01T12:30:00Z",
+      "_derivedFrom": "2069576"
+    },
+    {
+      "id": "553fa558b49c22085661cf08a4b8b3ff",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-01T12:30:00Z",
+      "completed": true,
+      "home_team": "Newcastle",
+      "away_team": "Tottenham",
+      "scores": [
+        {
+          "name": "Newcastle",
+          "score": "2"
+        },
+        {
+          "name": "Tottenham",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-01T12:30:00Z",
+      "_derivedFrom": "2069579"
+    },
+    {
+      "id": "51ee5711aa97b4bbe4119891d76047b8",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-01T15:00:00Z",
+      "completed": true,
+      "home_team": "Manchester United",
+      "away_team": "Liverpool",
+      "scores": [
+        {
+          "name": "Manchester United",
+          "score": "0"
+        },
+        {
+          "name": "Liverpool",
+          "score": "3"
+        }
+      ],
+      "last_update": "2024-09-01T15:00:00Z",
+      "_derivedFrom": "2069580"
+    },
+    {
+      "id": "8e278c54c71e4302503b5fadbcc73637",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-14T14:00:00Z",
+      "completed": true,
+      "home_team": "Liverpool",
+      "away_team": "Nottingham Forest",
+      "scores": [
+        {
+          "name": "Liverpool",
+          "score": "0"
+        },
+        {
+          "name": "Nottingham Forest",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-14T14:00:00Z",
+      "_derivedFrom": "2069586"
+    },
+    {
+      "id": "d83acc666f403f358483dc1476eb1688",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-14T11:30:00Z",
+      "completed": true,
+      "home_team": "Southampton",
+      "away_team": "Manchester United",
+      "scores": [
+        {
+          "name": "Southampton",
+          "score": "0"
+        },
+        {
+          "name": "Manchester United",
+          "score": "3"
+        }
+      ],
+      "last_update": "2024-09-14T11:30:00Z",
+      "_derivedFrom": "2069589"
+    },
+    {
+      "id": "6f5d52a17d60d5bef102a0c6fc778d4a",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-14T14:00:00Z",
+      "completed": true,
+      "home_team": "Manchester City",
+      "away_team": "Brentford",
+      "scores": [
+        {
+          "name": "Manchester City",
+          "score": "2"
+        },
+        {
+          "name": "Brentford",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-14T14:00:00Z",
+      "_derivedFrom": "2069590"
+    },
+    {
+      "id": "81d9215708a292fba1787c00a02c0081",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-14T14:00:00Z",
+      "completed": true,
+      "home_team": "Fulham",
+      "away_team": "West Ham",
+      "scores": [
+        {
+          "name": "Fulham",
+          "score": "1"
+        },
+        {
+          "name": "West Ham",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-14T14:00:00Z",
+      "_derivedFrom": "2069591"
+    },
+    {
+      "id": "89975d4063c76c0168f697894561ad41",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-14T14:00:00Z",
+      "completed": true,
+      "home_team": "Crystal Palace",
+      "away_team": "Leicester",
+      "scores": [
+        {
+          "name": "Crystal Palace",
+          "score": "2"
+        },
+        {
+          "name": "Leicester",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-09-14T14:00:00Z",
+      "_derivedFrom": "2069592"
+    },
+    {
+      "id": "b8449747f03a5636ea3cb62df4153f87",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-14T14:00:00Z",
+      "completed": true,
+      "home_team": "Brighton",
+      "away_team": "Ipswich",
+      "scores": [
+        {
+          "name": "Brighton",
+          "score": "0"
+        },
+        {
+          "name": "Ipswich",
+          "score": "0"
+        }
+      ],
+      "last_update": "2024-09-14T14:00:00Z",
+      "_derivedFrom": "2069593"
+    },
+    {
+      "id": "2a28eb9d082e3af6e363244ce80304cc",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-14T16:30:00Z",
+      "completed": true,
+      "home_team": "Aston Villa",
+      "away_team": "Everton",
+      "scores": [
+        {
+          "name": "Aston Villa",
+          "score": "3"
+        },
+        {
+          "name": "Everton",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-09-14T16:30:00Z",
+      "_derivedFrom": "2069594"
+    },
+    {
+      "id": "855a27751598e02a953c45a7b605f9e5",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-14T19:00:00Z",
+      "completed": true,
+      "home_team": "Bournemouth",
+      "away_team": "Chelsea",
+      "scores": [
+        {
+          "name": "Bournemouth",
+          "score": "0"
+        },
+        {
+          "name": "Chelsea",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-14T19:00:00Z",
+      "_derivedFrom": "2069595"
+    },
+    {
+      "id": "6f6082ff20291c0764d9bce39f32d15a",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-15T15:30:00Z",
+      "completed": true,
+      "home_team": "Wolves",
+      "away_team": "Newcastle",
+      "scores": [
+        {
+          "name": "Wolves",
+          "score": "1"
+        },
+        {
+          "name": "Newcastle",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-09-15T15:30:00Z",
+      "_derivedFrom": "2069587"
+    },
+    {
+      "id": "da932c85dbf96996347cc67ba604636a",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-15T13:00:00Z",
+      "completed": true,
+      "home_team": "Tottenham",
+      "away_team": "Arsenal",
+      "scores": [
+        {
+          "name": "Tottenham",
+          "score": "0"
+        },
+        {
+          "name": "Arsenal",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-15T13:00:00Z",
+      "_derivedFrom": "2069588"
+    },
+    {
+      "id": "b82ec02f945d528ad05d1b64189ab4ee",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-21T14:00:00Z",
+      "completed": true,
+      "home_team": "Aston Villa",
+      "away_team": "Wolves",
+      "scores": [
+        {
+          "name": "Aston Villa",
+          "score": "3"
+        },
+        {
+          "name": "Wolves",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-21T14:00:00Z",
+      "_derivedFrom": "2069596"
+    },
+    {
+      "id": "be987dee7f4cbab9b918b5ebd0cd97d4",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-21T11:30:00Z",
+      "completed": true,
+      "home_team": "West Ham",
+      "away_team": "Chelsea",
+      "scores": [
+        {
+          "name": "West Ham",
+          "score": "0"
+        },
+        {
+          "name": "Chelsea",
+          "score": "3"
+        }
+      ],
+      "last_update": "2024-09-21T11:30:00Z",
+      "_derivedFrom": "2069597"
+    },
+    {
+      "id": "b987fce05da3311f3f9ac3807a258d26",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-21T14:00:00Z",
+      "completed": true,
+      "home_team": "Tottenham",
+      "away_team": "Brentford",
+      "scores": [
+        {
+          "name": "Tottenham",
+          "score": "3"
+        },
+        {
+          "name": "Brentford",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-21T14:00:00Z",
+      "_derivedFrom": "2069598"
+    },
+    {
+      "id": "274d52a70a2bb31bded72d1e0184453b",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-21T14:00:00Z",
+      "completed": true,
+      "home_team": "Southampton",
+      "away_team": "Ipswich",
+      "scores": [
+        {
+          "name": "Southampton",
+          "score": "1"
+        },
+        {
+          "name": "Ipswich",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-21T14:00:00Z",
+      "_derivedFrom": "2069599"
+    },
+    {
+      "id": "e3ef4b886780e799d550cdda8b24a6de",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-21T14:00:00Z",
+      "completed": true,
+      "home_team": "Leicester",
+      "away_team": "Everton",
+      "scores": [
+        {
+          "name": "Leicester",
+          "score": "1"
+        },
+        {
+          "name": "Everton",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-21T14:00:00Z",
+      "_derivedFrom": "2069601"
+    },
+    {
+      "id": "7a3c026deced977ed947460546ae8ca8",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-21T14:00:00Z",
+      "completed": true,
+      "home_team": "Fulham",
+      "away_team": "Newcastle",
+      "scores": [
+        {
+          "name": "Fulham",
+          "score": "3"
+        },
+        {
+          "name": "Newcastle",
+          "score": "1"
+        }
+      ],
+      "last_update": "2024-09-21T14:00:00Z",
+      "_derivedFrom": "2069602"
+    },
+    {
+      "id": "24b550097b3c0bf7c46f5a8a489c337d",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-21T16:30:00Z",
+      "completed": true,
+      "home_team": "Crystal Palace",
+      "away_team": "Manchester United",
+      "scores": [
+        {
+          "name": "Crystal Palace",
+          "score": "0"
+        },
+        {
+          "name": "Manchester United",
+          "score": "0"
+        }
+      ],
+      "last_update": "2024-09-21T16:30:00Z",
+      "_derivedFrom": "2069603"
+    },
+    {
+      "id": "54f00428e86dbe3b98d64bf7e00b4043",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-21T14:00:00Z",
+      "completed": true,
+      "home_team": "Liverpool",
+      "away_team": "Bournemouth",
+      "scores": [
+        {
+          "name": "Liverpool",
+          "score": "3"
+        },
+        {
+          "name": "Bournemouth",
+          "score": "0"
+        }
+      ],
+      "last_update": "2024-09-21T14:00:00Z",
+      "_derivedFrom": "2069605"
+    },
+    {
+      "id": "5bf13891d8fa61fd3bcf1798e294d8fc",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-22T15:30:00Z",
+      "completed": true,
+      "home_team": "Manchester City",
+      "away_team": "Arsenal",
+      "scores": [
+        {
+          "name": "Manchester City",
+          "score": "2"
+        },
+        {
+          "name": "Arsenal",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-09-22T15:30:00Z",
+      "_derivedFrom": "2069600"
+    },
+    {
+      "id": "9b388245ed5caab4f768ee7e915b53a9",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2024-09-22T13:00:00Z",
+      "completed": true,
+      "home_team": "Brighton",
+      "away_team": "Nottingham Forest",
+      "scores": [
+        {
+          "name": "Brighton",
+          "score": "2"
+        },
+        {
+          "name": "Nottingham Forest",
+          "score": "2"
+        }
+      ],
+      "last_update": "2024-09-22T13:00:00Z",
+      "_derivedFrom": "2069604"
+    }
+  ]
+}

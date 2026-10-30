@@ -1,19 +1,20 @@
 // TheSportsDB (thesportsdb.com) as the second, independent football source. Free test key "3" for dev;
-// production needs a paid key, and its ToS for derived on-chain results is (U). Replaceable by any provider
+// NOTE: the old key "3" was disabled; the public test key is "123". Production needs a paid key, and its ToS for derived on-chain results is (U). Replaceable by any provider
 // whose terms allow it (never API-Football: its terms grant no publishing licence).
 import { footballOutcome, type SourceReport } from "../core/outcome";
 import { getJson } from "./http";
 
-interface SportsDbEvent {
+export interface SportsDbEvent {
   idEvent: string;
-  strStatus: string | null; // "Match Finished", "FT", "Postponed", "Abandoned", "Not Started", ...
+  strStatus: string | null; // "FT", "Match Finished", "Postponed", "PST", "Abandoned", "Not Started", ...
+  strPostponed?: string | null; // "yes" / "no"
   intHomeScore: string | null;
   intAwayScore: string | null;
   strHomeTeam: string;
   strAwayTeam: string;
 }
 
-const VOID_STATUSES = /postponed|abandoned|cancel+ed|suspended|awarded/i;
+const VOID_STATUSES = /postponed|abandoned|cancel+ed|suspended|awarded|^(pst|abd|canc|susp|awd|int)$/i;
 const FINAL_STATUSES = /^(match finished|ft|finished)$/i;
 
 export async function fetchEvent(key: string, idEvent: string): Promise<SourceReport> {
@@ -25,7 +26,9 @@ export async function fetchEvent(key: string, idEvent: string): Promise<SourceRe
 
 export function toReport(e: SportsDbEvent | undefined, digest: `0x${string}`, fetchedAt: number): SourceReport {
   const base = { provider: "thesportsdb", fetchedAt, digest } as const;
-  if (!e || !e.strStatus) return { ...base, status: "pending" };
+  if (!e) return { ...base, status: "pending" };
+  if (e.strPostponed?.toLowerCase() === "yes") return { ...base, status: "void" };
+  if (!e.strStatus) return { ...base, status: "pending" };
   if (VOID_STATUSES.test(e.strStatus)) return { ...base, status: "void" };
   if (!FINAL_STATUSES.test(e.strStatus.trim())) return { ...base, status: "pending" };
   const h = Number(e.intHomeScore);

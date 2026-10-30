@@ -1,8 +1,7 @@
 // Local test chain for the keeper, watcher and indexer suites: a private anvil on port 8745 with the contracts
-// deployed from forge artifacts, plus a throwaway Postgres 16 cluster on 5442. Test keys are generated per run
+// deployed from forge artifacts, plus a throwaway Postgres 16 cluster on a free port. Test keys are generated per run
 // and funded on the local anvil only. Everything here stops the processes it started, by PID.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   createPublicClient,
@@ -26,9 +25,9 @@ import { createDb } from "../../src/db/client";
 import { runMigrations } from "../../src/db/migrate";
 import { Kind, ZERO_ADDRESS, ZERO_BYTES32, emptyCondition, type Condition, type CreateParams } from "../../src/core/types";
 import type { Deps } from "../../src/workers/deps";
+import { pgBin, startPg } from "./pg";
 
 export const ANVIL_PORT = 8745;
-export const PG_PORT = 5442;
 export const RPC = `http://127.0.0.1:${ANVIL_PORT}`;
 const CONTRACTS = join(import.meta.dir, "../../../contracts");
 const FOUNDRY_BIN = join(process.env.HOME ?? "", ".foundry/bin");
@@ -36,7 +35,6 @@ const FOUNDRY_BIN = join(process.env.HOME ?? "", ".foundry/bin");
 export const anvilPath = () => Bun.which("anvil") ?? (existsSync(join(FOUNDRY_BIN, "anvil")) ? join(FOUNDRY_BIN, "anvil") : undefined);
 const forgePath = () => Bun.which("forge") ?? (existsSync(join(FOUNDRY_BIN, "forge")) ? join(FOUNDRY_BIN, "forge") : undefined);
 export const haveAnvil = () => Boolean(anvilPath() && (forgePath() || existsSync(artifact("IfsoEscrow"))));
-const pgBin = () => ["/opt/homebrew/opt/postgresql@16/bin", "/usr/local/opt/postgresql@16/bin", "/usr/lib/postgresql/16/bin"].find((d) => existsSync(join(d, "pg_ctl"))) ?? Bun.which("pg_ctl")?.replace(/\/pg_ctl$/, "");
 export const havePostgres = () => Boolean(pgBin());
 
 function artifact(name: string) {
@@ -290,25 +288,15 @@ export interface TestDb {
 }
 
 export async function bootDb(): Promise<TestDb> {
-  const bin = pgBin();
-  if (!bin) throw new Error("postgres missing");
-  const dir = mkdtempSync(join(tmpdir(), "ifso-keeper-pg-"));
-  const data = join(dir, "data");
-  const run = (cmd: string[]) => Bun.spawnSync(cmd, { env: { ...process.env, LC_ALL: "C", LANG: "C" }, stdout: "pipe", stderr: "pipe" });
-  const url = `postgres://ifso@127.0.0.1:${PG_PORT}/postgres`;
-  const init = run([`${bin}/initdb`, "-D", data, "-U", "ifso", "--auth=trust", "-E", "UTF8", "--locale=C"]);
-  if (init.exitCode !== 0) throw new Error(init.stderr.toString());
-  const start = run([`${bin}/pg_ctl`, "-D", data, "-w", "-l", join(dir, "log"), "-o", `-p ${PG_PORT} -k ${dir} -c listen_addresses=127.0.0.1`, "start"]);
-  if (start.exitCode !== 0) throw new Error(start.stderr.toString() + start.stdout.toString());
-  await runMigrations(url);
-  const { db, sql } = createDb(url);
+  const pg = startPg("ifso-keeper-pg-");
+  await runMigrations(pg.url);
+  const { db, sql } = createDb(pg.url);
   return {
-    url,
+    url: pg.url,
     db,
     async stop() {
       await sql.end({ timeout: 2 }).catch(() => {});
-      run([`${bin}/pg_ctl`, "-D", data, "-m", "fast", "-w", "stop"]);
-      rmSync(dir, { recursive: true, force: true });
+      pg.stop();
     },
   };
 }

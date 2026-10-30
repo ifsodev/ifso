@@ -1,0 +1,388 @@
+{
+  "recordedOn": "2026-10-30",
+  "polygonRpc": "polygon-bor.publicnode.com",
+  "ctf": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+  "markets": [
+    {
+      "gamma": {
+        "slug": "will-donald-trump-win-the-2024-us-presidential-election",
+        "question": "Will Donald Trump win the 2024 US Presidential Election?",
+        "conditionId": "dd22472e552920b8438158ea7238bfadfa4f736aa4cee91a6b86c39ead110917",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"1\", \"0\"]",
+        "endDate": "2024-11-05T12:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "1",
+          "0"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-kamala-harris-win-the-2024-us-presidential-election",
+        "question": "Will Kamala Harris win the 2024 US Presidential Election?",
+        "conditionId": "c6485bb7ea46d7bb89beb9c91e7572ecfc72a6273789496f78bc5e989e4d1638",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2024-11-04T12:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-donald-trump-be-inaugurated",
+        "question": "Will Donald Trump be inaugurated?",
+        "conditionId": "c3d4155148681756bfe67bb41d8d0882a8a122e7d3762b3591bf6598c9bd198b",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"1\", \"0\"]",
+        "endDate": "2025-01-20T12:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "1",
+          "0"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-the-sacramento-kings-win-the-2025-nba-finals",
+        "question": "Will the Sacramento Kings win the 2025 NBA Finals?",
+        "conditionId": "763cc84a3cde36b9ce12a8afe6d3e1e3e46e50692e8ec47636c7803c1033cfab",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2025-06-23T12:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "microstrategy-sells-any-bitcoin-by-may-31-2026",
+        "question": "MicroStrategy sells any Bitcoin by May 31, 2026?",
+        "conditionId": "3733a1b647e7364095736ab0966465d896a84cf3b6bc1695ca1f26c3239b3868",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2026-07-01T04:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-nicolae-ciuca-win-the-2024-romanian-presidential-election",
+        "question": "Will Nicolae Ciuc\u0103 win the 2024 Romanian Presidential election?",
+        "conditionId": "9872fe47fbf6284e5399c0f41d6d2c8fb310d2f4d2d50635ab3b36f6a0a7f5b0",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2024-12-08T12:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "us-forces-enter-iran-by-april-30-899",
+        "question": "US forces enter Iran by April 30?",
+        "conditionId": "6d0e09d0f04572d9b1adad84703458b0297bc5603b69dccbde93147ee4443246",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"1\", \"0\"]",
+        "endDate": "2026-04-30T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "1",
+          "0"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-zelenskyy-wear-a-suit-before-july",
+        "question": "Will Zelenskyy wear a suit before July?",
+        "conditionId": "655e5ca101c466b6293aa15e06173b78b293221803d56e35551f708cd82eb352",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2025-06-30T12:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-any-other-republican-politician-win-the-2024-us-presidential-election",
+        "question": "Will any other Republican Politician win the 2024 US Presidential Election?",
+        "conditionId": "55c551896c10a74861f2fd88b4f928694310114704cc74b29b9760d1156cade6",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2024-11-05T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "fed-decreases-interest-rates-by-50-bps-after-january-2026-meeting",
+        "question": "Fed decreases interest rates by 50+ bps after January 2026 meeting?",
+        "conditionId": "17815081230e3b9c78b098162c33b1ffa68c4ec29c123d3d14989599e0c2e113",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2026-01-28T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "fed-increases-interest-rates-by-25-bps-after-january-2026-meeting",
+        "question": "Fed increases interest rates by 25+ bps after January 2026 meeting?",
+        "conditionId": "7c6c69d91b21cbbea08a13d0ad51c0e96a956045aaadc77bce507c6b0475b66e",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2026-01-28T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "us-x-iran-ceasefire-extended-by-april-22-2026",
+        "question": "US x Iran ceasefire extended by April 22, 2026?",
+        "conditionId": "1d2787cb8aed975d092b2799ed6f4083e9445f7420cdc09e9d47e7d54356c6cd",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2026-04-21T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "us-x-iran-permanent-peace-deal-by-june-15-2026-734-856-129",
+        "question": "US x Iran permanent peace deal by June 15, 2026?",
+        "conditionId": "d86a816093fcd0a0e1ca440bc5ce199bd3c5a8d6139e044b076958164f8c5423",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"1\", \"0\"]",
+        "endDate": "2026-06-15T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "1",
+          "0"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-argentina-win-the-2026-fifa-world-cup-245",
+        "question": "Will Argentina win the 2026 FIFA World Cup?",
+        "conditionId": "0c4cd2055d6ea89354ffddc55d6dbcef9355748112ea952fc925f3db6a5c457f",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2026-07-20T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "us-x-iran-ceasefire-by-april-7",
+        "question": "US x Iran ceasefire by April 7?",
+        "conditionId": "4c5701bcde0b8fb7d7f48c8e9d20245a6caa58c61a77f981fad98f2bfa0b1bc7",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"1\", \"0\"]",
+        "endDate": "2026-04-07T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "1",
+          "0"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-the-fed-increase-interest-rates-by-25-bps-after-the-march-2026-meeting",
+        "question": "Will the Fed increase interest rates by 25+ bps after the March 2026 meeting?",
+        "conditionId": "25aa90b3cd98305e849189b4e8b770fc77fe89bccb7cf9656468414e01145d38",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2026-03-18T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-kamala-harris-win-the-popular-vote-in-the-2024-presidential-election",
+        "question": "Kamala Harris wins the popular vote?",
+        "conditionId": "265366ede72d73e137b2b9095a6cdc9be6149290caa295738a95e3d881ad0865",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2024-11-05T12:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "fed-decreases-interest-rates-by-50-bps-after-december-2025-meeting",
+        "question": "Fed decreases interest rates by 50+ bps after December 2025 meeting?",
+        "conditionId": "6903b766f5fda3d5b02f4472a6b4154419e78b7fd126c0b29ce17bb8e20b20cc",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2025-12-10T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-egypt-win-the-2026-fifa-world-cup",
+        "question": "Will Egypt win the 2026 FIFA World Cup?",
+        "conditionId": "7412d284c8f63791fec807f9b1f61c6fe61163621775a3dc8686cd2575272abe",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0\", \"1\"]",
+        "endDate": "2026-07-20T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "0",
+          "1"
+        ]
+      }
+    },
+    {
+      "gamma": {
+        "slug": "will-there-be-another-us-government-shutdown-by-january-31",
+        "question": "US government shutdown Saturday?",
+        "conditionId": "43ec78527bd98a0588dd9455685b2cc82f5743140cb3a154603dc03c02b57de5",
+        "closed": true,
+        "umaResolutionStatus": "resolved",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"1\", \"0\"]",
+        "endDate": "2026-01-31T00:00:00Z"
+      },
+      "ctf": {
+        "payoutDenominator": "1",
+        "payoutNumerators": [
+          "1",
+          "0"
+        ]
+      }
+    }
+  ],
+  "note": "conditionId is stored without its 0x prefix (the public-guard flags any 0x + 64 hex); the test helper adds it back"
+}

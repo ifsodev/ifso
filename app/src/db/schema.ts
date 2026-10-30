@@ -107,6 +107,8 @@ export const questions = pgTable(
     proposedOutcome: smallint("proposed_outcome"),
     proposer: text("proposer"),
     finalOutcome: smallint("final_outcome"),
+    /** When the proposal was disputed (panel clock starts here). */
+    disputedAt: timestamp("disputed_at", { withTimezone: true }),
     createdTx: text("created_tx"),
   },
   (t) => [index("questions_state_idx").on(t.state, t.earliestResolve), index("questions_close_idx").on(t.closeTime)],

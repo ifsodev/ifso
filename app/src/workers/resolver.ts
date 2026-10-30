@@ -9,11 +9,12 @@ import { ifsoOutcomeResolverAbi, usdgAbi } from "../abi";
 import { agree, questionSpecHash, type SourceReport } from "../core/outcome";
 import { questions, sourceReports } from "../db/schema";
 import { required } from "../chain";
-import * as oddsApi from "../sources/theOddsApi";
-import * as sportsDb from "../sources/theSportsDb";
-import * as polymarket from "../sources/polymarket";
+import { liveSources } from "../sources";
+import { chainNow } from "./keeper";
 import { sendCall } from "./tx";
-import type { Deps } from "./deps";
+import { raise, type Deps } from "./deps";
+
+const sources = (deps: Deps) => deps.sources ?? liveSources;
 
 export const FOOTBALL_RULE =
   "League fixture. Result after 90 minutes plus stoppage time. Postponed, abandoned, suspended or awarded => VOID.";
@@ -100,7 +101,7 @@ export async function ensureFootballQuestion(deps: Deps, f: FootballFixture): Pr
 }
 
 export async function ensurePolymarketQuestion(deps: Deps, slug: string): Promise<{ id: Hex; earliestResolve: number; closeTime: number }> {
-  const { market } = await polymarket.fetchGamma(slug);
+  const { market } = await sources(deps).gamma(slug);
   if (!market?.endDate || market.closed) throw new Error("question not found or already closed");
   const end = Math.floor(new Date(market.endDate).getTime() / 1000);
   const spec = {
@@ -145,15 +146,15 @@ export async function gatherReports(deps: Deps, q: typeof questions.$inferSelect
   const pending = (provider: string): SourceReport => ({ provider, fetchedAt: Math.floor(Date.now() / 1000), status: "pending", digest: "0x" });
   if (q.source === "football") {
     if (deps.env.ODDS_API_KEY && refs.theoddsapi) {
-      tasks.push(oddsApi.fetchScore(deps.env.ODDS_API_KEY, String(spec.league), refs.theoddsapi).catch(() => pending("theoddsapi")));
+      tasks.push(sources(deps).oddsScore(deps.env.ODDS_API_KEY, String(spec.league), refs.theoddsapi).catch(() => pending("theoddsapi")));
     }
     if (deps.env.SECOND_SPORTS_SOURCE === "thesportsdb" && refs.thesportsdb) {
-      tasks.push(sportsDb.fetchEvent(deps.env.THESPORTSDB_KEY, refs.thesportsdb).catch(() => pending("thesportsdb")));
+      tasks.push(sources(deps).sportsDbEvent(deps.env.THESPORTSDB_KEY, refs.thesportsdb).catch(() => pending("thesportsdb")));
     }
   } else if (q.source === "polymarket") {
-    tasks.push(polymarket.fetchGamma(String(refs.polymarket)).then((r) => r.report).catch(() => pending("polymarket-gamma")));
+    tasks.push(sources(deps).gamma(String(refs.polymarket)).then((r) => r.report).catch(() => pending("polymarket-gamma")));
     if (deps.env.POLYGON_RPC_URL && refs.conditionId) {
-      tasks.push(polymarket.fetchCtf(deps.env.POLYGON_RPC_URL, refs.conditionId as Hex).catch(() => pending("polygon-ctf")));
+      tasks.push(sources(deps).ctf(deps.env.POLYGON_RPC_URL, refs.conditionId as Hex).catch(() => pending("polygon-ctf")));
     }
   }
   const reports = await Promise.all(tasks);
@@ -174,10 +175,42 @@ async function ensureBondAllowance(deps: Deps, resolver: Address) {
   }
 }
 
+const ZERO = "0x0000000000000000000000000000000000000000";
+/** Causes already raised by this process. The alert sender also dedupes (30 min), this keeps a restart-free loop quiet. */
+const raised = new Set<string>();
+export const resetResolverAlerts = () => raised.clear();
+async function raiseOnce(deps: Deps, cause: string, text: string) {
+  if (raised.has(cause)) return;
+  raised.add(cause);
+  await raise(deps, cause, text);
+}
+
+type OnchainQuestion = Awaited<ReturnType<typeof readQuestion>>;
+function readQuestion(deps: Deps, resolver: Address, id: Hex) {
+  return deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "getQuestion", args: [id] });
+}
+
+/** Mirrors the on-chain record into the questions row (state, proposal, dispute time, final outcome). */
+async function syncRow(deps: Deps, resolver: Address, id: Hex): Promise<OnchainQuestion> {
+  const o = await readQuestion(deps, resolver, id);
+  const state = Number(o.state);
+  await deps.db
+    .update(questions)
+    .set({
+      state,
+      proposedOutcome: state >= 2 ? o.proposed : null,
+      proposer: o.proposer === ZERO ? null : o.proposer,
+      finalOutcome: state === 4 ? o.finalOutcome : null,
+      disputedAt: o.disputedAt > 0n ? new Date(Number(o.disputedAt) * 1000) : null,
+    })
+    .where(eq(questions.id, id));
+  return o;
+}
+
 export async function resolverTick(deps: Deps) {
   const resolver = required(deps.clients.resolverContract, "RESOLVER_ADDRESS");
   const me = deps.clients.resolver?.account?.address?.toLowerCase();
-  const now = Math.floor(Date.now() / 1000);
+  const now = Number(await chainNow(deps)); // the contract judges windows by block time, so do we
   const disputeWindow = Number(await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "disputeWindow" }));
   const panelWindow = Number(await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "panelWindow" }));
 
@@ -188,44 +221,62 @@ export async function resolverTick(deps: Deps) {
     .limit(100);
 
   for (const q of live) {
-    const onchain = await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "getQuestion", args: [q.id as Hex] });
-    const state = Number(onchain.state);
-    if (state !== q.state) await deps.db.update(questions).set({ state, proposedOutcome: onchain.proposed, proposer: onchain.proposer, finalOutcome: state === 4 ? onchain.finalOutcome : null }).where(eq(questions.id, q.id));
-
-    if (state === 1) {
-      const a = agree(await gatherReports(deps, q));
-      deps.log("agreement", { q: q.id, decision: a.decision, reason: a.reason, providers: a.providers });
-      if (a.decision === null) {
-        if (now > Math.floor(q.earliestResolve.getTime() / 1000) + 48 * 3600) deps.log("ALERT unresolved after 48h: escrows will refund at expiry", { q: q.id });
-        continue;
-      }
-      await ensureBondAllowance(deps, resolver);
-      await sendCall(deps, deps.clients.resolver, { address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "propose", args: [q.id as Hex, a.decision, a.sourcesHash] }, { kind: "propose", questionId: q.id });
-    } else if (state === 2) {
-      const proposedAt = Number(onchain.proposedAt);
-      if (onchain.proposer.toLowerCase() !== me && now < proposedAt + disputeWindow) {
-        // someone else proposed: check it against our own sources
-        const a = agree(await gatherReports(deps, q));
-        if (a.decision !== null && a.decision !== onchain.proposed) {
-          deps.log("disputing contradicting proposal", { q: q.id, proposed: onchain.proposed, ours: a.decision });
-          await ensureBondAllowance(deps, resolver);
-          await sendCall(deps, deps.clients.resolver, { address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "dispute", args: [q.id as Hex, a.sourcesHash] }, { kind: "dispute", questionId: q.id });
-        }
-      } else if (now >= proposedAt + disputeWindow) {
-        await sendCall(deps, deps.clients.resolver ?? deps.clients.keeper, { address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "finalize", args: [q.id as Hex] }, { kind: "finalize", questionId: q.id });
-      }
-    } else if (state === 3) {
-      if (now >= Number(onchain.disputedAt) + panelWindow) {
-        await sendCall(deps, deps.clients.resolver ?? deps.clients.keeper, { address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "finalizeTimedOut", args: [q.id as Hex] }, { kind: "panel-timeout", questionId: q.id });
-      } else {
-        deps.log("ALERT disputed question waiting on the panel", { q: q.id, deadline: Number(onchain.disputedAt) + panelWindow });
-      }
+    try {
+      await resolveOne(deps, resolver, me, q, now, disputeWindow, panelWindow);
+    } catch (e) {
+      deps.log("resolver error", { q: q.id, error: String((e as Error)?.message ?? e).slice(0, 300) });
     }
   }
 
   // pull back any credited bonds
   if (me) {
     const claimable = await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "claimableBond", args: [me as Address] });
-    if (claimable > 0n) await sendCall(deps, deps.clients.resolver, { address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "withdrawBond", args: ["0x0000000000000000000000000000000000000000"] }, { kind: "bond-withdraw" });
+    if (claimable > 0n) await sendCall(deps, deps.clients.resolver, { address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "withdrawBond", args: [ZERO] }, { kind: "bond-withdraw" });
+  }
+}
+
+async function resolveOne(deps: Deps, resolver: Address, me: string | undefined, q: typeof questions.$inferSelect, now: number, disputeWindow: number, panelWindow: number) {
+  const id = q.id as Hex;
+  const onchain = await syncRow(deps, resolver, id);
+  const state = Number(onchain.state);
+  const call = (functionName: "propose" | "dispute" | "finalize" | "finalizeTimedOut", args: readonly unknown[], wallet = deps.clients.resolver) =>
+    sendCall(deps, wallet, { address: resolver, abi: ifsoOutcomeResolverAbi, functionName, args } as never, { kind: functionName, questionId: q.id });
+
+  if (state === 1) {
+    const a = agree(await gatherReports(deps, q));
+    deps.log("agreement", { q: q.id, decision: a.decision, reason: a.reason, providers: a.providers });
+    if (a.decision === null) {
+      if (a.conflict) await raiseOnce(deps, `resolver-conflict:${q.id}`, `sources contradict each other for question ${q.id} (${a.providers.join(", ")}); no proposal made, needs a human look`);
+      else if (now > Math.floor(q.earliestResolve.getTime() / 1000) + 48 * 3600) await raiseOnce(deps, `resolver-unresolved:${q.id}`, `question ${q.id} still has no agreed result 48 hours after the earliest resolve time; the payments on it refund at expiry`);
+      return;
+    }
+    await ensureBondAllowance(deps, resolver);
+    const r = await call("propose", [id, a.decision, a.sourcesHash]);
+    if (r.ok) await syncRow(deps, resolver, id);
+  } else if (state === 2) {
+    const proposedAt = Number(onchain.proposedAt);
+    if (onchain.proposer.toLowerCase() !== me && now < proposedAt + disputeWindow) {
+      // someone else proposed: check it against our own sources
+      const a = agree(await gatherReports(deps, q));
+      if (a.decision !== null && a.decision !== onchain.proposed) {
+        deps.log("disputing contradicting proposal", { q: q.id, proposed: onchain.proposed, ours: a.decision });
+        await ensureBondAllowance(deps, resolver);
+        const r = await call("dispute", [id, a.sourcesHash]);
+        if (r.ok) await syncRow(deps, resolver, id);
+      } else if (a.conflict) {
+        await raiseOnce(deps, `resolver-conflict:${q.id}`, `a proposal by another address on question ${q.id} cannot be checked: our sources contradict each other; it was not disputed`);
+      }
+    } else if (now >= proposedAt + disputeWindow) {
+      const r = await call("finalize", [id], deps.clients.resolver ?? deps.clients.keeper);
+      if (r.ok) await syncRow(deps, resolver, id);
+    }
+  } else if (state === 3) {
+    const deadline = Number(onchain.disputedAt) + panelWindow;
+    if (now >= deadline) {
+      const r = await call("finalizeTimedOut", [id], deps.clients.resolver ?? deps.clients.keeper);
+      if (r.ok) await syncRow(deps, resolver, id);
+    } else {
+      await raiseOnce(deps, `panel-waiting:${q.id}`, `question ${q.id} is disputed and waits on the panel until ${new Date(deadline * 1000).toISOString()}; no answer by then voids it and the payments on it refund`);
+    }
   }
 }

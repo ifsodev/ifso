@@ -1,33 +1,21 @@
-// R5: a fresh plain Postgres 16 cluster on port 5442 migrates from zero, twice. Skips when pg_ctl is missing.
+// R5: a fresh plain Postgres 16 cluster on a free port migrates from zero, twice. Skips when pg_ctl is missing.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import postgres from "postgres";
 import { runMigrations } from "../src/db/migrate";
+import { pgBin, startPg, type PgCluster } from "./helpers/pg";
 
-const PORT = 5442;
-const bin = ["/opt/homebrew/opt/postgresql@16/bin", "/usr/local/opt/postgresql@16/bin", "/usr/lib/postgresql/16/bin"].find((d) => existsSync(join(d, "pg_ctl"))) ?? Bun.which("pg_ctl")?.replace(/\/pg_ctl$/, "");
-const run = (cmd: string[]) => Bun.spawnSync(cmd, { env: { ...process.env, LC_ALL: "C", LANG: "C" }, stdout: "pipe", stderr: "pipe" });
+const bin = pgBin();
 
 describe.skipIf(!bin)("migrations on a fresh cluster (R5)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ifso-pg-"));
-  const data = join(dir, "data");
-  const url = `postgres://ifso@127.0.0.1:${PORT}/postgres`;
-  let started = false;
+  let pg: PgCluster;
+  let url = "";
 
   beforeAll(() => {
-    const init = run([`${bin}/initdb`, "-D", data, "-U", "ifso", "--auth=trust", "-E", "UTF8", "--locale=C"]);
-    if (init.exitCode !== 0) throw new Error(init.stderr.toString());
-    const start = run([`${bin}/pg_ctl`, "-D", data, "-w", "-l", join(dir, "log"), "-o", `-p ${PORT} -k ${dir} -c listen_addresses=127.0.0.1`, "start"]);
-    if (start.exitCode !== 0) throw new Error(start.stderr.toString() + start.stdout.toString());
-    started = true;
+    pg = startPg("ifso-pg-");
+    url = pg.url;
   });
 
-  afterAll(() => {
-    if (started) run([`${bin}/pg_ctl`, "-D", data, "-m", "fast", "-w", "stop"]);
-    rmSync(dir, { recursive: true, force: true });
-  });
+  afterAll(() => pg?.stop());
 
   test("migrates from zero twice without error and creates the round cache as a normal table", async () => {
     await runMigrations(url);

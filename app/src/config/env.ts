@@ -49,8 +49,8 @@ const schema = z.object({
 
   ODDS_API_KEY: z.string().optional(), // the-odds-api.com (scores endpoint)
   SECOND_SPORTS_SOURCE: z.enum(["thesportsdb", "none"]).default("thesportsdb"),
-  THESPORTSDB_KEY: z.string().default("3"), // public free key
-  POLYGON_RPC_URL: z.string().url().optional(), // cross-check Polymarket CTF payouts on-chain
+  THESPORTSDB_KEY: z.string().default("123"), // public free test key (the old key "3" is disabled)
+  POLYGON_RPC_URL: z.string().url().default("https://polygon-bor.publicnode.com"), // free public Polygon RPC (cross-checks Polymarket payouts on-chain)
   PYTH_HERMES_URL: z.string().url().default("https://hermes.pyth.network"),
   PYTH_API_KEY: z.string().optional(),
 

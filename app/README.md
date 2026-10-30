@@ -22,7 +22,7 @@ bunx tsc --noEmit
 | `src/api/` | tRPC router, Hono app, claim/accept relay, fixtures lookup, rate limiting |
 | `src/bot/` | Telegram bot: `/ifso`, `/challenge`, `/mine`, `/tz`; unclear input becomes a question with buttons, the final reply is one URL button to the web app (no Mini App) |
 | `src/workers/` | keeper, price watcher, round history (phase-aware finder), Pyth fetch, outcome resolver, indexer (block-hash cursor, reorg rewind), notifier, BullMQ queues |
-| `src/sources/` | The Odds API, TheSportsDB, Polymarket (Gamma + Polygon CTF), Hyperliquid HIP-4 (phase 2) |
+| `src/sources/` | The Odds API, TheSportsDB (free test key `123`), Polymarket (Gamma + Polygon CTF via `POLYGON_RPC_URL`, default a free public RPC), Hyperliquid HIP-4 (phase 2); `index.ts` is the swappable fetcher interface the resolver tests replay recorded fixtures through |
 | `src/chain/` | viem clients: ordered RPC fallback + chunked `getLogs` (`rpc.ts`), keystore hot keys (`keys.ts`) |
 | `src/ops/` | `/healthz` + `/readyz` probes, ops alerts (deduped, log-only unless `ALERTS_ARMED=1`), monitors |
 | `src/client/claimPage.ts` | Browser claim flow (fragment read + wipe, chain-rendered details, sign, relay) |
