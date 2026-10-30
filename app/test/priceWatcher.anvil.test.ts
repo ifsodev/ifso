@@ -6,8 +6,8 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 import { eq } from "drizzle-orm";
 import { decodeAbiParameters, decodeFunctionData } from "viem";
 import { ifsoEscrowAbi } from "../src/abi";
-import { Status } from "../src/core/types";
-import { cursors, relayTxs } from "../src/db/schema";
+import { Kind, Status } from "../src/core/types";
+import { cursors, escrows, relayTxs } from "../src/db/schema";
 import { indexerTick, resetIndexerState } from "../src/workers/indexer";
 import { priceWatchTick, resetWatcherState } from "../src/workers/priceWatcher";
 import { bootChain, bootDb, haveAnvil, havePostgres, makeTestDeps, priceCondition, type TestChain, type TestDb } from "./helpers/chain";
@@ -140,5 +140,30 @@ describe.skipIf(!haveAnvil() || !havePostgres())("price watcher", () => {
     expect(await statusOf(late)).toBe(Status.RELEASED);
     expect(await proofOf(late)).toBe(crossing);
     expect(await statusOf(first)).toBe(Status.OPEN); // 120 never reached its 150 threshold
+  });
+  // Review R2-M3: the watcher read 2000 OPEN PRICE rows with no order and dropped AT_DEADLINE rows after the query, so
+  // 2000+ AT_DEADLINE rows (or long-closed TOUCH rows) hid a live TOUCH escrow. Kept last: it leaves rows behind.
+  test("2,100 AT_DEADLINE rows and 300 long-closed TOUCH rows do not hide a live TOUCH escrow", async () => {
+    const t = Number(await chain.now());
+    const spamFeed = "0x000000000000000000000000000000000000dead";
+    const row = (id: number, mode: number, deadline: number) => ({
+      id: String(900_000 + id), sender: spamFeed, amount: "1000000", kind: Kind.PRICE, conditionHash: "0x" + "00".repeat(32), feed: spamFeed,
+      condition: { kind: Kind.PRICE, mode, op: 0, source: 0, target: spamFeed, threshold: "1", start: String(deadline - 3600), deadline: String(deadline), maxStale: 3600, holdWindow: 0 },
+      deadline: new Date(deadline * 1000), expiry: new Date((t + 300 * 86400) * 1000), activeFrom: new Date((t - 40 * 86400) * 1000),
+      status: Status.OPEN, createdBlock: 1n, createdTx: "0x",
+    });
+    const spam = [
+      ...Array.from({ length: 2100 }, (_, i) => row(i, 0, t + 86400 + i)), // AT_DEADLINE: the keeper's job, not the watcher's
+      ...Array.from({ length: 300 }, (_, i) => row(5000 + i, 1, t - 30 * 86400 + i)), // TOUCH windows closed a month ago
+    ];
+    for (let i = 0; i < spam.length; i += 500) await pg.db.insert(escrows).values(spam.slice(i, i + 500));
+    const feed = await chain.newFeed();
+    await chain.push(feed, px(90), await at(-100));
+    const id = await touch(feed, 100);
+    await sync();
+    await priceWatchTick(deps);
+    await chain.push(feed, px(105), await at(20));
+    await priceWatchTick(deps);
+    expect(await statusOf(id)).toBe(Status.RELEASED);
   });
 });

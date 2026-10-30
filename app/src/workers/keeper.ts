@@ -5,7 +5,7 @@
 // Decisions use CHAIN time (the latest block timestamp), the same clock the contract reads. Each pass builds a plan
 // (what to call, and whether the keeper believes it will succeed), then either sends it (simulate, estimate, send)
 // or, with KEEPER_SHADOW=1, logs the plan next to the eth_call answer and sends nothing.
-import { and, asc, eq, gt, inArray, lt, lte } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { encodeAbiParameters, type Address, type Hex } from "viem";
 import { erc8056Abi, ifsoConditionEvaluatorAbi, ifsoEscrowAbi, ifsoOutcomeResolverAbi } from "../abi";
 import { Kind, PRICE_AT_DEADLINE, SRC_PYTH, Status, Verdict, ZERO_ADDRESS, type Condition } from "../core/types";
@@ -75,6 +75,18 @@ function noteFailure(pass: string, id: string, nowMs: number) {
   backoff.set(bkey(pass, id), { fails, until: nowMs + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS) });
 }
 const noteSuccess = (pass: string, id: string) => backoff.delete(bkey(pass, id));
+// Review R2-M3: a row with nothing to send yet (no proof round, hold window, Pyth update missing) never fails, so it
+// used to sit at the head of every scan forever. It now steps aside too, on a shorter schedule (2 min doubling to 30 min).
+const WAIT_MAX_MS = 30 * 60_000;
+function noteWait(pass: string, id: string, nowMs: number) {
+  const prev = backoff.get(bkey(pass, id));
+  const fails = (prev?.fails ?? 0) + 1;
+  backoff.set(bkey(pass, id), { fails, until: nowMs + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), WAIT_MAX_MS) });
+}
+/** SQL: rows a keeper can act on at all (an unaccepted challenge never settles; it only refunds at expiry). */
+const actionable = () => or(eq(escrows.twoSided, false), eq(escrows.accepted, true));
+/** SQL: PRICE rows in one mode (condition->>'mode'), so TOUCH rows never take AT_DEADLINE scan slots and vice versa. */
+export const priceMode = (mode: number) => sql`${escrows.condition}->>'mode' = ${String(mode)}`;
 
 export async function keeperTick(deps: Deps) {
   const nowTs = await chainNow(deps);
@@ -141,7 +153,7 @@ async function settleTime(deps: Deps, now: Date) {
   const due = await deps.db
     .select()
     .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.TIME), lte(escrows.deadline, now), gt(escrows.expiry, now)))
+    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.TIME), lte(escrows.deadline, now), gt(escrows.expiry, now), actionable()))
     .orderBy(asc(escrows.deadline))
     .limit(SCAN + skippedIds("time", Date.now()));
   let sends = 0;
@@ -177,7 +189,8 @@ async function settlePrice(deps: Deps, now: Date, nowTs: bigint) {
   const due = await deps.db
     .select()
     .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.PRICE), lte(escrows.deadline, now), gt(escrows.expiry, now)))
+    // AT_DEADLINE only (TOUCH is the price watcher's job; untouched TOUCH rows just wait for their expiry refund)
+    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.PRICE), priceMode(PRICE_AT_DEADLINE), lte(escrows.deadline, now), gt(escrows.expiry, now), actionable()))
     .orderBy(asc(escrows.deadline))
     .limit(SCAN + skippedIds("price", Date.now()));
   let sends = 0;
@@ -186,7 +199,10 @@ async function settlePrice(deps: Deps, now: Date, nowTs: bigint) {
     if (sends >= BATCH || skipping("price", e.id, Date.now())) continue;
     if (await guarded(deps, "price", e.id, async () => {
       const plan = await planPrice(deps, e, nowTs);
-      if (!plan) return;
+      if (!plan || (!plan.send && !isShadow(deps))) {
+        noteWait("price", e.id, Date.now()); // nothing to send yet: step aside for a while
+        return;
+      }
       if (plan.send) {
         deps.log("price decidable", { id: e.id, verdict: plan.verdict === undefined ? undefined : Verdict[plan.verdict], reason: plan.reason });
       }
@@ -200,7 +216,7 @@ async function settleOutcome(deps: Deps, now: Date) {
   const open = await deps.db
     .select({ id: escrows.id, questionId: escrows.questionId, condition: escrows.condition, twoSided: escrows.twoSided, accepted: escrows.accepted })
     .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.OUTCOME), gt(escrows.expiry, now)))
+    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.OUTCOME), gt(escrows.expiry, now), actionable()))
     .orderBy(asc(escrows.expiry))
     .limit(500 + skippedIds("outcome", Date.now()));
   const byQ = new Map<string, typeof open>();

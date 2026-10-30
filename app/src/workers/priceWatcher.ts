@@ -4,19 +4,20 @@
 // The per-feed cursor (the last round id fully handled) lives in the cursors table, so a restart resumes where it
 // stopped instead of skipping the rounds printed while the process was down. A cursor only moves past a round once
 // every crossing in it is settled, finished by someone else, or given up after MAX_ATTEMPTS ticks (alerted).
-import { and, eq, gt, lte } from "drizzle-orm";
+import { and, desc, eq, gt, lte, or } from "drizzle-orm";
 import { encodeAbiParameters, type Address } from "viem";
 import { ifsoEscrowAbi } from "../abi";
 import { crosses, type Round } from "../core/price";
 import { Kind, PRICE_TOUCH, Status } from "../core/types";
 import { cursors, escrows } from "../db/schema";
 import { required } from "../chain";
-import { chainNow, conditionFromJson } from "./keeper";
+import { chainNow, conditionFromJson, priceMode } from "./keeper";
 import { cachedSource, earliestRound, lastRoundAtOrBefore, roundsAfter, type RoundSource } from "./rounds";
 import { isShadow, sendCall, shadowCall } from "./tx";
 import { raise, type Deps } from "./deps";
 
 export const MAX_ATTEMPTS = 10;
+const WATCH_LIMIT = 5000;
 const attempts = new Map<string, number>();
 
 const cursorName = (feed: string) => `watch:${feed.toLowerCase()}`;
@@ -44,11 +45,25 @@ async function startingPoint(src: RoundSource, earliestStart: bigint): Promise<b
 export async function priceWatchTick(deps: Deps) {
   const nowTs = await chainNow(deps);
   const now = new Date(Number(nowTs) * 1000);
+  // Review R2-M3: TOUCH rows only, filtered in SQL (AT_DEADLINE rows used to fill the window and were dropped after the
+  // query), unaccepted challenges left out, and ordered by need: windows still open first, then the most recently closed
+  // ones (their crossing may still be behind the feed cursor). Long-closed windows sort last.
   const live = await deps.db
     .select()
     .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), eq(escrows.kind, Kind.PRICE), gt(escrows.expiry, now), lte(escrows.activeFrom, now)))
-    .limit(2000);
+    .where(
+      and(
+        eq(escrows.status, Status.OPEN),
+        eq(escrows.kind, Kind.PRICE),
+        priceMode(PRICE_TOUCH),
+        gt(escrows.expiry, now),
+        lte(escrows.activeFrom, now),
+        or(eq(escrows.twoSided, false), eq(escrows.accepted, true)),
+      ),
+    )
+    .orderBy(desc(escrows.deadline), desc(escrows.id))
+    .limit(WATCH_LIMIT);
+  if (live.length >= WATCH_LIMIT) await raise(deps, "touch-watch-full", `the price watcher reads only the ${WATCH_LIMIT} TOUCH payments with the latest deadlines; older ones are not watched this tick`);
   const byFeed = new Map<string, typeof live>();
   for (const e of live) {
     const c = conditionFromJson(e.condition as Record<string, unknown>);
