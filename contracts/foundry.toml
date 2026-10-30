@@ -37,3 +37,10 @@ rhc_testnet = "https://rpc.testnet.chain.robinhood.com"
 
 [fmt]
 line_length = 120
+
+# Symbolic proofs only (halmos). Own out dir so the normal build cache and size gate are untouched.
+[profile.halmos]
+test = "test/halmos"
+script = "test/halmos"
+out = "out-halmos"
+cache_path = "cache-halmos"
