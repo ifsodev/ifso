@@ -1,0 +1,40 @@
+# Slither exact-match allowlist (tools/slither-gate.py). One line per finding: "<check> <file>:<element>  # reason".
+# Scope: src/ minus mocks; informational and optimization detectors excluded. Never silence a finding by editing
+# deployed source. Every line was reviewed on 2026-10-30; a new finding or a stale line fails CI.
+
+calls-loop src/IfsoEscrow.sol:_create  # createBatch calls the trusted, immutable evaluator per row; one bad row reverts only that caller's own batch
+calls-loop src/IfsoEscrow.sol:_create  # same finding, second call site (evaluator.validate and the resolver read behind it)
+incorrect-equality src/FeeRouter.sol:distribute  # "balance == 0" is an early return on an empty router, not a security check
+missing-zero-check src/utils/Owned2Step.sol:newOwner  # transferOwnership(0) only clears the pending owner; ownership moves only on acceptOwnership by that address
+reentrancy-eth src/IfsoEscrow.sol:settle  # the external call is the immutable evaluator; every state-changing escrow entry point is nonReentrant (read-only view reentrancy noted in SECURITY.md)
+reentrancy-events src/FeeRouter.sol:distribute  # event after transfers of USDG (a fixed, known token); no state depends on the order
+reentrancy-events src/FeeRouter.sol:sweep  # sweep forwards a non-USDG token; event order has no effect on state
+timestamp src/IfsoConditionEvaluator.sol:_checkSequencer  # time-based by design (sequencer grace period); sequencer clock drift is far below the 1 h grace
+timestamp src/IfsoConditionEvaluator.sol:_evalChainlink  # time-based conditions by design; windows are hours or days
+timestamp src/IfsoConditionEvaluator.sol:_evalPyth  # time-based conditions by design; windows are hours or days
+timestamp src/IfsoConditionEvaluator.sol:_multiplierChanged  # compares the Stock Token's scheduled multiplier time; by design
+timestamp src/IfsoConditionEvaluator.sol:_validatePrice  # deadline and expiry bounds at creation; by design
+timestamp src/IfsoConditionEvaluator.sol:evaluate  # TIME conditions unlock at a timestamp; by design
+timestamp src/IfsoConditionEvaluator.sol:validate  # deadline and expiry bounds at creation; by design
+timestamp src/IfsoEscrow.sol:_accept  # accept window; by design
+timestamp src/IfsoEscrow.sol:_create  # expiry bounds at creation; by design
+timestamp src/IfsoEscrow.sol:_decisionGuard  # decisions close at expiry so refund takes over; by design
+timestamp src/IfsoEscrow.sol:claim  # claims close at expiry; by design
+timestamp src/IfsoEscrow.sol:decideBySig  # signature deadline; by design
+timestamp src/IfsoEscrow.sol:refund  # refund opens at expiry; by design
+timestamp src/IfsoEscrow.sol:setRefundAddressesBySig  # signature deadline; by design
+timestamp src/IfsoEscrow.sol:settle  # settle closes at expiry; by design
+timestamp src/IfsoOutcomeResolver.sol:applyPanel  # 48 h panel-change delay; by design
+timestamp src/IfsoOutcomeResolver.sol:createQuestion  # question timing bounds; by design
+timestamp src/IfsoOutcomeResolver.sol:dispute  # 2 h dispute window; by design
+timestamp src/IfsoOutcomeResolver.sol:finalize  # dispute window end; by design
+timestamp src/IfsoOutcomeResolver.sol:finalizeTimedOut  # panel timeout; by design
+timestamp src/IfsoOutcomeResolver.sol:panelResolve  # panel window; by design
+timestamp src/IfsoOutcomeResolver.sol:propose  # earliest-resolve time; by design
+uninitialized-local src/IfsoConditionEvaluator.sol:spent  # intentionally starts at zero
+uninitialized-local src/IfsoConditionEvaluator.sol:token  # intentionally starts at zero (0 = crypto feed with no Stock Token)
+uninitialized-local src/IfsoEscrow.sol:fees  # batch accumulator, intentionally starts at zero
+uninitialized-local src/IfsoEscrow.sol:total  # batch accumulator, intentionally starts at zero
+unused-return src/IfsoConditionEvaluator.sol:_checkSequencer  # only status and startedAt matter for the uptime feed
+unused-return src/IfsoConditionEvaluator.sol:_next  # only the latest round id is needed to tell "no next round yet" from a phase change
+unused-return src/IfsoConditionEvaluator.sol:_round  # startedAt is unused; roundId, answer, updatedAt and answeredInRound are all checked

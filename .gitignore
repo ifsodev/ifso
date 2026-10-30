@@ -10,3 +10,4 @@ app/abi-json/
 contracts/.armed-*
 contracts/deployments/31337.json
 contracts/docs/
+contracts/slither-report.json

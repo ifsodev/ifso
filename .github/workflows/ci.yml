@@ -1,21 +1,92 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every action is pinned by full commit sha (tag in the comment). Foundry is pinned to v1.8.4.
 jobs:
   contracts:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults: { run: { working-directory: contracts } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: foundry-rs/foundry-toolchain@v1
-      - run: forge build --sizes
-      - run: forge test -vvv
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with: { version: v1.8.4 }
+      - name: format
+        run: forge fmt --check
+      - name: build and size gate (24,576 B runtime)
+        run: forge build --sizes && bash tools/size-gate.sh
+      - name: NatSpec on every external/public function
+        run: python3 tools/natspec-check.py
+      - name: forge doc builds
+        run: forge doc --out "$RUNNER_TEMP/forge-doc"
+      - name: tests
+        run: forge test
+      - name: gas snapshot unchanged
+        run: forge snapshot --check
+      - name: local deploy on anvil + post-deploy assertions
+        run: |
+          anvil -p 8645 --silent & A=$!
+          sleep 2
+          bash script/local-deploy.sh 8645
+          bash script/verify-sourcify.sh 31337 --dry-run
+          kill $A
+
+  invariants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults: { run: { working-directory: contracts } }
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with: { version: v1.8.4 }
+      - name: invariants (10,000 runs x depth 50)
+        run: FOUNDRY_PROFILE=invariant forge test --match-test invariant -vv
+
+  slither:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with: { version: v1.8.4 }
+      - name: build for slither (deployable sources only)
+        working-directory: contracts
+        run: FOUNDRY_DYNAMIC_TEST_LINKING=false forge build --build-info --skip test --skip script
+      - uses: crytic/slither-action@b52cc1cbfee9ca3e8722dd5224299d16c9a6b80f # v0.4.2
+        with:
+          target: contracts
+          ignore-compile: true
+          slither-version: 0.11.6
+          fail-on: none
+          slither-args: >-
+            --filter-paths "test/|script/|src/mocks/"
+            --exclude-informational --exclude-optimization
+            --json /github/workspace/contracts/slither-report.json
+      - name: exact-match allowlist gate
+        working-directory: contracts
+        run: python3 tools/slither-gate.py slither-report.json slither.allow
+
   app:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults: { run: { working-directory: app } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with: { bun-version: 1.4.4 }
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
-      - run: bun test   # includes the banned-words gate and TS<->Solidity parity vectors
+      - run: bun test # includes the banned-words gate and TS<->Solidity parity vectors
