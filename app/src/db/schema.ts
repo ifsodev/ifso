@@ -68,6 +68,8 @@ export const escrows = pgTable(
     expiry: timestamp("expiry", { withTimezone: true }).notNull(),
     acceptBy: timestamp("accept_by", { withTimezone: true }),
     twoSided: boolean("two_sided").notNull().default(false),
+    /** VOIDED challenge sides still owed (1 = sender side, 2 = acceptor side): a side whose transfer failed at void time. */
+    voidOwed: smallint("void_owed").notNull().default(0),
     accepted: boolean("accepted").notNull().default(false),
     activeFrom: timestamp("active_from", { withTimezone: true }).notNull(),
     altRefundTo: text("alt_refund_to"),

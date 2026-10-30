@@ -126,8 +126,14 @@ export function render(name: string, t: Pick<Target, "role" | "amount" | "questi
       return copy.bot.released(amt("amount"), shortAddr(String(args.to)));
     case "Returned":
       return copy.bot.returned(amt("amount"));
-    case "Voided":
-      return copy.bot.voided;
+    case "Voided": {
+      // destination 0 = that side's refund could not be sent and is held for it (claimVoid)
+      const zero = (k: string) => /^0x0{40}$/i.test(String(args[k] ?? ""));
+      const owed = (t.role === "sender" && zero("senderTo")) || (t.role === "recipient" && zero("counterTo"));
+      return owed ? copy.bot.voidedOwed : copy.bot.voided;
+    }
+    case "VoidClaimed":
+      return copy.bot.voidClaimed(amt("amount"), shortAddr(String(args.to)));
     case "Proposed":
       return copy.bot.resolverPosted(q, POSTED[Number(args.outcome)] ?? String(args.outcome));
     case "Disputed":

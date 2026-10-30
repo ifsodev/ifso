@@ -8,7 +8,7 @@ import type { Deps } from "../src/workers/deps";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
 
-/** A keeper deps stub whose only non-empty query is the expired-refund pass (5th query of a tick is the last pass). */
+/** A keeper deps stub whose only non-empty query is the expired-refund pass (each tick makes 6 queries; the refund pass runs 4th). */
 function setup(stuck: number) {
   const sent: Array<{ functionName: string; args: unknown[] }> = [];
   const sims: bigint[] = [];
@@ -31,7 +31,7 @@ function setup(stuck: number) {
           where: () => q,
           orderBy: () => q,
           limit: (n: number) => ((limit = n), q),
-          then: (res: (v: unknown[]) => unknown) => res(call++ % 5 === 3 ? [...rows].sort((a, b) => a.expiry.getTime() - b.expiry.getTime()).slice(0, limit) : []),
+          then: (res: (v: unknown[]) => unknown) => res(call++ % 6 === 3 ? [...rows].sort((a, b) => a.expiry.getTime() - b.expiry.getTime()).slice(0, limit) : []),
         };
         return q;
       },

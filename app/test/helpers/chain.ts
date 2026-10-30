@@ -1,7 +1,7 @@
 // Local test chain for the keeper, watcher and indexer suites: a private anvil on port 8745 with the contracts
 // deployed from forge artifacts, plus a throwaway Postgres 16 cluster on a free port. Test keys are generated per run
 // and funded on the local anvil only. Everything here stops the processes it started, by PID.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   createPublicClient,
@@ -41,8 +41,21 @@ function artifact(name: string) {
   return join(CONTRACTS, "out", `${name}.sol`, `${name}.json`);
 }
 
+// Newest modification time under contracts/src (the artifacts are gitignored and go stale after a rebase).
+function newestSource(dir = join(CONTRACTS, "src")): number {
+  let m = 0;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    m = Math.max(m, e.isDirectory() ? newestSource(p) : statSync(p).mtimeMs);
+  }
+  return m;
+}
+let rebuilt = false;
+
 function loadArtifact(name: string): { abi: Abi; bytecode: Hex } {
-  if (!existsSync(artifact(name))) {
+  const stale = existsSync(artifact(name)) && !rebuilt && Boolean(forgePath()) && newestSource() > statSync(artifact(name)).mtimeMs;
+  if (stale) rebuilt = true;
+  if (!existsSync(artifact(name)) || stale) {
     const forge = forgePath();
     if (!forge) throw new Error("forge is missing and contracts/out has no artifacts");
     const r = Bun.spawnSync([forge, "build"], { cwd: CONTRACTS, stdout: "pipe", stderr: "pipe" });
@@ -95,6 +108,12 @@ export interface TestChain {
 export async function bootChain(): Promise<TestChain> {
   const bin = anvilPath();
   if (!bin) throw new Error("anvil missing");
+  // Another lane's anvil on the same port would be silently shared (wrong chain state, hung waits): fail fast instead.
+  const probe = () => fetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}', signal: AbortSignal.timeout(500) }).then(() => true, () => false);
+  for (let i = 0; i < 20 && (await probe()); i++) {
+    if (i === 19) throw new Error(`port ${ANVIL_PORT} already has a node answering; set IFSO_TEST_ANVIL_PORT to a free port for this lane`);
+    await sleep(250); // a previous suite's anvil may still be shutting down
+  }
   const proc = Bun.spawn([bin, "--port", String(ANVIL_PORT), "--chain-id", "31337", "--silent", "--host", "127.0.0.1"], { stdout: "ignore", stderr: "ignore" });
   const pc = createPublicClient({ transport: http(RPC), pollingInterval: 50 }) as PublicClient;
   for (let i = 0; i < 100; i++) {

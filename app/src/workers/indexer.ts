@@ -180,11 +180,18 @@ async function handleLog(deps: Deps, log: Log, escrow: Address, notify: Notify) 
   await notify({ name: decoded.eventName, escrowId, questionId, args, txHash: log.transactionHash! });
 }
 
+/** escrows.void_owed bits */
+export const VOID_OWED_SENDER = 1;
+export const VOID_OWED_COUNTER = 2;
+// IfsoEscrow flag bits for the same two facts
+const ESCROW_F_SENDER_OWED = 32;
+const ESCROW_F_COUNTER_OWED = 64;
+const isZero = (a: unknown) => String(a ?? "").toLowerCase() === "0x0000000000000000000000000000000000000000";
+
 const STATUS_BY_EVENT: Record<string, Status> = {
   Met: Status.MET,
   Released: Status.RELEASED,
   Returned: Status.RETURNED,
-  Voided: Status.VOIDED,
   Cancelled: Status.CANCELLED,
 };
 
@@ -230,6 +237,15 @@ async function applyEscrowEvent(deps: Deps, name: string, id: string, args: Reco
     await deps.db.update(escrows).set({ recipient: String(args.acceptor).toLowerCase(), accepted: true, activeFrom: new Date(Number(e.activeFrom) * 1000), updatedAt: new Date() }).where(eq(escrows.id, id));
   } else if (name === "RefundAddressesChanged") {
     await deps.db.update(escrows).set({ altRefundTo: String(args.altRefundTo), updatedAt: new Date() }).where(eq(escrows.id, id));
+  } else if (name === "Voided") {
+    // a side reported with destination 0 could not be paid at void time and is owed (claimVoid pays it later)
+    const owed = (isZero(args.senderTo) ? VOID_OWED_SENDER : 0) | (isZero(args.counterTo) ? VOID_OWED_COUNTER : 0);
+    await deps.db.update(escrows).set({ status: Status.VOIDED, voidOwed: owed, updatedAt: new Date() }).where(eq(escrows.id, id));
+  } else if (name === "VoidClaimed") {
+    // the event does not say which side was paid: take the remaining owed sides from the contract itself
+    const e = await deps.clients.publicClient.readContract({ address: escrow, abi: ifsoEscrowAbi, functionName: "getEscrow", args: [BigInt(id)] });
+    const owed = (e.flags & ESCROW_F_SENDER_OWED ? VOID_OWED_SENDER : 0) | (e.flags & ESCROW_F_COUNTER_OWED ? VOID_OWED_COUNTER : 0);
+    await deps.db.update(escrows).set({ voidOwed: owed, updatedAt: new Date() }).where(eq(escrows.id, id));
   } else if (STATUS_BY_EVENT[name] !== undefined) {
     await deps.db.update(escrows).set({ status: STATUS_BY_EVENT[name]!, updatedAt: new Date() }).where(eq(escrows.id, id));
   }

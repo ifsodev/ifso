@@ -25,6 +25,10 @@ export const copy = {
     unknownCondition: (t: string) =>
       `I couldn't turn "${t}" into a condition. Use a date, a stock price, a team result, a Polymarket link, or a referee.`,
     needDirection: (t: string, p: string) => `Should ${t} be at or above $${p}, or at or below it?`,
+    touchChallenge:
+      "A challenge can only check the price at the deadline, not whether it touched a level at some point. Check the price at the deadline instead, or send this as a one-sided if-so payment where touching counts?",
+    optCheckAtDeadline: "Check at the deadline",
+    optSendAsIfso: "One-sided if-so payment",
     needDeadline: "By when? Add something like \"by friday\" or \"on nov 14\".",
     inferredDirection: (t: string, op: "GTE" | "LTE") => `Reading this as ${t} reaching ${opWord(op)} that level.`,
     inclusive: "Levels count when reached exactly (\"above 200\" includes 200.00).",
@@ -89,6 +93,9 @@ export const copy = {
     released: (amt: string, to: string) => `${amt} USDG went to ${to}.`,
     returned: (amt: string) => `${amt} USDG came back to you.`,
     voided: "It couldn't be decided, so everyone got their own money back.",
+    voidedOwed:
+      "It couldn't be decided, so everyone gets their own money back. Yours couldn't be sent to your saved address (it can't receive USDG right now), so it is being held for you. We'll keep trying, or set a new refund address and it goes there.",
+    voidClaimed: (amt: string, to: string) => `${amt} USDG that was held after a voided challenge went to ${to}.`,
     expiringSoon: (when: string) => `Reminder: this if-so payment comes back on ${when} if it isn't claimed.`,
     resolverPosted: (q: string, outcome: string) =>
       `Result posted for ${q}: ${outcome}. Anyone can challenge it for the next 2 hours.`,

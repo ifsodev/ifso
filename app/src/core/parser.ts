@@ -40,7 +40,7 @@ export interface ParseContext {
 
 /** A question the bot asks instead of guessing. Each option carries the full command text to run if it is picked. */
 export interface Question {
-  kind: "direction" | "date_format" | "deadline" | "weekend" | "team";
+  kind: "direction" | "date_format" | "deadline" | "weekend" | "team" | "touch_challenge";
   text: string;
   options: { label: string; text?: string; replace?: [from: string, to: string] }[];
 }
@@ -110,6 +110,20 @@ export function parseCommand(input: string, ctx: ParseContext): ParseResult {
   if (res.condition && res.twoSided) {
     if (res.condition.kind === "TIME") res.errors.push(copy.parse.challengeNeedsOutcome);
     if (res.condition.kind === "APPROVE" && res.condition.mode === "PARTIES") res.errors.push(copy.parse.challengeNeedsReferee);
+    // The contract refuses a challenge on "touches": it can never end in a loss for the sender, and the other side
+    // could accept after the price already crossed. Offer the two honest alternatives instead of a dead end.
+    if (res.condition.kind === "PRICE" && res.condition.mode === "TOUCH") {
+      const verb = condText.toLowerCase().match(/\b(hits|touches|reaches|tops|breaks|crosses|gets)\b/)?.[1];
+      const asIfso = text.replace(/^\/challenge(@[a-z0-9_]+)?/i, "/ifso").replace(/(\$?\d[\d.]*\s*(?:usdg|usd|dollars?|bucks|\$)?)\s*(?:vs|\/)\s*\$?\d[\d.]*\s*(?:usdg|usd|dollars?|bucks|\$)?/i, "$1");
+      ask(res, {
+        kind: "touch_challenge",
+        text: copy.parse.touchChallenge,
+        options: [
+          { label: copy.parse.optCheckAtDeadline, replace: verb ? [verb, "is"] : undefined },
+          { label: copy.parse.optSendAsIfso, text: asIfso },
+        ],
+      });
+    }
     if (res.recipient?.type === "link") res.notes.push(copy.parse.challengeLinkPrivate);
   }
   if (res.condition && "deadline" in res.condition && res.condition.deadline > 0 && res.condition.deadline * 1000 <= ctx.nowMs) {

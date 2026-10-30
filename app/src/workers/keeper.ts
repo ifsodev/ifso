@@ -15,6 +15,7 @@ import { cachedSource, decideAtDeadline } from "./rounds";
 import { isShadow, sendCall, shadowCall, type ContractCall, type SendResult } from "./tx";
 import { raise, type Deps } from "./deps";
 import { fetchPythUpdate } from "./pyth";
+import { VOID_OWED_COUNTER, VOID_OWED_SENDER } from "./indexer";
 
 const BATCH = 50; //   sends per pass
 const SCAN = 200; //   rows looked at per pass (rows in backoff are skipped and do not count against it)
@@ -79,7 +80,7 @@ export async function keeperTick(deps: Deps) {
   const nowTs = await chainNow(deps);
   const now = new Date(Number(nowTs) * 1000);
   for (const [k, v] of backoff) if (v.until < Date.now() - BACKOFF_MAX_MS) backoff.delete(k); // settled long ago
-  for (const pass of [settleTime, settlePrice, settleOutcome, refundExpired]) {
+  for (const pass of [settleTime, settlePrice, settleOutcome, refundExpired, payOwedVoids]) {
     try {
       await pass(deps, now, nowTs);
     } catch (e) {
@@ -254,6 +255,39 @@ async function refundExpired(deps: Deps, now: Date) {
   for (const e of unaccepted) {
     if (freed >= BATCH || skipping("unaccepted", e.id, Date.now())) continue;
     if (await guarded(deps, "unaccepted", e.id, () => execute(deps, { meta: { kind: "refund-unaccepted", escrowId: e.id }, call: refundCall(e.id, false), send: true, reason: "not accepted in time" }))) freed++;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------- voided challenges
+/**
+ * A VOIDED challenge side whose transfer failed at void time is "owed" (the Voided event reported its destination as
+ * address 0). claimVoid is permissionless and only pays that side's own preset destinations: try the primary, then the
+ * alternate (sender: its alt refund address; acceptor: the acceptor address itself). The owed party may also point the
+ * destination elsewhere first (setRefundAddresses / setCounterRefundTo); the keeper just keeps trying with backoff.
+ */
+async function payOwedVoids(deps: Deps) {
+  const escrow = required(deps.clients.escrow, "ESCROW_ADDRESS");
+  const owed = await deps.db
+    .select({ id: escrows.id, owed: escrows.voidOwed })
+    .from(escrows)
+    .where(and(eq(escrows.status, Status.VOIDED), gt(escrows.voidOwed, 0)))
+    .orderBy(asc(escrows.updatedAt))
+    .limit(SCAN + skippedIds("void", Date.now()));
+  let sends = 0;
+  for (const e of owed) {
+    for (const [bit, counterSide] of [[VOID_OWED_SENDER, false], [VOID_OWED_COUNTER, true]] as const) {
+      if (!(e.owed & bit)) continue;
+      const pass = `void${counterSide ? "c" : "s"}`;
+      if (sends >= BATCH || skipping(pass, e.id, Date.now())) continue;
+      const call = (alt: boolean): ContractCall => ({ address: escrow, abi: ifsoEscrowAbi as never, functionName: "claimVoid", args: [BigInt(e.id), counterSide, alt] });
+      if (await guarded(deps, pass, e.id, async () => {
+        const r = await execute(deps, { meta: { kind: "claim-void", escrowId: e.id }, call: call(false), send: true, reason: "owed side of a voided challenge" });
+        if (isShadow(deps) || !r || r.ok) return r;
+        const alt = await execute(deps, { meta: { kind: "claim-void-alt", escrowId: e.id }, call: call(true), send: true, reason: "owed side, primary refused" });
+        if (alt && !alt.ok) await raise(deps, `void-stuck-${e.id}-${counterSide ? "counter" : "sender"}`, `owed ${counterSide ? "acceptor" : "sender"} payout of voided escrow ${e.id} failed on both addresses`);
+        return alt;
+      })) sends++;
+    }
   }
 }
 

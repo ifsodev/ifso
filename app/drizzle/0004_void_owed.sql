@@ -1,0 +1,1 @@
+ALTER TABLE "escrows" ADD COLUMN "void_owed" smallint DEFAULT 0 NOT NULL;

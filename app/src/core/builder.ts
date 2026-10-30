@@ -21,6 +21,13 @@ import {
 
 export const DEFAULTS = {
   maxStale: 25 * 3600, //       Chainlink equity heartbeat is 24 h; +1 h slack
+  /**
+   * Freshness for a CHALLENGE on a price at the deadline. The contract requires acceptBy + maxStale < deadline, so the
+   * 25 h used for one-sided payments would make every challenge shorter than a day impossible. One hour keeps the
+   * price check strict (an older print falls back to the first print after the deadline, still on-chain and fair)
+   * and lets a challenge on a deadline a little over 1 h 10 min away be built.
+   */
+  challengeMaxStale: 3600,
   holdWindow: 3 * 86400, //     covers a weekend (+ one holiday) if the feed paused
   timeClaimWindow: 7 * 86400,
   priceSettleWindow: 4 * 86400, // after deadline + hold
@@ -99,10 +106,11 @@ export function buildCondition(input: BuildInput): { condition: Condition; expir
       c.threshold = underlyingToFeedUnits(d.priceUsd, input.feed.stockToken ? input.feed.multiplier : 10n ** 18n);
       c.deadline = BigInt(d.deadline);
       if (d.mode === "TOUCH") {
+        if (input.twoSided) throw new BuildError("A challenge can only check the price at the deadline. Use \"is at or above\" instead of \"hits\", or send a one-sided if-so payment.");
         c.start = BigInt(now);
         return { condition: c, expiry: d.deadline + DEFAULTS.touchGrace };
       }
-      c.maxStale = DEFAULTS.maxStale;
+      c.maxStale = input.twoSided ? DEFAULTS.challengeMaxStale : DEFAULTS.maxStale;
       c.holdWindow = DEFAULTS.holdWindow;
       return { condition: c, expiry: d.deadline + DEFAULTS.holdWindow + DEFAULTS.priceSettleWindow };
     }
@@ -135,7 +143,7 @@ export function buildCondition(input: BuildInput): { condition: Condition; expir
 export function challengeAcceptBy(input: BuildInput, condition: Condition, expiry: number): number {
   const now = input.nowSec;
   let latest = Math.min(now + DEFAULTS.challengeAcceptWindow, expiry - 3600);
-  if (condition.kind === Kind.PRICE) latest = Math.min(latest, Number(condition.deadline) - 1); // contract: acceptBy <= deadline; stay strictly before
+  if (condition.kind === Kind.PRICE) latest = Math.min(latest, Number(condition.deadline) - condition.maxStale - 1); // contract: acceptBy + maxStale < deadline
   if (condition.kind === Kind.OUTCOME && input.outcome?.closeTime !== undefined) {
     latest = Math.min(latest, input.outcome.closeTime - (input.outcome.challengeMargin ?? DEFAULTS.sportsChallengeMargin));
   }

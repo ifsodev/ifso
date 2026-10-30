@@ -230,3 +230,43 @@ describe("R1-L3: Polymarket close time is the earliest signal; allow-list", () =
     expect(Number(q.acceptBy)).toBe(soon - 86400);
   });
 });
+
+describe("todo 11b: a NoChange revert is a refusal, not a send", () => {
+  const noChange = () => Object.assign(new Error("reverted"), { shortMessage: 'The contract function "decideBySig" reverted with the following signature: NoChange()' });
+  test("a decision or redirect that races a state change and reverts NoChange in the simulation is a 400 with no transaction", async () => {
+    const { deps, sent } = stubDeps();
+    (deps.clients.publicClient as unknown as { simulateContract: () => Promise<never> }).simulateContract = async () => {
+      throw noChange();
+    };
+    await expect(caller(deps).decide({ id: "9", signer: OTHER, action: 1, deadline: "9999999999", signature: "0x01" })).rejects.toThrow("would not change anything");
+    await expect(caller(deps).redirectRefund({ id: "9", refundTo: OTHER, altRefundTo: ZERO as Address, deadline: "9999999999", signature: "0x01" })).rejects.toThrow("would not change anything");
+    expect(sent.length).toBe(0);
+  });
+});
+
+describe("todo 11b: challenge builder honours acceptBy + maxStale < deadline", () => {
+  const NOW = 1_790_000_000;
+  const LINK = "0x0000000000000000000000000000000000001111" as const;
+  const FEED = "0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15" as const;
+  const mk = (deadline: number, twoSided: boolean, mode: "AT_DEADLINE" | "TOUCH" = "AT_DEADLINE") =>
+    buildParams({ draft: { kind: "PRICE", ticker: "ETH", op: "GTE", priceUsd: "3000", mode, deadline }, nowSec: NOW, amountUsdg: "10", twoSided, linkKey: LINK, feed: { feed: FEED, multiplier: 0n } });
+  test("a challenge uses the short freshness and the contract inequality holds across deadlines", () => {
+    for (const hours of [2, 3, 5, 12, 47, 49, 24 * 30]) {
+      const p = mk(NOW + hours * 3600, true);
+      expect(p.condition.maxStale).toBe(DEFAULTS.challengeMaxStale);
+      expect(p.acceptBy + BigInt(p.condition.maxStale) < p.condition.deadline).toBe(true);
+      expect(Number(p.acceptBy)).toBeGreaterThanOrEqual(NOW + DEFAULTS.challengeMinAcceptWindow);
+    }
+  });
+  test("a one-sided payment keeps the long freshness", () => {
+    expect(mk(NOW + 3 * 3600, false).condition.maxStale).toBe(DEFAULTS.maxStale);
+  });
+  test("a deadline too close for freshness + the 10 minute minimum is refused", () => {
+    expect(() => mk(NOW + DEFAULTS.challengeMaxStale + DEFAULTS.challengeMinAcceptWindow, true)).toThrow(BuildError);
+    expect(() => mk(NOW + DEFAULTS.challengeMaxStale + DEFAULTS.challengeMinAcceptWindow + 2, true)).not.toThrow();
+  });
+  test("a two-sided TOUCH is refused by the builder", () => {
+    expect(() => mk(NOW + 86400, true, "TOUCH")).toThrow(BuildError);
+    expect(() => mk(NOW + 86400, false, "TOUCH")).not.toThrow();
+  });
+});

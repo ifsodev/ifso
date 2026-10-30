@@ -124,6 +124,6 @@ describe.skipIf(!haveAnvil() || !havePostgres())("keeper shadow mode", () => {
     expect(await chain.pc.getTransactionCount({ address: deps.clients.keeper!.account!.address })).toBe(0);
     expect(await pg.db.select().from(relayTxs)).toEqual([]);
     console.log(`shadow: verdicts ${JSON.stringify([...new Set(verdicts.map((v) => v.extra.decided))])}; ${shadow.length} comparisons (${sends} send, ${shadow.length - sends} hold), ${verdicts.length} verdict checks, mix ${JSON.stringify(kinds)}`);
-  });
+  }, 900_000); // own timeout: 50 cases of chain writes take minutes when the host is busy
 });
 export type { Address };

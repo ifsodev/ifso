@@ -124,5 +124,8 @@ export async function shadowCall(
 
 export function shortError(e: unknown): string {
   const m = e as { shortMessage?: string; message?: string };
+  // the contract reverts NoChange for a relayed call that would change nothing (a repeat OK, the same refund addresses):
+  // that is a refusal for the caller, said plainly, and it never costs gas (it fails in the simulation)
+  if (/\bNoChange\b/.test(`${m.shortMessage ?? ""} ${m.message ?? ""}`)) return "this would not change anything, so it was not sent";
   return (m.shortMessage ?? m.message ?? String(e)).slice(0, 300);
 }
