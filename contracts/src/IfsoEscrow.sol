@@ -13,6 +13,7 @@ import {
 import {IIfsoEscrow} from "./interfaces/IIfsoEscrow.sol";
 import {IIfsoConditionEvaluator} from "./interfaces/IIfsoConditionEvaluator.sol";
 import {IUSDG} from "./interfaces/IUSDG.sol";
+import {IERC20} from "./interfaces/IERC20.sol";
 import {EIP712} from "./utils/EIP712.sol";
 import {ReentrancyGuard} from "./utils/ReentrancyGuard.sol";
 import {Owned2Step} from "./utils/Owned2Step.sol";
@@ -56,6 +57,8 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     uint8 internal constant F_CANCELLABLE = 4;
     uint8 internal constant F_SENDER_OK = 8;
     uint8 internal constant F_RECIPIENT_OK = 16;
+    uint8 internal constant F_SENDER_OWED = 32; //  VOIDED: sender side not paid yet (its transfer failed)
+    uint8 internal constant F_COUNTER_OWED = 64; // VOIDED: acceptor side not paid yet (its transfer failed)
 
     // Return reasons (event field)
     uint8 internal constant R_CONDITION_FALSE = 1;
@@ -471,9 +474,12 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
 
     function _ok(uint256 id, address who) private {
         Escrow storage e = _decisionGuard(id);
-        if (who == e.sender) e.flags |= F_SENDER_OK;
-        else if (who != address(0) && who == e.recipient) e.flags |= F_RECIPIENT_OK;
+        uint8 bit;
+        if (who == e.sender) bit = F_SENDER_OK;
+        else if (who != address(0) && who == e.recipient) bit = F_RECIPIENT_OK;
         else revert NotAuthorized();
+        if (e.flags & bit != 0) revert NoChange(); // R1-M5: a repeated OK changes nothing (relayer-paid no-op)
+        e.flags |= bit;
         emit Approved(id, who);
 
         Condition storage c = _conditions[id];
@@ -569,10 +575,12 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     }
 
     function _setRefund(uint256 id, Escrow storage e, address refundTo, address altRefundTo) private {
-        if (e.status != Status.OPEN && e.status != Status.MET) revert NotOpen();
+        // also while a VOIDED sender side is still owed (its destination could not receive, R1-M4)
+        if (e.status != Status.OPEN && e.status != Status.MET && _notOwed(e, F_SENDER_OWED)) revert NotOpen();
         if (refundTo == address(0) || refundTo == address(this) || altRefundTo == address(this)) {
             revert InvalidParams();
         }
+        if (refundTo == e.refundTo && altRefundTo == e.altRefundTo) revert NoChange(); // R1-M5
         e.refundTo = refundTo;
         e.altRefundTo = altRefundTo;
         emit RefundAddressesChanged(id, refundTo, altRefundTo);
@@ -584,7 +592,7 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     function setCounterRefundTo(uint256 id, address counterRefundTo) external nonReentrant {
         Escrow storage e = _escrows[id];
         if (msg.sender != e.recipient || e.flags & F_ACCEPTED == 0) revert NotAuthorized();
-        if (e.status != Status.OPEN) revert NotOpen();
+        if (e.status != Status.OPEN && _notOwed(e, F_COUNTER_OWED)) revert NotOpen();
         if (counterRefundTo == address(0) || counterRefundTo == address(this)) revert InvalidParams();
         e.counterRefundTo = counterRefundTo;
         emit CounterRefundChanged(id, counterRefundTo);
@@ -603,13 +611,15 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
             _returnAll(id, e, senderAlt, reason);
         } else if (v == Verdict.VOID) {
             if (e.flags & F_ACCEPTED != 0) {
+                // R1-M4: each side is paid on its own. A side whose destination cannot receive (e.g. frozen by the
+                // USDG issuer) is left owed for claimVoid (reported as address 0) and never blocks the other side.
                 e.status = Status.VOIDED;
                 address sTo = _senderDest(e, senderAlt);
-                address cTo = counterAlt ? e.recipient : e.counterRefundTo;
+                address cTo = _counterDest(e, counterAlt);
                 uint256 sAmt = e.amount;
                 uint256 cAmt = e.counterAmount;
-                address(usdg).safeTransfer(sTo, sAmt);
-                address(usdg).safeTransfer(cTo, cAmt);
+                if (!_tryPay(sTo, sAmt)) (e.flags, sTo) = (e.flags | F_SENDER_OWED, address(0));
+                if (!_tryPay(cTo, cAmt)) (e.flags, cTo) = (e.flags | F_COUNTER_OWED, address(0));
                 emit Voided(id, sTo, sAmt, cTo, cAmt);
             } else {
                 _returnAll(id, e, senderAlt, reason == R_EXPIRED ? R_EXPIRED : R_VOID);
@@ -634,6 +644,41 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
         address to = _senderDest(e, senderAlt);
         address(usdg).safeTransfer(to, pot);
         emit Returned(id, to, pot, reason);
+    }
+
+    /// @notice Pays a VOIDED challenge side that could not be paid when the escrow was voided (its destination
+    ///         could not receive). ANYONE may call; the money only goes to that side's own preset destinations.
+    ///         The owed party may first point them elsewhere (setRefundAddresses / setCounterRefundTo).
+    /// @param id Escrow id (see idFor).
+    /// @param counterSide true pays the acceptor side, false the sender side.
+    /// @param alt Sender side: its alternate refund address. Acceptor side: the acceptor address itself.
+    function claimVoid(uint256 id, bool counterSide, bool alt) external nonReentrant {
+        Escrow storage e = _escrows[id];
+        uint8 bit = counterSide ? F_COUNTER_OWED : F_SENDER_OWED;
+        if (e.status != Status.VOIDED || e.flags & bit == 0) revert NotOpen();
+        e.flags &= ~bit;
+        address to = counterSide ? _counterDest(e, alt) : _senderDest(e, alt);
+        uint256 amt = counterSide ? e.counterAmount : e.amount;
+        address(usdg).safeTransfer(to, amt);
+        emit VoidClaimed(id, to, amt);
+    }
+
+    /// @dev USDG transfer that reports failure instead of reverting (USDG is a known token: true or revert).
+    ///      A transfer that ran out of gas reverts the whole call instead, so a caller cannot starve the transfer
+    ///      (63/64 rule) to push a payable side into the owed state.
+    function _tryPay(address to, uint256 amt) private returns (bool) {
+        uint256 g = gasleft();
+        (bool ok, bytes memory r) = address(usdg).call(abi.encodeCall(IERC20.transfer, (to, amt)));
+        if (!ok && gasleft() <= g / 63) revert();
+        return ok && (r.length == 0 || (r.length == 32 && uint256(bytes32(r)) == 1));
+    }
+
+    function _notOwed(Escrow storage e, uint8 bit) private view returns (bool) {
+        return e.status != Status.VOIDED || e.flags & bit == 0;
+    }
+
+    function _counterDest(Escrow storage e, bool alt) private view returns (address) {
+        return alt ? e.recipient : e.counterRefundTo;
     }
 
     function _senderDest(Escrow storage e, bool alt) private view returns (address) {

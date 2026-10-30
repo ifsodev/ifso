@@ -47,6 +47,8 @@ interface IIfsoEscrow {
     event Cancelled(uint256 indexed id, address indexed to, uint256 amount);
     event RefundAddressesChanged(uint256 indexed id, address refundTo, address altRefundTo);
     event CounterRefundChanged(uint256 indexed id, address counterRefundTo);
+    /// @notice A VOIDED side that could not be paid at void time (Voided reported its destination as 0) was paid.
+    event VoidClaimed(uint256 indexed id, address indexed to, uint256 amount);
     event FeesUpdated(uint96 creationFee, uint96 resolverFee);
     event CreationPaused(bool paused);
     event MaxAmountUpdated(uint96 maxAmount);
@@ -74,6 +76,7 @@ interface IIfsoEscrow {
     error SignatureExpired();
     error FeeTooHigh();
     error AmountAboveCap();
+    error NoChange();
 
     // ---------------------------------------------------------------- views
     function getEscrow(uint256 id) external view returns (Escrow memory);

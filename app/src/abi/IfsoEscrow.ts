@@ -410,6 +410,29 @@ export const ifsoEscrowAbi = [
   },
   {
     "type": "function",
+    "name": "claimVoid",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "counterSide",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "alt",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "conditionHashOf",
     "inputs": [
       {
@@ -2451,6 +2474,31 @@ export const ifsoEscrowAbi = [
   },
   {
     "type": "event",
+    "name": "VoidClaimed",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Voided",
     "inputs": [
       {
@@ -2569,6 +2617,11 @@ export const ifsoEscrowAbi = [
   {
     "type": "error",
     "name": "NoAlternate",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoChange",
     "inputs": []
   },
   {

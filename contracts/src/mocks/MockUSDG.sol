@@ -70,7 +70,7 @@ contract MockUSDG {
         return true;
     }
 
-    function transfer(address to, uint256 amt) external returns (bool) {
+    function transfer(address to, uint256 amt) external virtual returns (bool) {
         _transfer(msg.sender, to, amt);
         return true;
     }
