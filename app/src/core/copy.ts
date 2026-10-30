@@ -112,7 +112,7 @@ export const copy = {
     voidClaimed: (amt: string, to: string) => `${amt} USDG that was held after a voided challenge went to ${to}.`,
     expiringSoon: (when: string) => `Reminder: this if-so payment comes back on ${when} if it isn't claimed.`,
     resolverPosted: (q: string, outcome: string) =>
-      `Result posted for ${q}: ${outcome}. Anyone can challenge it for the next 2 hours.`,
+      `Result posted for ${q}: ${outcome}. Anyone can challenge it for the next 2 hours. If our own sources can't confirm it in that time, we challenge it and a review panel decides.`,
     help:
       "Commands: /ifso, /challenge, /mine, /tz, /help. Conditions: dates, stock prices (where available), match results, Polymarket questions, both tapping OK, or a referee.",
     notAvailable: "That isn't available in your region.",
@@ -140,7 +140,8 @@ export const copy = {
     refereeAsked: (amt: string) => `You were named referee for an if-so payment of ${amt} USDG.`,
     claimed: (amt: string) => `${amt} USDG was claimed. It unlocks when the condition is met.`,
     accepted: "The challenge was accepted. Both sides are now in.",
-    disputed: (q: string) => `The posted result for ${q} was challenged. A review panel will decide.`,
+    disputed: (q: string) =>
+      `The posted result for ${q} was challenged. A review panel decides within 72 hours; if it doesn't, the question is voided and everyone gets their own money back.`,
   },
 
   web: {

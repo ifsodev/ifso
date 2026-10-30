@@ -3,7 +3,7 @@
 //  - after earliestResolve: reads >= 2 independent sources, proposes only on agreement (USDG bond)
 //  - watches proposals made by anyone else and disputes the ones its sources contradict
 //  - finalizes undisputed proposals after the window; times out silent panels (=> VOID => refunds)
-import { and, asc, eq, exists, gt, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, gt, inArray, lt, lte, notInArray, or, sql } from "drizzle-orm";
 import { encodeAbiParameters, keccak256, maxUint256, type Address, type Hex } from "viem";
 import { ifsoOutcomeResolverAbi, usdgAbi } from "../abi";
 import { agree, questionSpecHash, type SourceReport } from "../core/outcome";
@@ -270,11 +270,24 @@ async function ensureBondAllowance(deps: Deps, resolver: Address) {
 const ZERO = "0x0000000000000000000000000000000000000000";
 /** Causes already raised by this process. The alert sender also dedupes (30 min), this keeps a restart-free loop quiet. */
 const raised = new Set<string>();
-export const resetResolverAlerts = () => raised.clear();
+export const resetResolverAlerts = () => (raised.clear(), pastWindow.clear());
 async function raiseOnce(deps: Deps, cause: string, text: string) {
   if (raised.has(cause)) return;
   raised.add(cause);
   await raise(deps, cause, text);
+}
+
+/** True (and an alert) when the resolver key cannot post `need` USDG: a missing key or a short bond float. */
+async function bondShort(deps: Deps, need: bigint, what: string): Promise<boolean> {
+  const wallet = deps.clients.resolver;
+  if (!wallet?.account) {
+    await raiseOnce(deps, "resolver-no-key", `resolver key not configured: ${what}`);
+    return true;
+  }
+  const bal = await deps.clients.publicClient.readContract({ address: deps.clients.usdg, abi: usdgAbi, functionName: "balanceOf", args: [wallet.account.address] });
+  if (bal >= need) return false;
+  await raise(deps, "resolver-bond-short", `resolver USDG bond float ${bal} is below the ${need} bond needed: ${what}. Top up the resolver address ${wallet.account.address}`);
+  return true;
 }
 
 type OnchainQuestion = Awaited<ReturnType<typeof readQuestion>>;
@@ -300,6 +313,10 @@ async function syncRow(deps: Deps, resolver: Address, id: Hex): Promise<OnchainQ
 }
 
 const CURSOR = "resolver";
+/** Foreign proposals handled per tick ahead of the cursor page (each one is disputed or confirmed in one visit). */
+const FOREIGN_PAGE = 200;
+/** Foreign proposals whose window closed unconfirmed: nothing left to dispute, so they do not hold foreign-pass slots. */
+const pastWindow = new Set<string>();
 async function readCursor(deps: Deps): Promise<{ at: Date; id: string } | undefined> {
   const [c] = await deps.db.select().from(cursors).where(eq(cursors.name, CURSOR));
   return c?.hash ? { at: new Date(Number(c.block) * 1000), id: c.hash } : undefined;
@@ -339,7 +356,16 @@ export async function resolverTick(deps: Deps, pageSize = 100) {
   // planned questions nobody ever funded are dropped once their close time passed
   await deps.db.delete(questions).where(and(eq(questions.state, Q_PLANNED), lt(questions.closeTime, new Date(now * 1000))));
 
-  for (const q of live) {
+  // Review R2-H1: proposals by other addresses are checked first, every tick, whatever the cursor page holds, so a
+  // long backlog of undecided questions cannot push one past its 2 h dispute window. The indexer marks them state 2.
+  const foreign = await deps.db
+    .select()
+    .from(questions)
+    .where(and(eq(questions.state, 2), me ? sql`lower(coalesce(${questions.proposer}, '')) <> ${me}` : undefined, pastWindow.size ? notInArray(questions.id, [...pastWindow]) : undefined, fundedEscrow))
+    .orderBy(asc(questions.earliestResolve), asc(questions.id))
+    .limit(FOREIGN_PAGE);
+  const seen = new Set(foreign.map((q) => q.id));
+  for (const q of [...foreign, ...live.filter((q) => !seen.has(q.id))]) {
     try {
       await resolveOne(deps, resolver, me, q, now, disputeWindow, panelWindow);
     } catch (e) {
@@ -369,23 +395,42 @@ async function resolveOne(deps: Deps, resolver: Address, me: string | undefined,
       else if (now > Math.floor(q.earliestResolve.getTime() / 1000) + 48 * 3600) await raiseOnce(deps, `resolver-unresolved:${q.id}`, `question ${q.id} still has no agreed result 48 hours after the earliest resolve time; the payments on it refund at expiry`);
       return;
     }
+    const bond = await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "bondAmount" });
+    if (await bondShort(deps, bond, `cannot propose the agreed result on question ${q.id}`)) return;
     await ensureBondAllowance(deps, resolver);
     const r = await call("propose", [id, a.decision, a.sourcesHash]);
     if (r.ok) await syncRow(deps, resolver, id);
   } else if (state === 2) {
     const proposedAt = Number(onchain.proposedAt);
-    if (onchain.proposer.toLowerCase() !== me && now < proposedAt + disputeWindow) {
-      // someone else proposed: check it against our own sources
+    const closesAt = proposedAt + disputeWindow;
+    const foreign = onchain.proposer.toLowerCase() !== me;
+    if (foreign && now < closesAt) {
+      // Review R2-H1: fail closed. A proposal by any other address stands only if our own sources confirm it (two final
+      // sources agreeing on the same outcome). Contradicted, pending, unavailable or conflicting sources all mean we
+      // dispute inside the window: the panel decides, and panel silence voids the question (payments refund).
+      await raiseOnce(deps, `resolver-foreign:${q.id}:${proposedAt}`, `another address (${onchain.proposer}) proposed outcome ${onchain.proposed} on question ${q.id}; the window closes ${new Date(closesAt * 1000).toISOString()}`);
       const a = agree(await gatherReports(deps, q));
-      if (a.decision !== null && a.decision !== onchain.proposed) {
-        deps.log("disputing contradicting proposal", { q: q.id, proposed: onchain.proposed, ours: a.decision });
-        await ensureBondAllowance(deps, resolver);
-        const r = await call("dispute", [id, a.sourcesHash]);
-        if (r.ok) await syncRow(deps, resolver, id);
-      } else if (a.conflict) {
-        await raiseOnce(deps, `resolver-conflict:${q.id}`, `a proposal by another address on question ${q.id} cannot be checked: our sources contradict each other; it was not disputed`);
+      if (a.decision !== null && a.decision === onchain.proposed) {
+        deps.log("foreign proposal confirmed by our sources", { q: q.id, proposed: onchain.proposed });
+        return;
       }
-    } else if (now >= proposedAt + disputeWindow) {
+      const why = a.decision !== null ? `our sources say ${a.decision}` : a.conflict ? "our sources contradict each other" : `our sources cannot confirm it yet (${a.reason})`;
+      deps.log("disputing unconfirmed proposal", { q: q.id, proposed: onchain.proposed, why });
+      if (await bondShort(deps, onchain.bond, `cannot dispute the unconfirmed proposal on question ${q.id} before ${new Date(closesAt * 1000).toISOString()}`)) return;
+      await ensureBondAllowance(deps, resolver);
+      const r = await call("dispute", [id, a.sourcesHash]);
+      if (r.ok) await syncRow(deps, resolver, id);
+      else await raiseOnce(deps, `resolver-dispute-failed:${q.id}:${proposedAt}`, `dispute of the unconfirmed proposal on question ${q.id} failed (${r.error ?? "reverted"}); ${why}; the window closes ${new Date(closesAt * 1000).toISOString()}`);
+    } else if (now >= closesAt) {
+      if (foreign) {
+        // Never finalize a proposal we did not confirm (anyone else still can: that is why the dispute above matters).
+        const a = agree(await gatherReports(deps, q));
+        if (a.decision === null || a.decision !== onchain.proposed) {
+          pastWindow.add(q.id); // stays in the cursor walk, leaves the per-tick foreign pass
+          await raiseOnce(deps, `resolver-unconfirmed-open:${q.id}:${proposedAt}`, `the window on question ${q.id} closed with an undisputed proposal (outcome ${onchain.proposed}) by ${onchain.proposer} that our sources do not confirm; the service will not finalize it, needs a human look`);
+          return;
+        }
+      }
       const r = await call("finalize", [id], deps.clients.resolver ?? deps.clients.keeper);
       if (r.ok) await syncRow(deps, resolver, id);
     }
