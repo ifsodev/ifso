@@ -27,6 +27,8 @@ jobs:
         run: forge build --sizes && bash tools/size-gate.sh
       - name: NatSpec on every external/public function
         run: python3 tools/natspec-check.py
+      - name: README deployment table matches deployments/
+        run: bash tools/readme-deploy-check.sh
       - name: forge doc builds
         run: forge doc --out "$RUNNER_TEMP/forge-doc"
       - name: tests
