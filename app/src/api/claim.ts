@@ -35,7 +35,8 @@ export async function relayClaim(
   input: { id: bigint; recipient: Address; signature: Hex; ip: string },
 ): Promise<{ txHash: Hex; status: "bound" | "paid" }> {
   const ipHash = RateLimiter.ipHash(input.ip, deps.env.IP_HASH_SALT);
-  if (!(await limiter.hit(`claim:${ipHash}`, deps.env.CLAIM_RELAY_PER_IP_PER_HOUR, 3600))) {
+  // a generous brake on attempts of any kind (each costs us a read); the real claim budget is charged only after the signature checks out
+  if (!(await limiter.hit(`claim-try:${ipHash}`, deps.env.CLAIM_RELAY_PER_IP_PER_HOUR * 10, 3600))) {
     throw new ClaimError("RATE_LIMITED", "too many claims from this network, try again later");
   }
   const recipient = getAddress(input.recipient);
@@ -54,6 +55,10 @@ export async function relayClaim(
   const signer = await recoverClaimSigner({ chainId: deps.clients.chain.id, escrow, id: input.id, recipient, conditionHash: e.conditionHash, signature: input.signature });
   if (signer.toLowerCase() !== e.linkKey.toLowerCase()) throw new ClaimError("BAD_SIGNATURE", "signature does not match this link");
 
+  // only a request that proved the link secret counts against the shared claim budget
+  if (!(await limiter.hit(`claim:${ipHash}`, deps.env.CLAIM_RELAY_PER_IP_PER_HOUR, 3600))) {
+    throw new ClaimError("RATE_LIMITED", "too many claims from this network, try again later");
+  }
   const r = await sendCall(
     deps,
     deps.clients.relayer,

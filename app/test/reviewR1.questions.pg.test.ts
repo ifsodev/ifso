@@ -3,9 +3,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import type { Address, Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { createAuthNonce } from "../src/core/condition";
+import { createAuthorizationTypedData } from "../src/core/typedData";
 import { createApp } from "../src/api/app";
 import { RateLimiter } from "../src/api/rateLimit";
-import { appRouter } from "../src/api/router";
+import { appRouter, paramsFromJson } from "../src/api/router";
 import { loadEnv } from "../src/config/env";
 import { questions, relayTxs } from "../src/db/schema";
 import type { Deps } from "../src/workers/deps";
@@ -14,7 +17,8 @@ import { bootDb, havePostgres, type TestDb } from "./helpers/chain";
 setDefaultTimeout(60_000);
 const ESCROW = "0x00000000000000000000000000000000000e5c20" as Address;
 const RESOLVER = "0x00000000000000000000000000000000000e5c21" as Address;
-const SENDER = "0x0000000000000000000000000000000000005e4d" as Address;
+const SENDER_ACC = privateKeyToAccount(("0x" + "11".repeat(32)) as Hex); // test-key
+const SENDER = SENDER_ACC.address;
 const LINK = "0x000000000000000000000000000000000000c0de" as Address;
 
 describe.skipIf(!havePostgres())("R1-M7: questions are planned off-chain and registered for funded senders only", () => {
@@ -124,7 +128,9 @@ describe.skipIf(!havePostgres())("R1-M7: questions are planned off-chain and reg
   test("submit for an outcome payment registers the question only when the sender holds the funds", async () => {
     markets["good"] = market("good");
     const built = (await build("good")) as { params: Record<string, unknown> };
-    const base = { params: built.params, from: SENDER, validAfter: "0", validBefore: "9999999999", signature: "0x01" };
+    const p = paramsFromJson(built.params);
+    const signature = await SENDER_ACC.signTypedData(createAuthorizationTypedData({ chainId: 4663, usdg: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", escrow: ESCROW, from: SENDER, value: p.amount + 750_000n, validAfter: 0n, validBefore: 9999999999n, nonce: createAuthNonce(SENDER, p) }));
+    const base = { params: built.params, from: SENDER, validAfter: "0", validBefore: "9999999999", signature };
     const c = appRouter.createCaller({ deps, limiter: new RateLimiter(), ip: "203.0.113.7", country: "DE" });
     balance = 0n;
     await expect(c.submit(base as never)).rejects.toThrow("does not hold enough");

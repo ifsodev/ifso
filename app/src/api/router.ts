@@ -5,6 +5,7 @@ import { getAddress, type Address, type Hex } from "viem";
 import { erc8056Abi, ifsoEscrowAbi, usdgAbi } from "../abi";
 import { BuildError, DEFAULTS, buildParams, type BuildInput } from "../core/builder";
 import { conditionHash, createAuthNonce, escrowId } from "../core/condition";
+import { verifiedAcceptSigner, verifiedCreateSigner, verifiedDecisionSigner, verifiedRedirectSigner } from "./signers";
 import { copy } from "../core/copy";
 import { stockPriceConditionAllowed } from "../core/geo";
 import { formatUsdg } from "../core/money";
@@ -14,7 +15,7 @@ import { Kind, type CreateParams } from "../core/types";
 import { SEED_FEEDS } from "../config/chain";
 import { escrows, intents, questions } from "../db/schema";
 import { required } from "../chain";
-import { sendCall } from "../workers/tx";
+import { sendCall, simulate } from "../workers/tx";
 import type { Deps } from "../workers/deps";
 import { PolymarketRefused, planFootballQuestion, planPolymarketQuestion, polymarketLooksDecided, registerPlanned } from "../workers/resolver";
 import { ClaimError, readEscrow, relayAccept, relayClaim } from "./claim";
@@ -86,14 +87,39 @@ function gateDraft(ctx: Ctx, d: ConditionDraft | undefined) {
 
 const tooMany = (message: string) => new TRPCError({ code: "TOO_MANY_REQUESTS", message });
 
-/** Budgets for relayed calls (we pay the gas): per client network and per signing wallet, per hour. */
-export async function relayBudget(ctx: Ctx, signer?: Address) {
+const BAD_SIG = (message: string) => new TRPCError({ code: "BAD_REQUEST", message });
+
+async function ipBudget(ctx: Ctx) {
   const { env } = ctx.deps;
   const ipHash = RateLimiter.ipHash(ctx.ip, env.IP_HASH_SALT);
   if (!(await ctx.limiter.hit(`relay:ip:${ipHash}`, env.RELAY_PER_IP_PER_HOUR, 3600))) throw tooMany("too many requests from this network, try again later");
+  return ipHash;
+}
+
+async function signerBudget(ctx: Ctx, signer: Address) {
+  const { env } = ctx.deps;
   // holders get a larger per-wallet budget; the tier is read on the server (fails closed to the base budget)
-  const factor = signer ? LIMITS[await holderTier(ctx.deps, signer)].relayBudgetFactor : 1;
-  if (signer && !(await ctx.limiter.hit(`relay:signer:${signer.toLowerCase()}`, env.RELAY_PER_SIGNER_PER_HOUR * factor, 3600))) throw tooMany("too many requests for this wallet, try again later");
+  const factor = LIMITS[await holderTier(ctx.deps, signer)].relayBudgetFactor;
+  if (!(await ctx.limiter.hit(`relay:signer:${signer.toLowerCase()}`, env.RELAY_PER_SIGNER_PER_HOUR * factor, 3600))) throw tooMany("too many requests for this wallet, try again later");
+}
+
+/**
+ * Budgets for relayed calls (we pay the gas): per client network and, when `signer` is given, per signing wallet.
+ * `signer` MUST be an address recovered from a verified signature (see relayBudgetVerified); never pass an address
+ * the caller typed, or a caller could borrow a Holder's budget and burn its counter.
+ */
+export async function relayBudget(ctx: Ctx, signer?: Address) {
+  const ipHash = await ipBudget(ctx);
+  if (signer) await signerBudget(ctx, signer);
+  return ipHash;
+}
+
+/** Network budget first (cheap), then the signature check, then the per-wallet budget on the address it proved. */
+async function relayBudgetVerified(ctx: Ctx, verify: () => Promise<Address | undefined>, failure: string) {
+  const ipHash = await ipBudget(ctx);
+  const signer = await verify();
+  if (!signer) throw BAD_SIG(failure);
+  await signerBudget(ctx, signer);
   return ipHash;
 }
 
@@ -124,7 +150,6 @@ async function registerForFundedSender(ctx: Ctx, questionId: Hex, sender: Addres
   const [row] = await deps.db.select().from(questions).where(eq(questions.id, questionId));
   if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "unknown question: build the payment first" });
   if (row.state !== 0) return; // already on the resolver
-  await relayBudget(ctx, sender);
   const balance = await deps.clients.publicClient.readContract({ address: deps.clients.usdg, abi: usdgAbi, functionName: "balanceOf", args: [sender] });
   if (balance < needed) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "the sending wallet does not hold enough USDG for this payment" });
   try {
@@ -316,11 +341,16 @@ export const appRouter = t.router({
       const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
       const p = paramsFromJson(input.params);
       if (p.condition.kind === Kind.PRICE) gateDraft(ctx, { kind: "PRICE", ticker: SEED_FEEDS.find((f) => f.feed.toLowerCase() === p.condition.target.toLowerCase())?.ticker ?? "", op: "GTE", priceUsd: "0", mode: "AT_DEADLINE", deadline: 0 });
-      const ipHash = await relayBudget(ctx, input.from);
-      if (p.condition.kind === Kind.OUTCOME) {
-        const fee = await ctx.deps.clients.publicClient.readContract({ address: escrowAddr, abi: ifsoEscrowAbi, functionName: "feeFor", args: [p.condition.kind] });
-        await registerForFundedSender(ctx, p.condition.key as Hex, input.from, p.amount + fee);
-      }
+      let fee = 0n;
+      const ipHash = await relayBudgetVerified(
+        ctx,
+        async () => {
+          fee = await ctx.deps.clients.publicClient.readContract({ address: escrowAddr, abi: ifsoEscrowAbi, functionName: "feeFor", args: [p.condition.kind] });
+          return verifiedCreateSigner(ctx.deps, { p, from: input.from, validAfter: input.validAfter, validBefore: input.validBefore, signature: input.signature, fee });
+        },
+        "the signature was not made by the sending wallet for these exact details",
+      );
+      if (p.condition.kind === Kind.OUTCOME) await registerForFundedSender(ctx, p.condition.key as Hex, input.from, p.amount + fee);
       const r = await sendCall(
         ctx.deps,
         ctx.deps.clients.relayer,
@@ -337,6 +367,7 @@ export const appRouter = t.router({
    * `submit`, which does this on its own). Needs the sender's USDG balance to cover the result fee plus the minimum.
    */
   prepareQuestion: t.procedure.input(z.object({ questionId: hex, sender: addr })).mutation(async ({ input, ctx }) => {
+    await relayBudget(ctx); // network budget only: nothing here is signed, so `sender` is not a trusted identity
     const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
     const fee = await ctx.deps.clients.publicClient.readContract({ address: escrowAddr, abi: ifsoEscrowAbi, functionName: "feeFor", args: [Kind.OUTCOME] });
     await registerForFundedSender(ctx, input.questionId, input.sender, fee + BigInt(Math.round(ctx.deps.env.SPONSOR_MIN_AMOUNT_USDG * 1e6)));
@@ -362,7 +393,14 @@ export const appRouter = t.router({
   accept: t.procedure
     .input(z.object({ id: uint, acceptor: addr, linkSig: hex, counterRefundTo: addr, validAfter: uint, validBefore: uint, authSig: hex }))
     .mutation(async ({ input, ctx }) => {
-      await relayBudget(ctx, input.acceptor);
+      await relayBudgetVerified(
+        ctx,
+        async () => {
+          const { e } = await readEscrow(ctx.deps, input.id);
+          return verifiedAcceptSigner(ctx.deps, { id: input.id, acceptor: input.acceptor, counterRefundTo: input.counterRefundTo, counterAmount: e.counterAmount, validAfter: input.validAfter, validBefore: input.validBefore, signature: input.authSig });
+        },
+        "the payment authorization was not signed by the accepting wallet",
+      );
       try {
         return await relayAccept(ctx.deps, input);
       } catch (e) {
@@ -376,15 +414,19 @@ export const appRouter = t.router({
     .input(z.object({ id: uint, signer: addr, action: z.number().int().min(1).max(4), deadline: uint, signature: hex }))
     .mutation(async ({ input, ctx }) => {
       const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
-      const ipHash = await relayBudget(ctx, input.signer);
+      const ipHash = await relayBudgetVerified(ctx, () => verifiedDecisionSigner(ctx.deps, { id: input.id, signer: input.signer, action: input.action, deadline: input.deadline, signature: input.signature }), "the signature does not match this wallet, action and current nonce");
       // a repeat OK changes nothing on chain but still costs gas: refuse it before anything is sent
       const { e } = await readEscrow(ctx.deps, input.id);
       if (input.action === 1) {
         const flag = input.signer.toLowerCase() === String(e.sender ?? "").toLowerCase() ? F_SENDER_OK : input.signer.toLowerCase() === String(e.recipient ?? "").toLowerCase() ? F_RECIPIENT_OK : 0;
         if (flag && (Number(e.flags) & flag) !== 0) throw new TRPCError({ code: "BAD_REQUEST", message: "this approval is already recorded" });
       }
+      // the per-escrow cap is charged only for a call that would succeed: junk or non-party signatures never use it up
+      const call = { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "decideBySig" as const, args: [input.id, input.signer, input.action, input.deadline, input.signature] as const };
+      const sim = await simulate(ctx.deps, ctx.deps.clients.relayer, call as never);
+      if (!sim.ok) throw new TRPCError({ code: "BAD_REQUEST", message: sim.error ?? "decision would not go through" });
       await escrowDailyCap(ctx, input.id);
-      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "decideBySig", args: [input.id, input.signer, input.action, input.deadline, input.signature] }, { kind: "decision", escrowId: input.id.toString(), ipHash });
+      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, call as never, { kind: "decision", escrowId: input.id.toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "decision failed" });
       return { txHash: r.hash };
     }),
@@ -394,12 +436,22 @@ export const appRouter = t.router({
     .input(z.object({ id: uint, refundTo: addr, altRefundTo: addr, deadline: uint, signature: hex }))
     .mutation(async ({ input, ctx }) => {
       const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
-      const ipHash = await relayBudget(ctx);
-      const { e } = await readEscrow(ctx.deps, input.id);
+      let e: Awaited<ReturnType<typeof readEscrow>>["e"] | undefined;
+      const ipHash = await relayBudgetVerified(
+        ctx,
+        async () => {
+          e = (await readEscrow(ctx.deps, input.id)).e;
+          return verifiedRedirectSigner(ctx.deps, { id: input.id, sender: e.sender as Address, refundTo: input.refundTo, altRefundTo: input.altRefundTo, deadline: input.deadline, signature: input.signature });
+        },
+        "the signature does not match this payment's sender and the current nonce",
+      );
       const same = (a: unknown, b: string) => String(a ?? "").toLowerCase() === b.toLowerCase();
-      if (same(e.refundTo, input.refundTo) && same(e.altRefundTo, input.altRefundTo)) throw new TRPCError({ code: "BAD_REQUEST", message: "the refund addresses are already set to these" });
+      if (same(e!.refundTo, input.refundTo) && same(e!.altRefundTo, input.altRefundTo)) throw new TRPCError({ code: "BAD_REQUEST", message: "the refund addresses are already set to these" });
+      const call = { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "setRefundAddressesBySig" as const, args: [input.id, input.refundTo, input.altRefundTo, input.deadline, input.signature] as const };
+      const sim = await simulate(ctx.deps, ctx.deps.clients.relayer, call as never);
+      if (!sim.ok) throw new TRPCError({ code: "BAD_REQUEST", message: sim.error ?? "redirect would not go through" });
       await escrowDailyCap(ctx, input.id);
-      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "setRefundAddressesBySig", args: [input.id, input.refundTo, input.altRefundTo, input.deadline, input.signature] }, { kind: "redirect", escrowId: input.id.toString(), ipHash });
+      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, call as never, { kind: "redirect", escrowId: input.id.toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "redirect failed" });
       return { txHash: r.hash };
     }),
