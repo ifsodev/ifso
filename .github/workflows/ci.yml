@@ -9,9 +9,9 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
       - run: forge build --sizes
       - run: forge test -vvv
-  services:
+  app:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: services } }
+    defaults: { run: { working-directory: app } }
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

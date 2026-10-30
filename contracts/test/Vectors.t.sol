@@ -3,8 +3,8 @@ pragma solidity 0.8.28;
 
 import "./utils/IfsoFixture.sol";
 
-/// @notice Cross-language parity: the constants below are printed by services/scripts/print-vectors.ts from
-///         services/test/fixtures/vectors.ts (viem encoding). services/test/parity.test.ts asserts the same
+/// @notice Cross-language parity: the constants below are printed by app/scripts/print-vectors.ts from
+///         app/test/fixtures/vectors.ts (viem encoding). app/test/parity.test.ts asserts the same
 ///         constants, so a drift in either the Solidity or the TypeScript encoding fails one of the suites.
 contract VectorsTest is IfsoFixture {
     address internal constant V_SENDER = 0x00000000000000000000000000000000000A11cE;

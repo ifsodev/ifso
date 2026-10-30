@@ -1,4 +1,4 @@
-# IFSO services
+# IFSO app (API, bot, workers)
 
 Bun · Hono · tRPC v11 · Drizzle (Postgres/Timescale) · BullMQ (Redis) · viem · grammY.
 

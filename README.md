@@ -6,7 +6,7 @@ send it back. Claim links, a Telegram bot and a web app on top.
 
 ```
 contracts/   Foundry project (Solidity 0.8.28, dependency-free) — escrow, evaluator, outcome resolver, fee router, mocks, tests, deploy script
-services/    Bun + Hono + tRPC + Drizzle + BullMQ + viem + grammY — API, bot, keeper, price watcher, resolver, indexer, notifier
+app/         Bun + Hono + tRPC + Drizzle + BullMQ + viem + grammY — API, bot, keeper, price watcher, resolver, indexer, notifier
 ```
 
 Status: launch build, 2026-10-25. Working name (name check incomplete). See the Overview / Backend docs for

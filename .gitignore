@@ -3,6 +3,6 @@ contracts/out/
 contracts/cache/
 contracts/artifacts/
 contracts/broadcast/
-services/abi-json/
+app/abi-json/
 .env
 *.log

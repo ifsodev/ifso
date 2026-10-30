@@ -19,7 +19,7 @@ forge build --sizes && forge test -vvv            # primary
 npm i && SOLC_JS=$PWD/node_modules/solc/soljson.js npx hardhat test solidity
 # compile-only check with solc-js
 node tools/solcjs-compile.mjs                     # all of src/, test/, script/
-node tools/solcjs-compile.mjs --src-only --abi-ts-out ../services/src/abi   # regenerate service ABIs
+node tools/solcjs-compile.mjs --src-only --abi-ts-out ../app/src/abi   # regenerate service ABIs
 ```
 
 ## Deploy
