@@ -10,7 +10,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Every action is pinned by full commit sha (tag in the comment). Foundry is pinned to v1.8.4.
+# Every action is pinned by full commit sha (tag in the comment), checked by .github/scripts/pins-check.sh. Foundry is
+# pinned to v1.8.4; python packages are hash-locked; the gitleaks binary is pinned by sha256.
 jobs:
   contracts:
     runs-on: ubuntu-latest
@@ -35,6 +36,9 @@ jobs:
         run: forge doc --out "$RUNNER_TEMP/forge-doc"
       - name: tests
         run: forge test
+      - name: every workflow action and image is pinned
+        working-directory: .
+        run: bash .github/scripts/pins-check.sh
       - name: gas snapshot unchanged
         run: forge snapshot --check
       - name: local deploy on anvil + post-deploy assertions
@@ -94,3 +98,63 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
       - run: bun test # includes the banned-words gate and TS<->Solidity parity vectors
+
+  halmos:
+    # symbolic proofs of the comparison, threshold, fee and cap arithmetic (contracts/test/halmos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults: { run: { working-directory: contracts } }
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with: { version: v1.8.4 }
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with: { python-version: "3.12" }
+      - name: halmos (hash-locked install)
+        run: |
+          python -m venv "$RUNNER_TEMP/halmos-venv"
+          "$RUNNER_TEMP/halmos-venv/bin/pip" install --require-hashes -r tools/halmos-requirements.txt
+          PATH="$RUNNER_TEMP/halmos-venv/bin:$PATH" bash tools/halmos.sh
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults: { run: { working-directory: contracts } }
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with: { version: v1.8.4 }
+      - name: forge coverage (summary) and the floor
+        run: bash tools/coverage.sh --out "$RUNNER_TEMP/coverage.md" --min-lines 90
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with: { name: coverage, path: "${{ runner.temp }}/coverage.md" }
+
+  mutation:
+    # hand mutants, one per round-1 finding plus operator and boundary mutants; fails below 90% or on a stale mutant
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults: { run: { working-directory: contracts } }
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with: { version: v1.8.4 }
+      - name: mutation score
+        run: bash tools/mutation.sh --min-score 90 --out "$RUNNER_TEMP/audit-grade"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with: { name: mutation, path: "${{ runner.temp }}/audit-grade" }
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false, fetch-depth: 0 }
+      - name: gitleaks 8.30.1 (release tarball pinned by sha256)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" detect --source . --config .github/gitleaks.toml --redact --no-banner --exit-code 1

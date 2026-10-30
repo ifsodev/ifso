@@ -1,0 +1,20 @@
+# Default gitleaks rules plus ONE narrow allowlist: the generic-api-key rule fires on public contract addresses and
+# on public test vectors (hex literals). Real keys, tokens and private keys are still caught by every other rule.
+title = "ifso gitleaks"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "public on-chain addresses and test-vector hex literals in source, tests and config"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''^(contracts/(script|test)/.*\.(sol|ts)|(app|services)/src/config/chain\.ts)$''',
+]
+regexTarget = "line"
+regexes = [
+  '''0x[0-9a-fA-F]{40}\b''',
+  '''0x[0-9a-fA-F]{64}\b''',
+  '''"0x[0-9a-fA-F]{40}"''',
+]
