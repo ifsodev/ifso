@@ -30,12 +30,12 @@ describe.skipIf(!bin)("bot + notifier stores on Postgres", () => {
 
   test("users keep their zone, intents expire after 24 h by default, and a question is answered in place", async () => {
     const store = drizzleBotStore(db);
-    await store.upsertUser(7n, { username: "sam", tz: "Asia/Dubai", tzOffsetMin: 240 });
-    await store.upsertUser(7n, { username: "sam2" }); // does not wipe the zone
+    await store.upsertUser(7n, { username: "alice", tz: "Asia/Dubai", tzOffsetMin: 240 });
+    await store.upsertUser(7n, { username: "alice2" }); // does not wipe the zone
     expect(await store.getUser(7n)).toEqual({ tz: "Asia/Dubai", tzOffsetMin: 240 });
 
     const flow = { store, publicAppUrl: "https://ifso.test", tickers: new Set(["NVDA"]), now: () => Date.UTC(2026, 9, 21, 12) };
-    const q = await handleCommand(flow, { tgId: 7n, chatId: 7n, username: "sam", cmd: "ifso", body: "@mia 5 on 11/01" });
+    const q = await handleCommand(flow, { tgId: 7n, chatId: 7n, username: "alice", cmd: "ifso", body: "@mia 5 on 11/01" });
     const data = (q.buttons![0]![0] as { data: string }).data;
     const [row] = await db.select().from(intents);
     const hours = (row!.expiresAt.getTime() - row!.createdAt.getTime()) / 3600_000;
