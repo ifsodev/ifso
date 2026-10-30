@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Address, Hex } from "viem";
-import { ifsoEscrowAbi } from "../src/abi";
+import { ifsoEscrowAbi, usdgAbi } from "../src/abi";
 import { buildClaimUrl, linkKeyAddress } from "../src/core/link";
 import { Status } from "../src/core/types";
 import { runCli } from "../scripts/ifso-cli";
@@ -158,10 +158,20 @@ describe.skipIf(!h.haveAnvil())("ifso-cli on anvil (port 8946)", () => {
     const id = await chain.create(chain.sender, { linkKey: linkKeyAddress(secret), condition: h.timeCondition(deadline), expiry: deadline + 86400n });
     const url = buildClaimUrl("https://example.invalid", id, secret);
     const wrong = buildClaimUrl("https://example.invalid", id, Uint8Array.from({ length: 32 }, () => 9));
-    const bad = await cli(["claim", id.toString(), wrong, "--recipient", chain.bob.address]);
+    // review R2-I7: the link (it holds the secret) is read from a file or stdin, never from the command line
+    const dir = mkdtempSync(join(tmpdir(), "ifso-cli-link-"));
+    const file = (name: string, body: string) => (writeFileSync(join(dir, name), body), join(dir, name));
+    const onArgv = await cli(["claim", id.toString(), url, "--recipient", chain.bob.address]);
+    expect(onArgv.code).toBe(1);
+    expect(onArgv.err).toContain("--link-file");
+    const bad = await cli(["claim", id.toString(), "--link-file", file("wrong.txt", wrong + "\n"), "--recipient", chain.bob.address]);
     expect(bad.code).toBe(1);
     expect(bad.err).toContain("does not match");
-    const c = await call(["claim", id.toString(), url, "--recipient", chain.bob.address]);
+    const viaStdin: string[] = [];
+    const sc = await runCli(["claim", id.toString(), "--link-file", "-", "--recipient", chain.bob.address, "--json", ...base()], { out: (s) => viaStdin.push(s), err: (s) => viaStdin.push(s), readStdin: async () => url + "\n" });
+    expect(sc).toBe(0);
+    expect((JSON.parse(viaStdin.join("\n")) as Printed).fn).toBe("claim(uint256,address,bytes)");
+    const c = await call(["claim", id.toString(), "--link-file", file("link.txt", url), "--recipient", chain.bob.address]);
     expect(c.fn).toBe("claim(uint256,address,bytes)");
     expect(c.castCommand).not.toContain(Buffer.from(secret).toString("hex")); // the secret never appears in the output
     await send(chain.alice, c); // anyone may submit; the signature fixes the recipient
@@ -171,8 +181,33 @@ describe.skipIf(!h.haveAnvil())("ifso-cli on anvil (port 8946)", () => {
     const before = await chain.balance(chain.bob.address);
     await send(chain.alice, await call(["settle", id.toString()]));
     expect((await chain.balance(chain.bob.address)) - before).toBe(20_000_000n);
-    const twice = await cli(["claim", id.toString(), url, "--recipient", chain.alice.address]);
+    const twice = await cli(["claim", id.toString(), "--link-file", join(dir, "link.txt"), "--recipient", chain.alice.address]);
     expect(twice.code).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("claim-void: pays a voided challenge side that is still held, only once (review R2-I2)", async () => {
+    const blockAbi = [{ type: "function", name: "setBlocked", stateMutability: "nonpayable", inputs: [{ name: "who", type: "address" }, { name: "b", type: "bool" }], outputs: [] }] as const;
+    const t = await chain.now();
+    const id = await chain.create(chain.sender, { condition: h.approveCondition(chain.deployer.address), recipient: chain.alice.address, twoSided: true, counterAmount: 15_000_000n, acceptBy: t + 1800n, expiry: t + 7200n });
+    await chain.mint(chain.alice.address, 20);
+    await chain.write(chain.alice, chain.usdg, usdgAbi as never, "approve", [chain.escrow, 2n ** 255n]);
+    await chain.write(chain.alice, chain.escrow, ifsoEscrowAbi as never, "accept", [id, "0x", chain.alice.address]);
+    const notYet = await cli(["claim-void", id.toString()]);
+    expect(notYet.code).toBe(1);
+    expect(notYet.err).toContain("not VOIDED");
+    await chain.write(chain.deployer, chain.usdg, blockAbi as never, "setBlocked", [chain.alice.address, true]);
+    await chain.warpTo(t + 7300n);
+    await send(chain.bob, await call(["refund", id.toString()])); // VOID: the acceptor side cannot be paid, so it is held
+    expect(await statusOf(id)).toBe(Status.VOIDED);
+    expect((await cli(["claim-void", id.toString(), "--side", "sender"])).err).toContain("already paid");
+    await chain.write(chain.deployer, chain.usdg, blockAbi as never, "setBlocked", [chain.alice.address, false]);
+    const c = await call(["claim-void", id.toString()]); // the one owed side is picked by itself
+    expect(c.fn).toBe("claimVoid(uint256,bool,bool)");
+    const before = await chain.balance(chain.alice.address);
+    await send(chain.bob, c);
+    expect((await chain.balance(chain.alice.address)) - before).toBe(15_000_000n);
+    expect((await cli(["claim-void", id.toString()])).err).toContain("both sides were already paid");
   });
 
   test("status and list read the chain logs", async () => {

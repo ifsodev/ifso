@@ -82,7 +82,8 @@ cd app && bun install
 bun scripts/ifso-cli.ts status <id>                                  # what state is it in, when can it be refunded
 bun scripts/ifso-cli.ts refund <id> [--alt-sender] [--alt-counter]   # after expiry
 bun scripts/ifso-cli.ts settle <id>                                  # date, price or result payments: builds the proof
-bun scripts/ifso-cli.ts claim <id> '<claim link>' --recipient <your address>
+bun scripts/ifso-cli.ts claim <id> --link-file - --recipient <your address>   # paste the claim link, then Ctrl-D
+bun scripts/ifso-cli.ts claim-void <id> [--side sender|counter]     # a voided challenge side that is still held
 bun scripts/ifso-cli.ts list --sender <your address>                 # your payments, read from chain logs
 ```
 

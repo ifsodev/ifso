@@ -6,13 +6,14 @@
 //   bun scripts/ifso-cli.ts status <id>
 //   bun scripts/ifso-cli.ts refund <id> [--alt-sender] [--alt-counter]
 //   bun scripts/ifso-cli.ts settle <id>
-//   bun scripts/ifso-cli.ts claim  <id> <claim-url> --recipient <your address>
+//   bun scripts/ifso-cli.ts claim  <id> --link-file <file|-> --recipient <your address>
+//   bun scripts/ifso-cli.ts claim-void <id> [--side sender|counter] [--alt]
 //   bun scripts/ifso-cli.ts list --sender <address> [--from-block <n>]
 //
 // Flags: --rpc <url> (default https://rpc.mainnet.chain.robinhood.com), --escrow <address> (else deployments/<chainId>.json
 // next to the contracts), --from <address> (dry-run caller), --json (machine readable output).
 // <id> is the escrow number: decimal, 0x hex, or the id part of a claim link.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   createPublicClient,
@@ -60,7 +61,7 @@ export interface Parsed {
   flags: Record<string, string | true>;
 }
 
-const VALUE_FLAGS = new Set(["rpc", "escrow", "from", "sender", "recipient", "from-block", "deployments", "keystore"]);
+const VALUE_FLAGS = new Set(["rpc", "escrow", "from", "sender", "recipient", "from-block", "deployments", "keystore", "link-file", "side"]);
 
 export function parseArgs(argv: string[]): Parsed {
   const pos: string[] = [];
@@ -312,6 +313,38 @@ export async function cmdClaim(c: Ctx, id: bigint | undefined, url: string, reci
   return buildCall(c, "claim", [parsed.id, recipient, sig], [parsed.id.toString(), recipient, sig]);
 }
 
+const F_SENDER_OWED = 32;
+const F_COUNTER_OWED = 64;
+
+/** claimVoid: pays a VOIDED challenge side whose refund could not be sent (DECISIONS #22 shutdown path, review R2-I2). */
+export async function cmdClaimVoid(c: Ctx, id: bigint, side: "sender" | "counter" | undefined, alt: boolean) {
+  const e = await readEscrow(c, id);
+  if (Number(e.status) !== Status.VOIDED) throw new CliError(`escrow ${id} is ${STATUS_NAMES[Number(e.status)]}, not VOIDED: nothing is held for a side`);
+  const owed = { sender: (Number(e.flags) & F_SENDER_OWED) !== 0, counter: (Number(e.flags) & F_COUNTER_OWED) !== 0 };
+  if (!owed.sender && !owed.counter) throw new CliError(`escrow ${id}: both sides were already paid`);
+  const pick = side ?? (owed.sender && owed.counter ? undefined : owed.sender ? "sender" : "counter");
+  if (!pick) throw new CliError("both sides are still owed: choose one with --side sender or --side counter");
+  if (!owed[pick]) throw new CliError(`escrow ${id}: the ${pick} side was already paid`);
+  return buildCall(c, "claimVoid", [id, pick === "counter", alt], [id.toString(), String(pick === "counter"), String(alt)]);
+}
+
+/** The claim link holds the secret: read it from a file or stdin, never from argv (shell history, ps). Review R2-I7. */
+async function readLink(p: Parsed, io: Io): Promise<string> {
+  const f = flagStr(p, "link-file");
+  if (!f) throw new CliError("give the claim link with --link-file <file> (or --link-file - and paste it on stdin); it holds a secret, so it never goes on the command line");
+  let raw: string;
+  if (f === "-") {
+    if (!io.readStdin) throw new CliError("stdin is not available here: use --link-file <file>");
+    raw = await io.readStdin();
+  } else {
+    if (!existsSync(f) || !statSync(f).isFile()) throw new CliError(`--link-file: ${f} is not a file`);
+    raw = readFileSync(f, "utf8");
+  }
+  const url = raw.trim().split(/\s+/)[0] ?? "";
+  if (!url) throw new CliError("the link file is empty");
+  return url;
+}
+
 export async function cmdList(c: Ctx, sender: Address, fromBlock?: bigint) {
   const created = (ifsoEscrowAbi as readonly { type: string; name?: string }[]).find((x) => x.type === "event" && x.name === "Created")!;
   const head = await c.pc.getBlockNumber();
@@ -351,13 +384,16 @@ function printCall(io: Io, p: Parsed, call: UnsignedCall, rpc: string, note?: st
 export interface Io {
   out(s: string): void;
   err(s: string): void;
+  /** the whole of stdin (claim --link-file -) */
+  readStdin?(): Promise<string>;
 }
 
 const USAGE = `ifso-cli: get your money back without the website.
   status <id>                              what state is this payment in
   refund <id> [--alt-sender] [--alt-counter]   send the money back (anyone, after expiry)
   settle <id>                              build the proof for a date, price or result payment
-  claim  <id> <claim-url> --recipient <you>    bind a claim link to your address
+  claim  <id> --link-file <file|-> --recipient <you>   bind a claim link to your address (link read from a file or stdin)
+  claim-void <id> [--side sender|counter] [--alt]   pay a voided challenge side that is still held
   list --sender <address> [--from-block n]    payments an address created
 flags: --rpc <url>  --escrow <address>  --from <address>  --json`;
 
@@ -369,7 +405,7 @@ export async function runCli(argv: string[], io: Io, client?: PublicClient): Pro
       io.out(USAGE);
       return p.cmd ? 0 : 1;
     }
-    if (!["status", "refund", "settle", "claim", "list"].includes(p.cmd)) throw new CliError(`unknown command "${p.cmd}"\n${USAGE}`);
+    if (!["status", "refund", "settle", "claim", "claim-void", "list"].includes(p.cmd)) throw new CliError(`unknown command "${p.cmd}"\n${USAGE}`);
     const c = await setup(p, client);
     if (p.cmd === "status") {
       const s = await cmdStatus(c, parseId(p.pos[0]));
@@ -379,10 +415,14 @@ export async function runCli(argv: string[], io: Io, client?: PublicClient): Pro
     } else if (p.cmd === "settle") {
       const { call, note } = await cmdSettle(c, parseId(p.pos[0]));
       printCall(io, p, call, c.rpc, note);
+    } else if (p.cmd === "claim-void") {
+      const side = flagStr(p, "side");
+      if (side !== undefined && side !== "sender" && side !== "counter") throw new CliError("--side is sender or counter");
+      printCall(io, p, await cmdClaimVoid(c, parseId(p.pos[0]), side, Boolean(p.flags.alt)), c.rpc);
     } else if (p.cmd === "claim") {
-      const url = p.pos[1] ?? p.pos[0];
-      if (!url) throw new CliError("missing <claim-url>");
-      const id = p.pos.length > 1 ? parseId(p.pos[0]) : undefined;
+      if (p.pos.some((a) => a.includes("://") || a.includes("#"))) throw new CliError("do not put the claim link on the command line (it lands in shell history and the process list): use --link-file <file> or --link-file -");
+      const url = await readLink(p, io);
+      const id = p.pos.length ? parseId(p.pos[0]) : undefined;
       const rec = parseAddr("--recipient (your address)", flagStr(p, "recipient"));
       printCall(io, p, await cmdClaim(c, id, url, rec), c.rpc);
     } else {
@@ -401,7 +441,7 @@ export async function runCli(argv: string[], io: Io, client?: PublicClient): Pro
 }
 
 if (import.meta.main) {
-  const code = await runCli(process.argv.slice(2), { out: (s) => console.log(s), err: (s) => console.error(s) });
+  const code = await runCli(process.argv.slice(2), { out: (s) => console.log(s), err: (s) => console.error(s), readStdin: () => Bun.stdin.text() });
   process.exit(code);
 }
 
