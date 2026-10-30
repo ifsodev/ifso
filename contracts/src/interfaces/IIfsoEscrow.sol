@@ -49,6 +49,7 @@ interface IIfsoEscrow {
     event CounterRefundChanged(uint256 indexed id, address counterRefundTo);
     event FeesUpdated(uint96 creationFee, uint96 resolverFee);
     event CreationPaused(bool paused);
+    event MaxAmountUpdated(uint96 maxAmount);
 
     // ---------------------------------------------------------------- errors
     error CreationIsPaused();
@@ -72,6 +73,7 @@ interface IIfsoEscrow {
     error NoAlternate();
     error SignatureExpired();
     error FeeTooHigh();
+    error AmountAboveCap();
 
     // ---------------------------------------------------------------- views
     function getEscrow(uint256 id) external view returns (Escrow memory);

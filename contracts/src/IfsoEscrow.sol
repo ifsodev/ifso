@@ -48,6 +48,8 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     uint96 public constant MIN_AMOUNT = 1e6; //       1 USDG (anti-dust / anti-spam)
     uint64 public constant MIN_EXPIRY_DELAY = 1 hours;
     uint64 public constant MAX_DURATION = 400 days;
+    /// @notice Hard ceiling of `setMaxAmount` (the full uint96 range: the setter can never overflow an amount).
+    uint96 public constant MAX_AMOUNT_CAP = type(uint96).max;
 
     uint8 internal constant F_TWO_SIDED = 1;
     uint8 internal constant F_ACCEPTED = 2;
@@ -88,6 +90,9 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     uint96 public creationFee;
     uint96 public resolverFee;
     bool public creationPaused;
+    /// @notice Per-escrow launch cap on each side's amount (USDG, 6 decimals). 0 = no cap.
+    ///         Gates NEW creates and challenge accepts only; existing escrows always exit.
+    uint96 public maxAmount;
 
     mapping(uint256 => Escrow) internal _escrows;
     mapping(uint256 => Condition) internal _conditions;
@@ -125,6 +130,15 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
     function setCreationPaused(bool paused) external onlyOwner {
         creationPaused = paused;
         emit CreationPaused(paused);
+    }
+
+    /// @notice Sets the per-escrow cap on each side's amount. Applies to NEW creates and challenge accepts only:
+    ///         lowering it never blocks claim, settle, decisions, cancel or refund of existing escrows.
+    /// @param maxAmount_ New cap in USDG base units (6 decimals); 0 removes the cap, otherwise at least MIN_AMOUNT.
+    function setMaxAmount(uint96 maxAmount_) external onlyOwner {
+        if (maxAmount_ != 0 && maxAmount_ < MIN_AMOUNT) revert InvalidParams();
+        maxAmount = maxAmount_;
+        emit MaxAmountUpdated(maxAmount_);
     }
 
     // ================================================================== create
@@ -193,6 +207,7 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
         Condition calldata c = p.condition;
 
         if (p.amount < MIN_AMOUNT) revert InvalidParams();
+        _checkCap(p.amount, p.counterAmount);
         if ((p.recipient == address(0)) == (p.linkKey == address(0))) revert InvalidParams(); // exactly one
         if (p.recipient == address(this)) revert BadRecipient();
         if (p.expiry < nowTs + MIN_EXPIRY_DELAY || p.expiry > nowTs + MAX_DURATION) revert InvalidParams();
@@ -232,6 +247,11 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
 
         fee = feeFor(c.kind);
         _emitCreated(id, e, c.kind, fee);
+    }
+
+    function _checkCap(uint96 amount, uint96 counterAmount) private view {
+        uint96 cap = maxAmount;
+        if (cap != 0 && (amount > cap || counterAmount > cap)) revert AmountAboveCap();
     }
 
     function _emitCreated(uint256 id, Escrow storage e, Kind kind, uint96 fee) private {
@@ -299,6 +319,7 @@ contract IfsoEscrow is IIfsoEscrow, EIP712, ReentrancyGuard, Owned2Step {
         if (e.flags & F_TWO_SIDED == 0) revert NotTwoSided();
         if (e.status != Status.OPEN) revert NotOpen();
         if (e.flags & F_ACCEPTED != 0) revert AlreadyAccepted();
+        _checkCap(e.amount, e.counterAmount); // accepting is a new entry: the cap in force now applies
         if (block.timestamp > e.acceptBy) revert AcceptWindowClosed();
         if (acceptor == address(0) || acceptor == e.sender || acceptor == address(this)) revert BadRecipient();
 

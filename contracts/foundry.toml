@@ -11,10 +11,22 @@ optimizer_runs = 200          # keeps IfsoEscrow well under EIP-170 for local EV
 via_ir = false
 bytecode_hash = "none"
 code_size_limit = 98304       # RHC max code size is 96 KB; test contracts that deploy the full stack exceed 24 KB
-fs_permissions = [{ access = "read", path = "./" }]
+fs_permissions = [{ access = "read", path = "./" }, { access = "read-write", path = "./deployments" }]
 
 [profile.default.fuzz]
 runs = 512
+seed = "0x1f50"               # fixed seed: deterministic runs, so `forge snapshot --check` and CI never flake
+
+[profile.default.invariant]
+runs = 32
+depth = 50
+fail_on_revert = false
+
+# FOUNDRY_PROFILE=invariant forge test --match-test invariant   (10,000 runs x depth 50 = 500,000 calls)
+[profile.invariant.invariant]
+runs = 10000
+depth = 50
+fail_on_revert = false
 
 [profile.ci]
 fuzz = { runs = 4096 }

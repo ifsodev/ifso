@@ -4,6 +4,14 @@ pragma solidity 0.8.28;
 /// @notice Subset of the Foundry cheatcode interface (same address/signatures as forge-std's Vm), vendored
 ///         so the repo compiles and tests run without `forge install`. Works under Foundry and Hardhat 3.
 interface Vm {
+    struct DirEntry {
+        string errorMessage;
+        string path;
+        uint64 depth;
+        bool isDir;
+        bool isSymlink;
+    }
+
     function warp(uint256 newTimestamp) external;
     function prank(address sender) external;
     function startPrank(address sender) external;
@@ -22,6 +30,27 @@ interface Vm {
     function envOr(string calldata name, uint256 defaultValue) external view returns (uint256);
     function startBroadcast(uint256 privateKey) external;
     function stopBroadcast() external;
+    function startBroadcast() external;
+    function snapshotState() external returns (uint256 snapshotId);
+    function revertToState(uint256 snapshotId) external returns (bool success);
+    function chainId(uint256 newChainId) external;
+    function exists(string calldata path) external view returns (bool);
+    function envOr(string calldata name, bool defaultValue) external view returns (bool);
+    function envOr(string calldata name, string calldata defaultValue) external view returns (string memory);
+    function writeFile(string calldata path, string calldata data) external;
+    function readFile(string calldata path) external view returns (string memory);
+    function parseJsonAddress(string calldata json, string calldata key) external pure returns (address);
+    function parseJsonUint(string calldata json, string calldata key) external pure returns (uint256);
+    function toString(address value) external pure returns (string memory);
+    function toString(uint256 value) external pure returns (string memory);
+    function toString(bytes32 value) external pure returns (string memory);
+    function setEnv(string calldata name, string calldata value) external;
+    function getCode(string calldata artifactPath) external view returns (bytes memory);
+    function etch(address target, bytes calldata newRuntimeBytecode) external;
+    function readCallers() external returns (uint8 callerMode, address msgSender, address txOrigin);
+    function readDir(string calldata path) external view returns (DirEntry[] memory entries);
+    function parseJsonAddressArray(string calldata json, string calldata key) external pure returns (address[] memory);
+    function parseJsonString(string calldata json, string calldata key) external pure returns (string memory);
 }
 
 abstract contract TestBase {
