@@ -1,0 +1,43 @@
+# Ifso's own Redis: a SEPARATE instance on 127.0.0.1:6380 (never the system default port), password-protected, 256 MB cap,
+# noeviction (BullMQ needs that). Installed by provision.sh --cohost; the placeholder is the redis-server binary's path.
+[Unit]
+Description=Ifso Redis (private instance, 127.0.0.1:6380)
+After=network.target
+
+[Service]
+Type=simple
+User=ifso-redis
+Group=ifso-redis
+ExecStart=@REDIS_BIN@ /etc/ifso/redis.conf
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+StateDirectory=ifso-redis
+StateDirectoryMode=0700
+# Limits so this instance can never starve the other services on the machine.
+MemoryMax=448M
+CPUQuota=50%
+CPUWeight=50
+IOWeight=50
+TasksMax=128
+Nice=10
+OOMScoreAdjust=500
+LimitNOFILE=10032
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ifso-redis
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

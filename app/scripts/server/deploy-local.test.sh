@@ -22,8 +22,10 @@ cat >"$T/bin/systemctl" <<FAKE
 echo "systemctl \$*" >>"$T/ctl/calls"
 case "\$1" in
   start) [[ "\$2" == ifso-migrate.service && -e "$T/ctl/fail-migrate" ]] && exit 1 ;;
-  restart) [[ -e "$T/ctl/fail-restart" ]] && exit 1 ;;
-  is-active) [[ -e "$T/ctl/inactive" ]] && exit 3 ;;
+  restart) [[ -e "$T/ctl/prot-bump" ]] && echo "\$RANDOM\$RANDOM" >"$T/ctl/prot-pid"; [[ -e "$T/ctl/fail-restart" ]] && exit 1 ;;
+  is-active) [[ -e "$T/ctl/inactive" ]] && exit 3
+    [[ -e "$T/ctl/inactive-unit" && "\${@: -1}" == "\$(cat "$T/ctl/inactive-unit")" ]] && exit 3 ;;
+  show) printf 'ActiveState=active\nMainPID=%s\nActiveEnterTimestampMonotonic=5\n' "\$(cat "$T/ctl/prot-pid" 2>/dev/null || echo 100)" ;;
 esac
 exit 0
 FAKE
@@ -209,6 +211,213 @@ check "provision.sh hands relayer keys to ifso-api and keeper/resolver keys to i
   grep -q "for u in ifso-api ifso-bot ifso-worker" "$p" && grep -q "install -d -o root -g root -m 0711 \"\$KEYS_DIR\"" "$p"' _ "$HERE"
 check "env.example holds no real secret values" bash -c '! grep -E "^(TELEGRAM_BOT_TOKEN|OPS_BOT_TOKEN|ODDS_API_KEY|PYTH_API_KEY|ALCHEMY_KEY|TELEGRAM_WEBHOOK_SECRET|ZERODEV_PROJECT_ID)=.+" "$1/env.example"' _ "$HERE"
 check "no leftovers from the project these scripts were adapted from" bash -c 'w="lem""niscate"; ! grep -rIil "$w" "$1" --exclude=deploy-local.test.sh' _ "$HERE"
+
+# =====================================================================================================================
+# Co-host mode: deploy.sh (dry-run, fake systemctl) -------------------------------------------------------------------
+reset
+write_env 46630 0xb626
+sed -i.bak 's/^PORT=8080/PORT=3201\nHOST=127.0.0.1/' "$T/etc/api.env"
+printf 'DATABASE_URL=postgres://ifso:x@127.0.0.1:5432/ifso_testnet\nREDIS_URL=redis://:x@127.0.0.1:6380\n' >"$T/etc/db.env"
+mkdir -p "$T/opt/bin"
+printf '#!/usr/bin/env bash\necho OWNBUN >>"%s/ctl/calls"\nexec "%s/bin/bun" "$@"\n' "$T" "$T" >"$T/opt/bin/bun"; chmod +x "$T/opt/bin/bun"
+printf '# protected\ncaddy.service\npostgresql@18-main.service\nother-api.service\n' >"$T/etc/cohost.protected"
+runc() { OUT="$(env -u IFSO_BUN bash "$DEPLOY" --dry-run "$@" 2>&1)"; RC=$?; }
+rm -f "$T/etc/cohost"
+runc --cohost "$S3"; check "co-host: --cohost without /etc/ifso/cohost is refused (64)" test "$RC" = 64
+touch "$T/etc/cohost"
+reset; runc "$S3"
+check "co-host: a deploy works, exit 0, and uses Ifso's own Bun (never /usr/local/bin/bun)" bash -c '[ "$1" = 0 ] && grep -q OWNBUN "$2"' _ "$RC" "$T/ctl/calls"
+check "co-host: current moved" test "$(cur)" = "$S3"
+reset; echo other-api.service >"$T/ctl/inactive-unit"; runc "$S4"
+check "co-host: a protected unit that is not active stops the deploy before any change (75)" test "$RC" = 75
+check "  ... nothing switched" bash -c '[ "$1" = "$2" ] && ! grep -qE "restart|db:migrate" "$3"' _ "$(cur)" "$S3" "$T/ctl/calls"
+reset; touch "$T/ctl/prot-bump"; runc "$S4"
+check "co-host: a protected unit that changed during the deploy exits 3 and says so" bash -c '[ "$1" = 3 ] && grep -q "other project" <<<"$2"' _ "$RC" "$OUT"
+reset; runc --check
+check "co-host: --check on a healthy server exits 0" test "$RC" = 0
+sed -i.bak 's/^PORT=3201/PORT=8080/' "$T/etc/api.env"; runc "$S4"
+check "co-host: API port other than 3201 is refused (64)" bash -c '[ "$1" = 64 ] && grep -q "PORT must be 3201" <<<"$2"' _ "$RC" "$OUT"
+sed -i.bak 's/^PORT=8080/PORT=3201/' "$T/etc/api.env"
+sed -i.bak 's/^HOST=127.0.0.1/HOST=0.0.0.0/' "$T/etc/api.env"; runc "$S4"
+check "co-host: API host other than 127.0.0.1 is refused (64)" test "$RC" = 64
+sed -i.bak 's/^HOST=0.0.0.0/HOST=127.0.0.1/' "$T/etc/api.env"
+sed -i.bak 's/6380/6379/' "$T/etc/db.env"; runc "$S4"
+check "co-host: Redis on 6379 is refused (64)" bash -c '[ "$1" = 64 ] && grep -q 6380 <<<"$2"' _ "$RC" "$OUT"
+sed -i.bak 's/6379/6380/' "$T/etc/db.env"
+mv "$T/etc/cohost.protected" "$T/etc/cohost.protected.off"; runc "$S4"
+check "co-host: a missing protected-unit list is refused (64)" test "$RC" = 64
+mv "$T/etc/cohost.protected.off" "$T/etc/cohost.protected"
+rm -f "$T/etc/cohost"
+write_env 46630 0xb626
+
+# Co-host mode: provision.sh --cohost --check / --caddy-only against shimmed system commands ---------------------------
+SHIM="$T/shim"; C="$T/pc"; mkdir -p "$SHIM" "$C/etc" "$C/caddy/sites" "$C/state"
+cat >"$SHIM/systemctl" <<FAKE
+#!/usr/bin/env bash
+echo "systemctl \$*" >>"$C/state/calls"
+last="\${@: -1}"
+case "\$1" in
+  list-units) cat "$C/state/units" ;;
+  is-active) grep -q "^\$last " "$C/state/units" && ! grep -qx "\$last" "$C/state/inactive" 2>/dev/null ;;
+  show) if [[ "\$*" == *FragmentPath* ]]; then cat "$C/state/frag-\$2" 2>/dev/null; elif [[ "\$*" == *ActiveState* ]]; then printf 'ActiveState=active\nMainPID=%s\nActiveEnterTimestampMonotonic=7\n' "\$(cat "$C/state/pid" 2>/dev/null || echo 1)"; fi ;;
+  reload) [[ ! -e "$C/state/fail-reload" ]] ;;
+esac
+FAKE
+cat >"$SHIM/ss" <<FAKE
+#!/usr/bin/env bash
+cat "$C/state/ports" 2>/dev/null
+FAKE
+cat >"$SHIM/dpkg-query" <<FAKE
+#!/usr/bin/env bash
+grep -qx "\${@: -1}" "$C/state/installed" 2>/dev/null && printf 'install ok installed' || exit 1
+FAKE
+cat >"$SHIM/apt-cache" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s:\n  Installed: (none)\n  Candidate: 7.0.15-1\n' "$2"
+FAKE
+cat >"$SHIM/apt-get" <<FAKE
+#!/usr/bin/env bash
+echo "apt-get \$*" >>"$C/state/calls"
+if [[ "\$1" == -s ]]; then for a in "\$@"; do [[ "\$a" == -* || "\$a" == install ]] || echo "Inst \$a (1.0 Ubuntu:26.04 [amd64])"; done; cat "$C/state/apt-extra" 2>/dev/null; fi
+exit 0
+FAKE
+cat >"$SHIM/psql" <<FAKE
+#!/usr/bin/env bash
+q="\$*"
+case "\$q" in
+  *server_version_num*) echo 180001 ;;
+  *hba_file*) echo "$C/hba.conf" ;;
+  *pg_roles*) [[ -e "$C/state/role" ]] && echo 1 ;;
+  *pg_database*) [[ -e "$C/state/db" ]] && echo 1 ;;
+esac
+exit 0
+FAKE
+cat >"$SHIM/runuser" <<'FAKE'
+#!/usr/bin/env bash
+shift 2; [[ "$1" == -- ]] && shift; exec "$@"
+FAKE
+cat >"$SHIM/caddy" <<FAKE
+#!/usr/bin/env bash
+[[ "\$1" == version ]] && { echo v2.11.7; exit 0; }
+echo "caddy \$*" >>"$C/state/calls"
+cfg=""; while [[ \$# -gt 0 ]]; do [[ "\$1" == --config ]] && cfg="\$2"; shift; done
+[[ -e "$C/state/caddy-invalid" ]] && exit 1
+! grep -q BROKEN "\$cfg"
+FAKE
+cat >"$SHIM/df" <<'FAKE'
+#!/usr/bin/env bash
+echo "Filesystem 1K-blocks Used Available Capacity Mounted"
+echo "/dev/x 90000000 1 80000000 1% /"
+FAKE
+printf '#!/usr/bin/env bash\necho 6\n' >"$SHIM/nproc"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$SHIM/swapon"
+chmod +x "$SHIM"/*
+printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$C/os-release"
+printf 'MemAvailable:    4718592 kB\n' >"$C/meminfo"
+printf 'local all postgres peer\nhost all all 127.0.0.1/32 scram-sha-256\n' >"$C/hba.conf"
+pcn=0
+pcreset() { # move the old state aside (the temp dir is removed on exit) and lay down a fresh "shared server"
+  pcn=$((pcn + 1)); mkdir -p "$T/old$pcn"
+  mv "$C/state" "$C/etc" "$C/caddy" "$T/old$pcn/" 2>/dev/null
+  mkdir -p "$C/state" "$C/etc" "$C/caddy/sites"; : >"$C/state/calls"
+  printf 'caddy.service loaded active running Caddy\nfail2ban.service loaded active running F\nssh.service loaded active running S\npostgresql@18-main.service loaded active running PG\nother-api.service loaded active running A\nother-vol.service loaded active running V\ncron.service loaded active running cron\n' >"$C/state/units"
+  echo /etc/systemd/system/other-api.service >"$C/state/frag-other-api.service"
+  echo /etc/systemd/system/other-vol.service >"$C/state/frag-other-vol.service"
+  echo /usr/lib/systemd/system/cron.service >"$C/state/frag-cron.service"
+  printf 'LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\nLISTEN 0 4096 0.0.0.0:3101 0.0.0.0:*\nLISTEN 0 244 127.0.0.1:5432 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:2019 0.0.0.0:*\n' >"$C/state/ports"
+  printf '{\n\temail ops@example.test\n}\nexample.test {\n\trespond ok\n}\n' >"$C/caddy/Caddyfile"
+}
+pc() {
+  OUT="$(env PATH="$SHIM:$PATH" IFSO_COHOST_TEST=1 IFSO_ETC="$C/etc" IFSO_OPT="$C/opt" IFSO_OS_RELEASE="$C/os-release" IFSO_MEMINFO="$C/meminfo" \
+    IFSO_CADDYFILE="$C/caddy/Caddyfile" IFSO_CADDY_SITES="$C/caddy/sites" DOMAIN="${DOMAIN-api.example.test}" bash "$HERE/provision.sh" --cohost "$@" 2>&1)"; RC=$?
+}
+tree_sum() { (cd "$C" && find etc caddy -type f -exec shasum {} + 2>/dev/null | sort | shasum); }
+
+pcreset; before="$(tree_sum)"; pc --check
+check "cohost --check on a clean shared server: exit 0 and 'CHECK OK'" bash -c '[ "$1" = 0 ] && grep -q "CHECK OK" <<<"$2"' _ "$RC" "$OUT"
+check "  ... lists the plan: role, database, Redis port, Caddy import" bash -c 'for w in "create role ifso" "create database ifso_testnet" "6380" "import " "3201"; do grep -q -- "$w" <<<"$1" || exit 1; done' _ "$OUT"
+check "  ... lists the other project's units as protected (caddy, postgres cluster, its own unit files), not cron" bash -c 'grep -q "protected unit caddy.service" <<<"$1" && grep -q "protected unit postgresql@18-main.service" <<<"$1" && grep -q "protected unit other-api.service" <<<"$1" && ! grep -q "protected unit cron" <<<"$1"' _ "$OUT"
+check "  ... changes nothing (files under etc and caddy identical)" test "$(tree_sum)" = "$before"
+check "  ... no apt install, no reload, no restart was called (only a simulation)" bash -c '! grep -qE "reload|restart|stop|mask" "$1"; ! grep -E "^apt-get" "$1" | grep -qv -- " -s "' _ "$C/state/calls"
+pcreset; echo 'LISTEN 0 128 127.0.0.1:3201 0.0.0.0:*' >>"$C/state/ports"; pc --check
+check "cohost --check: port 3201 already used: FAIL, exit 1" bash -c '[ "$1" = 1 ] && grep -q "FAIL  port 3201" <<<"$2"' _ "$RC" "$OUT"
+pcreset; echo 'LISTEN 0 128 127.0.0.1:6380 0.0.0.0:*' >>"$C/state/ports"; pc --check
+check "cohost --check: port 6380 already used: FAIL, exit 1" bash -c '[ "$1" = 1 ] && grep -q "FAIL  port 6380" <<<"$2"' _ "$RC" "$OUT"
+pcreset; PROTECTED_UNITS="other-hedger.service" pc --check
+check "cohost --check: a named PROTECTED_UNITS entry that is not active is a FAIL" bash -c '[ "$1" = 1 ] && grep -q "other-hedger.service is NOT active" <<<"$2"' _ "$RC" "$OUT"
+pcreset; sed -i.bak '/^postgresql@/d' "$C/state/units"; pc --check
+check "cohost --check: no active postgresql@ cluster is a FAIL" test "$RC" = 1
+pcreset; sed -i.bak '/^caddy/d' "$C/state/units"; pc --check
+check "cohost --check: caddy not active is a FAIL" test "$RC" = 1
+pcreset; touch "$C/state/role"; pc --check
+check "cohost --check: a role ifso that this script did not create is a FAIL (never taken over)" bash -c '[ "$1" = 1 ] && grep -q "refusing to take it over" <<<"$2"' _ "$RC" "$OUT"
+pcreset; touch "$C/state/db"; pc --check
+check "cohost --check: a database ifso_testnet that this script did not create is a FAIL" test "$RC" = 1
+pcreset; echo 'Inst libc6 [2.40-1] (2.41-1 Ubuntu:26.04 [amd64])' >"$C/state/apt-extra"; pc --check
+check "cohost --check: a package simulation that would UPGRADE anything is a FAIL" bash -c '[ "$1" = 1 ] && grep -q "UPGRADE or REMOVE" <<<"$2"' _ "$RC" "$OUT"
+pcreset; echo 'Inst postgresql-common (1.0 Ubuntu:26.04 [amd64])' >"$C/state/apt-extra"; pc --check
+check "cohost --check: a simulation that touches postgres is a FAIL" bash -c '[ "$1" = 1 ] && grep -q "would install/change postgresql-common" <<<"$2"' _ "$RC" "$OUT"
+pcreset; printf 'ID=ubuntu\nVERSION_ID="24.04"\n' >"$C/os-release"; pc --check
+check "cohost --check: Ubuntu 24.04 is a warning, not a failure" bash -c '[ "$1" = 0 ] && grep -q "warn  Ubuntu 24.04" <<<"$2"' _ "$RC" "$OUT"
+printf 'ID=ubuntu\nVERSION_ID="26.04"\n' >"$C/os-release"
+pcreset; printf 'MemAvailable:    400000 kB\n' >"$C/meminfo"; pc --check
+check "cohost --check: too little free memory is a FAIL" test "$RC" = 1
+printf 'MemAvailable:    4718592 kB\n' >"$C/meminfo"
+pcreset; PROFILE=mainnet pc; check "cohost refuses the mainnet profile (64)" test "$RC" = 64
+pcreset; DOMAIN='' pc; check "cohost real run without DOMAIN is refused (64)" test "$RC" = 64
+pcreset; DOMAIN='bad domain' pc --check; check "cohost refuses a malformed DOMAIN (64)" test "$RC" = 64
+
+# Caddy: ONE import line, backup, validate, graceful reload
+pcreset; cp "$C/caddy/Caddyfile" "$T/orig"; pc --caddy-only
+check "caddy step: exit 0, the import line was appended exactly once" bash -c '[ "$1" = 0 ] && [ "$(grep -c "^import $2/\*.caddy$" "$3")" = 1 ]' _ "$RC" "$C/caddy/sites" "$C/caddy/Caddyfile"
+check "  ... every original line is still there, in order, and only the import and its comment were added" bash -c 'head -n "$(wc -l <"$1")" "$2" | cmp -s - "$1" && [ "$(( $(wc -l <"$2") - $(wc -l <"$1") ))" -le 3 ]' _ "$T/orig" "$C/caddy/Caddyfile"
+check "  ... a timestamped backup of the old Caddyfile exists and equals it" bash -c 'b=$(ls "$1"/Caddyfile.bak.* | head -1); cmp -s "$b" "$2"' _ "$C/caddy" "$T/orig"
+check "  ... ifso.caddy points the domain at 127.0.0.1:3201" bash -c 'grep -q "^api.example.test {" "$1" && grep -q "reverse_proxy 127.0.0.1:3201" "$1"' _ "$C/caddy/sites/ifso.caddy"
+check "  ... caddy was reloaded (never restarted)" bash -c 'grep -q "^systemctl reload caddy" "$1" && ! grep -qE "systemctl (restart|stop) caddy" "$1"' _ "$C/state/calls"
+: >"$C/state/calls"; pc --caddy-only
+check "caddy step again: nothing to do, no second import line, no reload" bash -c '[ "$1" = 0 ] && [ "$(grep -c "^import " "$2")" = 1 ] && ! grep -q reload "$3"' _ "$RC" "$C/caddy/Caddyfile" "$C/state/calls"
+pcreset; printf 'import %s/*\n' "$C/caddy/sites" >>"$C/caddy/Caddyfile"; cp "$C/caddy/Caddyfile" "$T/orig"; pc --caddy-only
+check "caddy step: an import of the sites folder that is already there is left alone (no append, no backup)" bash -c '[ "$1" = 0 ] && cmp -s "$2" "$3" && ! ls "$4"/Caddyfile.bak.* >/dev/null 2>&1' _ "$RC" "$T/orig" "$C/caddy/Caddyfile" "$C/caddy"
+pcreset; cp "$C/caddy/Caddyfile" "$T/orig"; touch "$C/state/caddy-invalid"; pc --caddy-only
+check "caddy step: a configuration that does not validate leaves the Caddyfile untouched, no reload, site file set aside" bash -c '[ "$1" != 0 ] && cmp -s "$2" "$3" && ! grep -q reload "$4" && [ ! -e "$5/ifso.caddy" ] && ls "$5"/ifso.caddy.rejected.* >/dev/null' _ "$RC" "$T/orig" "$C/caddy/Caddyfile" "$C/state/calls" "$C/caddy/sites"
+pcreset; cp "$C/caddy/Caddyfile" "$T/orig"; touch "$C/state/fail-reload"; pc --caddy-only
+check "caddy step: a failed reload restores the Caddyfile from the backup" bash -c '[ "$1" != 0 ] && cmp -s "$2" "$3"' _ "$RC" "$T/orig" "$C/caddy/Caddyfile"
+pcreset; sed -i.bak 's/^example.test/BROKEN/' "$C/caddy/Caddyfile"; pc --caddy-only
+check "caddy step: it validates the whole file, so a problem in the other project's part also stops it" bash -c '[ "$1" != 0 ]' _ "$RC"
+
+# Static guarantees of the co-host files
+PC="$HERE/provision-cohost.sh"
+check "cohost: never restarts, stops or reconfigures postgres, caddy, fail2ban, ssh (only reload caddy; stop/disable/mask only the package's own redis unit)" bash -c '
+  ! grep -nE "systemctl +(restart|try-restart|stop|disable|mask|start|enable)[^#]*(caddy|postgres|fail2ban|ssh)" "$1" &&
+  [ "$(grep -cE "^[[:space:]]*(if ! )?systemctl reload caddy" "$1")" = 1 ] && ! grep -nE "systemctl +restart" "$1" &&
+  [ "$(grep -E "systemctl +(stop|disable|mask)" "$1" | grep -vc "redis-server.service")" = 0 ]' _ "$PC"
+check "cohost: no apt upgrade, no ufw, no sysctl, no timedatectl, no swap, no sshd or fail2ban config, no pg_hba write" bash -c '
+  ! grep -nE "^[^#]*(apt-get +[^#]*[[:space:]]upgrade|dist-upgrade|ufw |sysctl |timedatectl|mkswap|fallocate|fail2ban/|sshd_config|journald|pg_hba.conf *>|unattended-upgrades *$)" "$1"' _ "$PC"
+check "cohost: Bun and cast go to /opt/ifso/bin, never /usr/local/bin" bash -c '! grep -nE "install .*/usr/local/bin/(bun|cast)" "$1" && grep -q "\"\$BIN_DIR/bun\"" "$1" && grep -q "^BIN_DIR=\"\$OPT/bin\"" "$1"' _ "$PC"
+check "cohost: Bun 1.4.4 and cast 1.8.4 pinned, bun checksum verified" bash -c 'grep -q "^BUN_VERSION=\"1.4.4\"" "$1" && grep -q "^FOUNDRY_VERSION=\"1.8.4\"" "$1" && grep -q "sha256sum -c" "$1"' _ "$PC"
+check "cohost: ports are API 3201, Redis 6380; the redis.conf carries port, password, 256mb and noeviction on 127.0.0.1" bash -c '
+  grep -q "^API_PORT=3201" "$1" && grep -q "^REDIS_PORT=6380" "$1" && grep -q "echo \"port \$REDIS_PORT\"" "$1" && grep -q "requirepass" "$1" &&
+  grep -q "maxmemory 256mb" "$1" && grep -q "maxmemory-policy noeviction" "$1" && grep -q "echo \"bind 127.0.0.1\"" "$1"' _ "$PC"
+check "cohost: the package's default redis-server (6379) is masked, and only when this script installed it" bash -c 'grep -q "redis_preinstalled" "$1" && grep -q "systemctl mask redis-server.service" "$1" && grep -q "policy-rc.d" "$1"' _ "$PC"
+check "cohost: db.env 0600; role without superuser and with a connection limit; no extension, no Timescale" bash -c '
+  grep -q "chmod 0600 \"\$ETC/db.env\"" "$1" && grep -q "NOSUPERUSER NOCREATEDB NOCREATEROLE" "$1" && grep -q "CONNECTION LIMIT" "$1" && ! grep -v "^#" "$1" | grep -qiE "CREATE EXTENSION|timescaledb"' _ "$PC"
+check "cohost: the identity of the protected units is compared before and after, exit 3 on a change" bash -c 'grep -q "BEFORE=\"\$(snapshot)\"" "$1" && grep -q "AFTER=\"\$(snapshot)\"" "$1" && grep -q "exit 3" "$1"' _ "$PC"
+check "provision.sh hands --cohost over before it checks root or installs anything" bash -c '
+  a=$(grep -n "== --cohost" "$1/provision.sh" | head -1 | cut -d: -f1); b=$(grep -n "id -u" "$1/provision.sh" | head -1 | cut -d: -f1); c=$(grep -n "^apt-get" "$1/provision.sh" | head -1 | cut -d: -f1)
+  [ -n "$a" ] && [ "$a" -lt "$b" ] && [ "$a" -lt "$c" ]' _ "$HERE"
+check "co-host drop-ins: MemoryMax api 512M, bot 256M, worker 768M and a CPUQuota on each" bash -c '
+  d="$1/cohost/dropins"
+  grep -qx "MemoryMax=512M" "$d/ifso-api.service.conf" && grep -qx "MemoryMax=256M" "$d/ifso-bot.service.conf" && grep -qx "MemoryMax=768M" "$d/ifso-worker.service.conf" &&
+  for r in api bot worker migrate backup; do grep -q "^CPUQuota=" "$d/ifso-$r.service.conf" || exit 1; done' _ "$HERE"
+check "co-host drop-ins: Ifso's own Bun, not /usr/local/bin/bun, and the right role arguments" bash -c '
+  d="$1/cohost/dropins"
+  for r in api bot worker; do grep -qx "ExecStart=/opt/ifso/bin/bun src/main.ts $r" "$d/ifso-$r.service.conf" || exit 1; done
+  grep -qx "ExecStart=/opt/ifso/bin/bun run db:migrate" "$d/ifso-migrate.service.conf" && ! grep -rq "/usr/local/bin" "$d"' _ "$HERE"
+check "co-host Redis unit: own user, its own config file, limits, no 6379" bash -c '
+  u="$1/cohost/ifso-redis.service"
+  grep -qx "User=ifso-redis" "$u" && grep -q "^ExecStart=@REDIS_BIN@ /etc/ifso/redis.conf" "$u" && grep -q "^MemoryMax=" "$u" && grep -q "^CPUQuota=" "$u" && ! grep -q 6379 "$u"' _ "$HERE"
+check "co-host Caddy site: domain placeholder -> 127.0.0.1:3201 only" bash -c 'grep -q "^@DOMAIN@ {" "$1/cohost/ifso.caddy" && grep -q "reverse_proxy 127.0.0.1:3201" "$1/cohost/ifso.caddy" && ! grep -qE "8080|:80 " "$1/cohost/ifso.caddy"' _ "$HERE"
+check "co-host files name the other project nowhere" bash -c 'w="lem""niscate"; ! grep -rIil "$w" "$1/cohost" "$1/provision-cohost.sh"' _ "$HERE"
 
 if ((fail)); then printf '%s of %s failed\n' "$fail" "$n"; exit 1; fi
 printf 'all %s passed\n' "$n"

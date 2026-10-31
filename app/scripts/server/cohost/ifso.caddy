@@ -1,0 +1,23 @@
+# /etc/caddy/sites/ifso.caddy: Ifso's site, written by provision.sh --cohost (the placeholder is replaced with DOMAIN).
+# It is pulled into the main Caddyfile by ONE line: import /etc/caddy/sites/*.caddy. Only the API is public, and only through
+# here: it listens on 127.0.0.1:3201. The bot, the worker and Redis listen on nothing public.
+# The API reads the client address from X-Forwarded-For, which Caddy sets itself (it discards any value a client sends); the
+# Cloudflare headers a client could forge are removed before the request reaches the API.
+# No access-log file on purpose: a log path Caddy cannot write would fail a reload that also carries the other sites.
+
+@DOMAIN@ {
+	encode zstd gzip
+	request_body {
+		max_size 1MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:3201 {
+		header_up -CF-Connecting-IP
+		header_up -CF-IPCountry
+	}
+}

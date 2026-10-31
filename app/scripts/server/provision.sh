@@ -6,6 +6,9 @@
 #   PROFILE=testnet bash provision.sh        everything below (PROFILE is testnet or mainnet, required the first time)
 #   bash provision.sh --units-only           only (re)install the systemd units, Caddyfile-independent scripts, backup and deploy
 #   bash provision.sh --fix-key-perms        only re-own /etc/ifso/keys for the service users (after you copy key files in)
+#   bash provision.sh --cohost [--check]     testnet on a server that already runs another project's live services: touches
+#                                            nothing of theirs (see provision-cohost.sh); --check only reads. Do NOT run the
+#                                            plain mode on such a server: it upgrades packages and restarts Postgres-side services.
 #
 # What it does: apt upgrade; git, build tools, jq; UTC clock with NTP; a swap file when there is none; Postgres 16 (no
 # extensions) with an `ifso` role and one database (ifso_testnet or ifso_mainnet); Redis 7 on 127.0.0.1 with a password and
@@ -41,13 +44,19 @@ log() { printf '[provision %s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 warn() { printf '[provision] WARNING: %s\n' "$*" >&2; }
 die() { printf 'provision: %s\n' "$*" >&2; exit 1; }
 
+if [[ "${1:-}" == --cohost ]]; then
+  [[ -f "$HERE/provision-cohost.sh" ]] || die "missing $HERE/provision-cohost.sh: run provision.sh from the app/scripts/server folder"
+  shift
+  exec bash "$HERE/provision-cohost.sh" "$@"
+fi
+
 UNITS_ONLY=0
 KEYS_ONLY=0
 case "${1:-}" in
   "") ;;
   --units-only) UNITS_ONLY=1 ;;
   --fix-key-perms | --service-users) KEYS_ONLY=1 ;;
-  -h | --help) sed -n '2,29p' "$0"; exit 0 ;;
+  -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
   *) die "unknown argument $1 (try --help)" ;;
 esac
 

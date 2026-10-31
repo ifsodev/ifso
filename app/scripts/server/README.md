@@ -8,6 +8,7 @@ These scripts set up one Ubuntu 24.04 server (Cherry Servers VPS, 2 to 4 GB of m
 | `deploy.sh` | Puts one exact commit live, checks it, and goes back by itself if it fails. Installed on the server as `ifso-deploy`. |
 | `systemd/` | The services (`ifso-api`, `ifso-bot`, `ifso-worker`), the migration step, and the daily backup timer. |
 | `Caddyfile` | The HTTPS front door. The domain is a variable, `DOMAIN`. |
+| `provision-cohost.sh`, `cohost/` | `provision.sh --cohost`: testnet on a server that already runs another project's live services (see below). |
 | `backup.sh` | Daily database backup, 14 days kept. Installed as `ifso-backup`. |
 | `env.example` | Every setting, per service, with no secret values. |
 | `deploy-local.test.sh` | Proves the deploy logic on your own computer, no server needed. |
@@ -98,10 +99,14 @@ Migrations only go forward. A rollback puts the old code back but does not undo 
 - **Security updates** install by themselves; the server may need a reboot now and then (`reboot`; the services come back on their own).
 - **Mainnet**: do not run the mainnet profile until the testnet one has been deployed, checked with `ifso-deploy --check`, and a rollback has been rehearsed once (deploy an older sha, then the newer one).
 
+## Sharing a server with another project (`--cohost`, testnet only)
+
+`bash provision.sh --cohost --check` only reads: it lists what it would do, confirms ports 3201 (API) and 6380 (Ifso's own Redis) are free and that the other project's units are active, and stops with a `FAIL` line if anything of theirs would change. `DOMAIN=api.<domain> bash provision.sh --cohost` then does the setup without installing, upgrading or restarting their Postgres, Caddy, fail2ban or ssh: a role and a database in their Postgres cluster, a separate Redis on 127.0.0.1:6380, Ifso's own Bun in `/opt/ifso/bin`, one `import` line in their Caddyfile plus `/etc/caddy/sites/ifso.caddy` (graceful reload only), and systemd limits on every Ifso unit. Afterwards `ifso-deploy` runs in co-host mode by itself (the file `/etc/ifso/cohost` switches it on) and exits 3 if one of their units changed during a deploy. The exact order of commands and the way back are in the private runbook for the night.
+
 ## Trying the deploy logic on your computer
 
 ```bash
-bash app/scripts/server/deploy-local.test.sh        # 54 checks, a few seconds, touches nothing outside a temp folder
+bash app/scripts/server/deploy-local.test.sh        # 118 checks, a few seconds, touches nothing outside a temp folder
 shellcheck app/scripts/server/*.sh                  # brew install shellcheck
 ```
 `deploy.sh --dry-run <sha>` does the same kind of rehearsal by hand: no root, systemd calls only printed.

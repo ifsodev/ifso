@@ -5,6 +5,7 @@
 #   sudo ifso-deploy <40-hex sha>                  deploy that commit
 #   sudo ifso-deploy --profile mainnet <sha>       state the network explicitly (default: /etc/ifso/profile)
 #   sudo ifso-deploy --check                       health-check everything, change nothing
+#   sudo ifso-deploy --cohost <sha>                assert co-host mode (it is on by itself when /etc/ifso/cohost exists)
 #   ifso-deploy --dry-run <sha>                    rehearse without root and without touching systemd (see below)
 #
 # Steps, in order. Everything before step 5 leaves the running release untouched, and a failure there exits 75
@@ -18,7 +19,8 @@
 #   6. wait for GET /readyz to answer 200 and for every unit to stay active. Any failure from step 5 on puts /opt/ifso/current
 #      back on the previous release, restarts the services and checks them again (exit 1 = rolled back, exit 2 = the rollback
 #      failed too: the server needs a human).
-# Exit codes: 0 done, 1 failed and rolled back, 2 failed and rollback failed, 64 bad usage or settings, 75 nothing switched.
+# Exit codes: 0 done, 1 failed and rolled back, 2 failed and rollback failed, 3 (co-host) done but another project's unit changed,
+# 64 bad usage or settings, 75 nothing switched.
 #
 # --dry-run: no root needed, no chown/runuser, systemctl is only logged (unless IFSO_SYSTEMCTL names a stand-in), the real
 # git/bun/curl are used unless IFSO_GIT/IFSO_BUN/IFSO_CURL name stand-ins. deploy-local.test.sh drives this mode in CI.
@@ -35,7 +37,7 @@ ETC="${IFSO_ETC:-/etc/ifso}"
 OPT="${IFSO_OPT:-/opt/ifso}"
 STATE="${IFSO_STATE:-/var/lib/ifso}"
 SYSTEMCTL="${IFSO_SYSTEMCTL:-systemctl}"
-BUN="${IFSO_BUN:-/usr/local/bin/bun}"
+BUN="${IFSO_BUN:-}"
 GIT="${IFSO_GIT:-git}"
 CURL="${IFSO_CURL:-curl}"
 BACKUP_CMD="${IFSO_BACKUP_CMD:-/usr/local/sbin/ifso-backup}"
@@ -55,17 +57,29 @@ die() { printf 'deploy: %s\n' "$*" >&2; exit "${2:-64}"; }
 PROFILE=""
 DRY_RUN=0
 CHECK_ONLY=0
+COHOST_FLAG=0
 SHA=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile) [[ $# -ge 2 ]] || die "--profile needs testnet or mainnet"; PROFILE="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --check) CHECK_ONLY=1; shift ;;
-    -h | --help) sed -n '2,30p' "$0"; exit 0 ;;
+    --cohost) COHOST_FLAG=1; shift ;;
+    -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
     -*) die "unknown option $1 (try --help)" ;;
     *) [[ -z "$SHA" ]] || die "only one sha, got '$SHA' and '$1'"; SHA="$1"; shift ;;
   esac
 done
+
+# Co-host mode (the server also runs another project's live services): on when provision.sh --cohost wrote $ETC/cohost.
+# The flag only asserts it. In this mode Ifso's own Bun is used, the API must be 127.0.0.1:3201, Redis must be 6380, and the
+# other project's units (listed in $ETC/cohost.protected) must be active before, and unchanged after.
+COHOST=0
+[[ -e "$ETC/cohost" ]] && COHOST=1
+if [[ "$COHOST_FLAG" == 1 && "$COHOST" == 0 ]]; then die "--cohost given but $ETC/cohost is missing: run provision.sh --cohost first"; fi
+if [[ -z "$BUN" ]]; then
+  if [[ "$COHOST" == 1 ]]; then BUN="$OPT/bin/bun"; else BUN=/usr/local/bin/bun; fi
+fi
 
 if [[ "$CHECK_ONLY" == 0 ]]; then
   [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || die "give the full 40-character commit sha (a branch name can move, a sha cannot); got '${SHA:-nothing}'"
@@ -123,6 +137,33 @@ fi
 UNITS=(ifso-api ifso-worker)
 if [[ -n "$(cfg TELEGRAM_BOT_TOKEN)" ]]; then UNITS+=(ifso-bot); fi
 
+PROTECTED=()
+if [[ "$COHOST" == 1 ]]; then
+  [[ -r "$ETC/cohost.protected" ]] || die "$ETC/cohost.protected is missing: run provision.sh --cohost again" 64
+  while read -r u; do [[ -n "$u" && "$u" != \#* ]] && PROTECTED+=("$u"); done <"$ETC/cohost.protected"
+  [[ ${#PROTECTED[@]} -gt 0 ]] || die "$ETC/cohost.protected lists no units" 64
+fi
+protected_snapshot() { # state, main pid and start time of each protected unit: a restart changes it
+  local u
+  for u in "${PROTECTED[@]}"; do printf '%s %s\n' "$u" "$("$SYSTEMCTL" show "$u" -p ActiveState -p MainPID -p ActiveEnterTimestampMonotonic 2>/dev/null | LC_ALL=C sort | tr '\n' ' ')"; done
+}
+protected_active() { # all protected units active
+  local u bad=0
+  for u in "${PROTECTED[@]}"; do
+    if ! "$SYSTEMCTL" is-active --quiet "$u" 2>/dev/null; then log "the other project's unit $u is not active"; bad=1; fi
+  done
+  return "$bad"
+}
+PROT_BEFORE=""
+protected_verify() { # exit 3 when a protected unit differs from the snapshot taken before the switch
+  [[ "$COHOST" == 1 && -n "$PROT_BEFORE" ]] || return 0
+  if [[ "$(protected_snapshot)" != "$PROT_BEFORE" ]]; then
+    log "WARNING: the other project's units changed during this deploy (state, pid or start time). Ifso did not restart them: look at them now."
+    printf '%s\n' "--- before" "$PROT_BEFORE" "--- after" "$(protected_snapshot)" >&2
+    exit 3
+  fi
+}
+
 check_settings() {
   local f key p chain url hex got owner
   for f in common api worker db; do
@@ -138,6 +179,15 @@ check_settings() {
   [[ -n "$(cfg WEB_ORIGINS)" ]] || log "warning: WEB_ORIGINS is empty in $ETC/api.env: only PUBLIC_APP_URL may call the API from a browser (CORS)"
   [[ -n "$p" && "$p" != none ]] || die "TRUST_PROXY is ${p:-unset} for the api role: set TRUST_PROXY=caddy in $ETC/api.env (behind Caddy every client would otherwise share one rate-limit bucket)"
   [[ -n "$(cfg ESCROW_ADDRESS)" ]] || die "ESCROW_ADDRESS is empty"
+  if [[ "$COHOST" == 1 ]]; then
+    [[ "$(cfg PORT)" == 3201 ]] || die "co-host: PORT must be 3201 in $ETC/api.env (got '$(cfg PORT)'); 8080 may belong to the other project"
+    [[ "$(cfg HOST)" == 127.0.0.1 ]] || die "co-host: HOST must be 127.0.0.1 in $ETC/api.env (nothing but Caddy may reach the API)"
+    p="$(envval "$ETC/db.env" REDIS_URL)"
+    [[ "$p" == *@127.0.0.1:6380* ]] || die "co-host: REDIS_URL in $ETC/db.env must point at 127.0.0.1:6380 (6379 is not Ifso's)"
+    [[ "$(envval "$ETC/db.env" DATABASE_URL)" == *@127.0.0.1:* ]] || die "co-host: DATABASE_URL must use 127.0.0.1"
+    [[ -x "$BUN" ]] || die "co-host: $BUN is missing: run provision.sh --cohost (Ifso keeps its own Bun, it never uses /usr/local/bin/bun)" 64
+    protected_active || die "the other project's units are not all active: nothing switched, nothing touched" 75
+  fi
   for key in RELAYER KEEPER RESOLVER; do
     for f in "${key}_KEYSTORE" "${key}_PASSWORD_FILE"; do
       p="$(cfg "$f")"
@@ -282,12 +332,14 @@ rollback() {
   if restart_all && wait_healthy; then
     log "rolled back: $prev is live again (migrations are NOT undone; restore from /var/backups/ifso only if the data is wrong)"
     abandon "$SHA"
+    protected_verify
     exit 1
   fi
   log "ROLLBACK FAILED: $prev did not become healthy either. Look at: journalctl -u ifso-api -u ifso-worker -n 80"
   exit 2
 }
 
+if [[ "$COHOST" == 1 ]]; then PROT_BEFORE="$(protected_snapshot)"; fi
 point "$SHA"
 log "current -> $SHA; running migrations"
 migrate || { log "migrations failed"; rollback; }
@@ -310,3 +362,4 @@ while read -r d; do
   abandon "$d"
 done < <(ls -1t "$RELEASES" 2>/dev/null)
 log "done: $SHA is live and healthy"
+protected_verify
