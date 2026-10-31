@@ -1,382 +1,171 @@
 # Ifso: Audit
 
-**Repo:** the private development repo · **Commit:** `b9af4a4` (2026-10-31) · **Public copy:**
-github.com/ifsodev/ifso `985d854` (signed; every non-web file is byte-identical to `b9af4a4`: blob-sha diff over 328
-files, only `.githooks/public-guard.denylist` withheld; `b9af4a4` differs from `9c2b89b` only in `web/`) ·
-**Mode:** full · **Rubric:** v2
+**Repo:** the private development repo · **Commit:** `071fee4` (2026-10-31) · **Public copy:** not yet synced for this
+commit (the owner syncs it; every point below is earned by files that ship in the public copy) · **Mode:** rescore ·
+**Rubric:** v2 · **Previous run:** full on `b9af4a4` (2026-10-31), 8.2/10, kept unchanged in
+[REPORT-2026-10-31-b9af4a4.md](REPORT-2026-10-31-b9af4a4.md).
 
-Scope:
-- In scope: `contracts/` (Foundry) and `app/` (the Bun/Hono/tRPC API, relayer, Telegram bot, keeper, price watcher,
-  resolver, indexer, notifier, and the server and release scripts).
-- Out of scope: `web/`, the frontend.
-- Nothing is deployed to mainnet, so the deployment section scores readiness only.
+Scope (unchanged, file list with blob ids in [SCOPE.md](SCOPE.md)):
+- In scope: `contracts/` (Foundry) and `app/` (API, relayer, bot, keeper, price watcher, resolver, indexer, notifier,
+  server and release scripts).
+- Out of scope: `web/`, the frontend. The L-3 fix touches `web/src/lib/ifso/create.ts`; it was read only to confirm the
+  page passes what the user asked for into the client check, and earns no points.
+- Nothing is deployed, so the deployment section scores readiness only.
 - Every suite ran in an isolated worktree after `bun install --frozen-lockfile --ignore-scripts`.
+
+Rescore means: every open finding re-checked against the code and its PoC re-run (it must now fail to exploit), scans and
+suites re-run, re-graded. Each fix diff was also read as new code (S-3); that is where L-6 comes from. No other new hunting.
 
 ## Verdict
 
-**Grade: 8.2 / 10.** The open-Medium cap (8.9) applies but does not bind. The weighted score is 8.27.
+**Grade: 9.6 / 10.** No cap binds. The weighted score is 9.62 (was 8.27 → 8.2).
 
-The contracts are clean. A line-by-line read found nothing above Info. They also have:
-- 500,000 invariant calls;
-- a 100% mutation score;
-- Halmos proofs;
-- 97% line coverage.
+The rubric allows a rescore to show 9+ only when a full or quick run is on record within 30 days and anything live has a
+current deploy verdict: the full run on `b9af4a4` is from 2026-10-31 (today) and nothing is deployed.
 
-The off-chain service holds the grade down with four Mediums, in the relayer, resolver, keeper and release runner.
-Each is griefing or an operator-key risk; none moves escrowed funds. Smaller gaps:
-- no invariant suite for the resolver's bonds;
-- no TypeScript static analysis in CI;
-- vendored helpers that name no source or version.
+All four Mediums and all five Lows from the full run are fixed, each with a regression test that ran green here, and each
+original PoC now fails to exploit. The resolver and FeeRouter now have 500,000-call invariant suites, Semgrep runs on
+`app/` in CI (TypeScript rules only, so the Python release runner still has no analyser), the contracts package has a
+lockfile, and every vendored helper names its origin.
 
-Most important fix: M-2. Refuse to plan a football question that has no second source id, and treat a single final
-source that contradicts a proposal as "contradicted". SECURITY.md accepts the R3-H1 residual as rare, but today it is
-certain on every one-source question.
+One new Low: the M-4 fix moved signature checks into a root-owned scratch repo, but the ancestry checks still read the
+release user's clone, and git honours a `.git/info/grafts` file planted there. A compromised release user can therefore
+get an older owner-signed revision accepted (a downgrade). No root, no unsigned code.
 
-## Findings
+## Change since the last run
 
-### M-1. Medium: anyone burns a victim's relay budget by replaying the victim's already-used authorization
-- **id:** `offchain|app/src/api/router.ts|relay-budget-replay`
-- **Location:** `app/src/api/router.ts:103-109` (`relayBudgetVerified`), `:351-365` (`submit`), `:429-436` (`accept`);
-  `app/src/api/signers.ts:23-36`.
-- **Path:**
-  1. A victim's gasless create leaves `params`, `from`, `validAfter`, `validBefore` and `signature` in public calldata.
-  2. Anyone calls `submit` with those arguments. The route has no auth (router.ts:351).
-  3. `verifiedCreateSigner` recovers the signer offline and returns the victim's address. It never checks
-     `authorizationState` or `validBefore` (signers.ts:23-28).
-  4. `signerBudget` charges `relay:signer:<victim>` (router.ts:84-89, 107).
-  5. Only then does `sendCall` simulate. The simulation fails and nothing is sent, but the charge stays.
-  6. Twenty replays use up the budget (`RELAY_PER_SIGNER_PER_HOUR=20`, env.ts:68). The per-IP budget (60/h) is larger,
-     so one address is enough. The victim's gasless `decide`, `redirectRefund`, `submit` and `accept` are refused for
-     the hour, and the attacker can repeat this every hour.
-  7. `accept` replays work the same way.
-- **Trigger:** anyone, with no special state.
-- **Impact:** blocks one party's gasless decisions (decline, OK or refund redirect near a deadline) for as long as the
-  attacker keeps going.
-  - No funds are lost. A wallet that holds ETH can still call the contract directly.
-  - This is the same impact class as R3-M1. The SECURITY.md row "Gasless decisions depend on the relayer" relies on
-    R3-M1 having stopped cross-party burns, and this path restores them.
-- **Evidence:** `IFSO_POCS/M1-relay-budget-replay/replayBurn.test.ts`: 3 pass. The create-replay and accept-replay
-  tests each leave the victim's decide refused with "too many requests for this wallet". The control (no replays)
-  relays the decide.
-- **Fix:** charge `signerBudget` only after `simulate` succeeds, the same way the per-escrow cap already works
-  (router.ts:457-463). Alternatively, reject an authorization whose `USDG.authorizationState(from, nonce)` is used, or
-  whose `validBefore <= now`.
-- **Regression test:** the PoC, asserting the decide still relays after 20 replays.
+| Cat | b9af4a4 | 071fee4 | Why |
+|---|---|---|---|
+| A | 10.0 | 10.0 | `contracts/src` changed only by comment headers (12 files, 29 added comment lines) |
+| B | 3.7 | 9.7 | 4 Mediums and 5 Lows fixed; 1 new Low (L-6) |
+| C | 7.7 | 9.7 | Invariant suites for IfsoOutcomeResolver and FeeRouter, 500k calls each |
+| D | 9.0 | 9.0 | PostDeployCheck now compares bytecode and has a handed-over mode (already scored pre-launch); still no admin-event monitoring |
+| E | 6.25 | 9.25 | `contracts/bun.lock` committed (Hardhat runner removed); vendored helpers name their origin |
+| F | 9.0 | 9.0 | Semgrep job on `app/` now covers TypeScript, but its rules are TS/JS only; the in-scope Python (`app/scripts/release/lib/release.py`, `preflight.py`) has no analyser, and the item needs every stack |
+| G | 9.5 | 9.5 | SCOPE.md added, but the audited commit still has no tag (the item needs both) |
+| **Total** | **8.27 → 8.2** | **9.62 → 9.6** | |
 
-### M-2. Medium: one-source football questions let anyone drain the bond float, and a wrong proposal then only pages a human
-- **id:** `offchain|app/src/api/fixtures.ts|single-source-oracle`
-- **Location:** `app/src/api/fixtures.ts:81`, `app/src/workers/resolver.ts:55,246`,
-  `app/src/core/disputePolicy.ts:16,68-79`.
-- **Path:**
-  1. `findFixture` swallows a TheSportsDB failure or a team-name mismatch with
-     `findSportsDbEvent(...).catch(() => undefined)` (fixtures.ts:81). Its own comment marks naming differences as
-     unknown (fixtures.ts:88).
-  2. The question is planned and registered anyway, with `thesportsdb: null` (resolver.ts:55).
-  3. `gatherReports` then adds only The Odds API (resolver.ts:246). `agree` needs two sources, so `decision` stays null
-     for the whole question.
-  4. Because of that:
-     - the service never proposes;
-     - `classifyForeign` returns "unconfirmed" for every foreign proposal (disputePolicy.ts:16), even one the single
-       final source contradicts.
-  5. In the last-call slot, `planForeignDisputes` disputes until only one bond is left (disputePolicy.ts:73-78). With a
-     100 USDG bond and a 500 USDG float, that is 4 disputes. The panel upholds each true proposal and credits the
-     proposer with both bonds (IfsoOutcomeResolver.sol `panelResolve`).
-  6. Once the float is down to that last bond, a wrong proposal on a one-source question gets only `page/reserve`. If
-     no human disputes within the 2 h window, anyone can `finalize` the wrong outcome against every escrow on that
-     question.
-- **Trigger:** anyone.
-  1. Build a 1 USDG payment on a fixture whose TheSportsDB lookup fails (a 429 on the free key, or a naming
-     difference).
-  2. Propose the true result.
-  3. Collect a net 100 USDG per question from the float.
-- **Impact:**
-  - About 400 USDG of operator float lost per refill.
-  - After that, user funds on one-source questions depend on a human answering a page within 2 h.
-  - SECURITY.md row 79 accepts the R3-H1 residual as "rare". That reason does not cover one-source questions, where
-    the loss is certain, so this finding is rated open.
-- **Evidence:** `IFSO_POCS/M2-single-source-float-drain/lw1.singleSourceDrain.test.ts` passes, re-run in this audit.
-  The trace:
-  1. TheSportsDB answers 429, so `sportsDbEventId` is undefined.
-  2. The question gets 1 report.
-  3. An honest and a wrong proposal are both classed "unconfirmed".
-  4. The service disputes 4 times.
-  5. The wrong proposal gets `page/reserve`.
-- **Fix:**
-  - Refuse to plan or register a football question without a second-source id.
-  - Treat a single final source that disagrees with the proposal as contradicted.
-  - Keep one-source questions out of the last-call budget and page them instead.
-- **Regression test:** the PoC, asserting `build` refuses the fixture.
+## Findings status
 
-### M-3. Medium: the OUTCOME keeper pass has no wait back-off, so 500 rows on an unresolved question hide every later row
-- **id:** `offchain|app/src/workers/keeper.ts|outcome-scan-starvation`
-- **Location:** `app/src/workers/keeper.ts:260-274`.
-- **Path:**
-  1. `settleOutcome` selects `limit(500 + skippedIds("outcome"))` rows ordered by expiry ascending (keeper.ts:260-265).
-  2. Rows whose question is not FINAL or VOID hit `continue` (keeper.ts:274) without `noteWait`, so they take scan
-     slots on every tick.
-  3. OUTCOME rows behind them are never read. This is the R2-M3 shape; the R2-M3 fix covered PRICE rows only.
-- **Trigger:** anyone funds 500 payments of 1 USDG each (about 375 USDG in fees) on a question that stays unresolved,
-  with expiries earlier than the victim's. Examples: an M-2 one-source question, or a question in its 72 h panel window.
-- **Impact:** the victim's OUTCOME payment is never settled automatically. If nobody calls `settle` by hand, it refunds
-  at expiry instead of paying the winner. A losing challenger can use this to wait out the loss.
-- **Evidence:** `IFSO_POCS/M3-outcome-keeper-starvation/lw2.outcomeStarvation.test.ts` passes. With 500 rows ahead,
-  the victim is not settled in 20 ticks. The control, with 499 rows ahead, settles on tick 1.
-- **Fix:** call `noteWait("outcome", id)` for every row on a non-final question (or back off per question), so waiting
-  rows leave the page.
-- **Regression test:** the PoC: 500 rows on an open question plus 1 row on a final question settles in one pass.
-
-### M-4. Medium: the release user can become root and bypass the signature gate in `ifso-deploy-release`
-- **id:** `supply-chain|app/scripts/release/sbin/common.sh|git-config-in-untrusted-repo`
-- **Location:** `app/scripts/release/sbin/common.sh:40` (`GIT_CONFIG_VALUE_0='*'` for `safe.directory`),
-  `sbin/ifso-deploy-release:40-49`, `sudoers` line 5.
-- **Path:**
-  1. `ifso-release` may run `sudo ifso-deploy-release *`.
-  2. `REPO_DIR` is owned by the release user (install.sh:44).
-  3. Root runs `git -C $REPO_DIR ... verify-commit` with `safe.directory=*`. Git then honours the repo's
-     `.git/config`, and `gpg.ssh.program` is not pinned.
-  4. The release user plants `gpg.ssh.program=<own script>` and points the local `refs/remotes/origin/main` at a forged
-     commit.
-  5. The planted script runs as root and prints "Good signature", so `verify-commit` exits 0. This happens already in
-     `--validate`, before the arming checks.
-- **Trigger:** a compromised `ifso-release` account. That account runs `bun install` and the tests on queued code, so
-  a poisoned dependency is a plausible way in.
-- **Impact:** root on the VPS:
-  - every hot key: relayer, keeper, and the resolver with its bond float;
-  - `/etc/ifso/db.env`;
-  - the release tokens.
-
-  Escrowed funds are not reachable, because the server owns no contract.
-- **Evidence:** `IFSO_POCS/M4-release-user-root/run.sh`. `verify-commit` exits 0 with an empty `allowed_signers`, and
-  the planted program runs. The control, with the program pinned through `-c`, exits 1.
-- **Fix:**
-  - Verify in a root-owned bare mirror that root fetches itself.
-  - At minimum, pass `-c gpg.ssh.program=/usr/bin/ssh-keygen -c core.fsmonitor= -c core.hooksPath=/dev/null`.
-  - Stop exporting `safe.directory=*` to root's git calls.
-- **Regression test:** a sandbox case where the release user plants `gpg.ssh.program` and moves `origin/main`;
-  `--validate` must refuse.
-
-### Lows
-
-| # | Finding | Location | Path / impact | Fix |
+| # | Finding | Status | Re-check (code) | PoC on 071fee4 |
 |---|---|---|---|---|
-| L-1 | Intent IDOR | router.ts:264-269, 333-335, 374-377 | Intent UUIDs are visible in group-chat buttons (bot.ts:71, flow.ts:31,100). Anyone can call `build({intentId})`, which overwrites `escrowId`, `sender`, `params` and `state`, even after submit. Notifications and `/mine` then follow the wrong escrow, and `rememberSender` can bind the owner's chat to another address. Affects notifications only. | Never overwrite a built or submitted intent; bind to `from == intents.sender`; honour `expiresAt` |
-| L-2 | R3-L1 residual: unbudgeted reads | router.ts:260,411,494,500; app.ts:28,41,51; stats.ts:15 | These have no `readBudget`: `build` (4 RPC reads), `escrow`, `mine`, `question`, `/q/:file`, and `/readyz` (DB plus 2 RPC reads, and it echoes error text). `/stats/users?since=` caches per distinct `since` value, so varying the date forces a full scan each time. This burns the shared free RPC quota. | `readBudget` on each route; clamp `since` |
-| L-3 | Client check does not check intent | client/verifyBuild.ts:21-37; router.ts:286 | `verifyBuildAnswer` checks only internal consistency (nonce, id, total). It never compares amount, recipient, referee or kind with what the user asked for. Separately, a `referee` field from the caller overrides the referee typed in the text, while the preview shows the typed one. A compromised or buggy server or frontend can get a different create signed. | Pass the user's expected fields into `verifyBuildAnswer`; refuse a conflicting `referee` |
-| L-4 | Waits and failures share one back-off counter | keeper.ts:72-76, 87-92 | A row waits 12 to 150 times through the hold window. One transient send failure after that computes 2 min x 2^fails, which hits the 6 h cap. A late print can then miss expiry (minimum deadline + hold + 6 h) and refund instead of pay. This also blunts R3-L2. PoC `L-backoff-inflation`: the control retries after 3 min; with prior waits the retry comes only after 6 h. | Separate counters, or reset on the first real send |
-| L-5 | Root publishes any file | sbin/ifso-release-ghrelease:15,29,31 | `notes-file` is unconstrained. Root `cat`s it into a public GitHub Release, so for example `/etc/ifso/db.env` would be published. Needs a compromised release user, as in M-4. | Allow only `realpath` under `$RELEASE_HOME/notes/<tag>.md` |
+| M-1 | Relay-budget burn by replaying a used authorization | **fixed** | `relayBudgetVerified` runs `wouldSucceed` (expiry check plus `simulate`) before `signerBudget`, for both `submit` and `accept` (`router.ts`, a8490e1) | Original PoC: both replay tests fail (the decide relays, no "too many requests"). Regression `auditAG.m1.relayReplay.test.ts` passes |
+| M-2 | One-source football questions drain the bond float | **fixed** | `planFootballQuestion` and `registerPlanned` refuse a football question without a TheSportsDB id (`FootballRefused`); `classifyForeign` marks a proposal contradicted when a final source contradicts it and none backs it; the resolver passes the reports (f173e66) | The original PoC still passes because it calls internals that skip the fixed entry points (`footballRow`, `classifyForeign` with no reports). Through the real entry points the exploit is refused: `auditAG.m2.singleSource.test.ts` passes. What remains (a source down at last call) is the accepted R3-H1 row, which SECURITY.md now words for two-source questions |
+| M-3 | OUTCOME keeper scan starvation | **fixed** | Rows on a non-final question, and rows with no question id, call `noteWait`, and the page grows by the rows stepping aside (`keeper.ts`, e847b9d) | Original PoC fails (victim settled). Regression `auditAG.m3.outcomeStarvation.test.ts` passes |
+| M-4 | Release user to root through a planted `gpg.ssh.program` | **fixed** | `safe.directory=*` removed; `rgit` ignores global and system config and blanks program-launching keys; `verify_signed` copies the commit object into a fresh root-owned bare repo and verifies there with `ssh-keygen` pinned (97580f4) | `sandbox/hardening-cases.sh`: 18/18 pass on 071fee4, 8/18 against the `b9af4a4` sbin (the M-4 and L-5 cases fail there, as they should). The planted program never runs. Residual: L-6 |
+| L-1 | Intent IDOR | **fixed** | `intentForBuild` checks expiry, state (draft or built) and owner (linked wallet, else first builder); `submit` moves only the builder's own built intent (86b6b92) | `auditAG.l1.intentOwner.test.ts` passes |
+| L-2 | Unbudgeted reads | **fixed** | `readBudget` on `build`, `escrow`, `mine`, `question`; `/q/:file` and `/readyz` share the per-network read budget; `/readyz` cached 5 s and returns probe names only; `/stats/users` does one scan per minute whatever `since` is, and clamps it (68d6cce) | `auditAG.l2.readBudget.test.ts` passes |
+| L-3 | Client check does not check intent | **fixed** | `verifyBuildAnswer` takes `asked` (amount, recipient or link key, referee, kind, threshold, deadline, cancellable) and refuses a mismatch; the web create page passes it (f5cb7d2, 7e77cf3). The server still lets a `referee` field override a typed one, but a page that passes the typed referee now refuses that answer | `auditAG.l3.verifyIntent.test.ts` passes |
+| L-4 | Waits and failures share one back-off counter | **fixed** | Separate `waits` and `fails` counters (8e805d2) | Original PoC fails (retry after the base delay). Regression `auditAG.l4.backoffCounters.test.ts` passes |
+| L-5 | Root publishes any file | **fixed** | Notes must be `$RELEASE_HOME/.relnotes-<id>.md`, poster exactly `posters/<tag>.png`; both opened with `O_NOFOLLOW`, size- and type-checked, copied into a root-owned scratch dir first (3afdda2) | `hardening-cases.sh` L-5 cases pass |
+| Info | PostDeployCheck self-referential | **fixed** | Hard-coded 4663 constants, runtime bytecode compared with the build (immutables masked), `REQUIRE_HANDED_OVER=1`, `fold-txs.sh` writes tx hashes into the deployments JSON (071fee4); `contracts/test/PostDeployCheck.t.sol` | n/a |
+| **L-6** | **New: forged ancestry via a planted graft file** | **open** | See below | `L6-graft-downgrade/run.sh` (PoC bundle): exit 0 with the graft, exit 1 without |
 
-**Leads (no deduction):**
-- **Indexer reads `Created` state at the latest block** (indexer.ts:222-252). To settle it, pin `blockNumber:
-  log.blockNumber` and assert `status != NONE`.
-- **A rescheduled fixture may resolve instead of VOID** (theOddsApi.ts:44-46). To settle it, record one provider
-  reschedule and replay it through `resolver.replay.test.ts`.
-- **The resolver tick has no time budget, and disputes go out only after every source read** (resolver.ts:444-453). To
-  settle it, test that a slow CTF RPC tick still disputes inside the last-call slot.
+Leads (no deduction): indexer reads `Created` state at the latest block; a rescheduled fixture may resolve instead of
+VOID; the resolver tick has no time budget; new, from the independent check: the M-3 residual, where about 30k paid
+escrows that expire earlier could delay (not starve) a settlement, and anyone can still call `settle`. Info (unchanged): the `decideBySig` digest does not name the
+signer; server-signed rollbacks fail the owner-only `allowed_signers` gate (fails safe); `bun audit` still reports 9 high
+(hono, drizzle-orm, @trpc/server, zod), none judged reachable in the full run, versions unchanged, bump them anyway.
 
-**Info:**
-- The `decideBySig` digest does not name the signer. It is bound only through the per-signer nonce and `isValid`.
-- There is no ERC-6492 support for undeployed smart accounts. This affects liveness only; direct calls remain.
-- `PostDeployCheck` has these gaps (fix before mainnet):
-  - it reads its expectations from the JSON the deploy wrote;
-  - it has no bytecode comparison and no "handed over" mode;
-  - a real-chain deployments JSON has `txs: []` (Deploy.s.sol:172), which weakens Sourcify creation matching.
-- Server-signed cherry-picks and reverts fail an owner-only `allowed_signers`, so a rollback pauses the release
-  runner. This fails safe; document the server key.
-- `bun audit` reports 9 high (hono 4.8.4, drizzle-orm 0.44.2, @trpc/server 11.4.3, zod through viem). None is
-  reachable:
-  - no JWT, serveStatic, `sql.identifier` or `sql.raw` is used;
-  - CORS uses an explicit origin function;
-  - every middleware is mounted on `*`;
-  - Caddy caps the body at 1 MB.
+Notes from reading the fixes (no deduction):
+- M-1: `registerForFundedSender` now runs before the per-wallet charge. A replayed authorization belongs to an escrow that
+  already went through, so its question is already registered and this returns early.
+- M-3: a waiting OUTCOME row backs off up to 30 min, so settlement can start up to 30 min after a question is final. The
+  OUTCOME expiry already includes a settle margin, and anyone can call `settle`.
+- L-1: for a bot user with no linked wallet, the first wallet to build an intent owns it. Someone who sees the id in a
+  group chat can take it first, but binding the owner's notifications to their address means paying for the payment
+  themselves.
 
-  Bump them anyway.
-- grammy compares the Telegram webhook secret with `!==`. The secret path mitigates this.
-- `INCR` and `EXPIRE` are not atomic (rateLimit.ts:17-18).
-- RPC URL redaction strips only the userinfo part (rpc.ts:45).
-- Nothing monitors admin events on chain (pause, cap, feed, ownership).
-
-**Accepted / documented** (SECURITY.md "Accepted risks"):
-- Instant owner setters for new escrows.
-- No sequencer-uptime feed.
-- Panel trust.
-- R2-L2: late proposals.
-- The R3-H1 residual. Judged not to cover M-2.
-- The resolver bond float.
-- Relayer dependence. Weakened by M-1.
-- R3-I2: shared database role.
-- Wallet linking.
-
-**Prior fixes re-checked:**
-
-| Fix | Status | Evidence |
-|---|---|---|
-| R3-H1 | present | disputePolicy.ts:62-79, resolver.ts:338-342; Polymarket uses end + 24 h |
-| R3-M1 | present | router.ts:116-118, 457-463 |
-| R3-L1 | partial | see L-2 |
-| R3-L2 | present | keeper.ts:84-92, 243 |
-| R3-I1 | present | linkWallet.ts:14-22 |
-| R2-M1, R2-M2, R2-M3 (PRICE), R1-M5, R1-M6, R1-M8 | present | |
+### L-6. Low: a graft file planted in the release clone forges the ancestry checks, so an older signed revision can be deployed
+- **id:** `supply-chain|app/scripts/release/sbin/common.sh|graft-ancestry-forgery`
+- **Location:** `app/scripts/release/sbin/common.sh` (`rgit`), `sbin/ifso-deploy-release` (the `merge-base
+  --is-ancestor` and `rev-list` calls).
+- **Path:**
+  1. The release user owns `$REPO_DIR`, including `.git/info/grafts` and `remote.origin.url`.
+  2. `rgit` sets `GIT_NO_REPLACE_OBJECTS=1`, but git 2.56 still honours a graft file under it (it only prints a
+     deprecation hint).
+  3. The release user plants grafts that make the running revision a root and an older signed commit its child, and
+     points `origin` at a repo whose `main` is that older commit.
+  4. `--validate <older sha>` passes every check: "on private main", "descendant of the running revision", "1 commit
+     ahead", and the signature (it is a genuine owner-signed commit).
+  5. `ifso-deploy` checks out that sha from its own clone. The commit is real, so it is there.
+- **Trigger:** a compromised `ifso-release` account, the same precondition as M-4.
+- **Impact:** a deploy of any owner-signed commit the deploy clone fetched (`deploy.sh` fetches every branch), not only
+  an older one: for example a revision from before the M-1 fix, or an unmerged branch, or a migration mismatch
+  that takes the service down. No root and no unsigned code. Escrowed funds are not reachable, because the server owns no
+  contract.
+- **Evidence:** `L6-graft-downgrade/run.sh <sbin>`. The control (no graft) exits 1, which is a refusal. With the graft,
+  `ifso-deploy-release --validate` prints "ok: … 1 commit(s) ahead … all signed" and exits 0.
+- **Fix:** run the ancestry checks in a root-owned bare mirror that root fetches itself (as recommended for M-4). At
+  minimum, add `GIT_GRAFT_FILE=/dev/null` and `-c core.commitGraph=false` to `rgit`. A graft forged that way was refused in
+  the PoC (`merge-base` exit 1).
+- **Regression test:** add the PoC as a case in `sandbox/hardening-cases.sh`.
 
 ## Verified this run
 
 | Item | Result |
 |---|---|
-| Build | `forge build --sizes` ok (Foundry 1.8.4, solc 0.8.28); `bunx tsc --noEmit` ok |
-| Tests | **forge:** 160 passed, 0 failed, 3 skipped (fork tests skip without `RHC_FORK_RPC`), 18 suites. **bun:** 559 pass, 0 fail, 61 files, including the anvil (port 8645) and Postgres suites; none skipped |
-| Coverage | Contracts: 97.12% lines, 76.14% branches (`bash contracts/tools/coverage.sh`). App: 90.80% lines (`bun test --coverage`). Combined in-scope about 92%, scored as at least 85% |
-| Invariants / fuzz | `FOUNDRY_PROFILE=invariant forge test --match-test invariant`: 10,000 runs x 50 depth = 500,000 calls, 0 reverts, 5 invariants pass (EscrowInvariants). Fuzz: 512 runs with a fixed seed. **No invariant covers the resolver's bonds or the FeeRouter** |
-| Mutation / symbolic | `.audit-grade/mutation.md`: 122/122 (100%). Still current, because `contracts/src` is unchanged since c9ffd65. `halmos.md`: 13 proved |
-| Secrets | gitleaks over 220 commits on all refs: no leaks. hygiene_scan: no key files, `.env` is ignored, `.env.example` is present |
-| CI | See "CI coverage" below |
-| Public copy | `ifsodev/ifso@985d854` is signed (verified=true); its non-web tree is identical to `b9af4a4` |
-| Live check | **Not deployed** (pre-launch). Readiness below |
-
-**CI coverage** (`.github/workflows/ci.yml`):
-- **Jobs:**
-  - contracts: fmt, size, NatSpec, README-vs-deployments, owner-powers, tests, pins, gas snapshot, and a local deploy
-    plus PostDeployCheck;
-  - invariants;
-  - Slither, with an allowlist gate;
-  - app: tsc and `bun test`;
-  - halmos;
-  - coverage, failing below 90%;
-  - mutation, failing below 90%;
-  - gitleaks.
-- **Hardening:** every `uses:` pinned by SHA, `permissions: contents: read`, `persist-credentials: false`.
-- **Gaps:**
-  - There is no Semgrep or CodeQL for the TypeScript code.
-  - The app's anvil and Postgres suites skip on hosted CI.
-
-**Deploy readiness:**
-
-| Item | Status | Evidence |
-|---|---|---|
-| Armed guard | Present | `_requireArmed` needs the env flag plus `.armed-<chainid>` and refuses every chain except 31337 (`DeployBase.sol:92-104`); it is the first statement (`Deploy.s.sol:98`). Fork and cast helpers target 127.0.0.1 only |
-| Safe owner proof | Present | Proxy codehash, singleton, threshold of at least 2, no modules or guard, 7702 refused (`DeployBase.sol:135-152`) |
-| PostDeployCheck | Present, with gaps | Checks the owner or pending owner, creator, feeds, cap, fees, windows, bond and panel. Gaps under Info |
-| Sourcify verification | Present | `verify-sourcify.sh` |
-| Fork dry run | Present | `fork-dryrun.sh` |
-| Deployments JSON + README check | Present | `readme-deploy-check.sh` runs in CI; the README says not deployed |
+| Build | `forge build --sizes` ok (Foundry 1.8.4, solc 0.8.28); `bunx tsc --noEmit` exit 0 |
+| Tests | **forge:** 167 passed, 0 failed, 3 skipped (fork tests skip without `RHC_FORK_RPC`), 21 suites. **bun:** 582 pass, 0 fail, 68 files, with the anvil (port 8645) and Postgres suites running |
+| Invariants | `FOUNDRY_PROFILE=invariant forge test --match-test invariant`: EscrowInvariants, ResolverInvariants (`balance == bonds`, no double credit, right party credited, states only move forward) and FeeRouterInvariants (conservation, exact split, no stuck dust), each 10,000 runs x 50 = 500,000 calls, 0 reverts, all pass. They use the real resolver and router contracts on the USDG double |
+| Coverage | App: 92.4% lines (mean over `src/` files, `bun test --coverage`). Contracts: 97.12% lines (`coverage.md`; `contracts/src` code is unchanged). Combined about 93% |
+| Mutation / symbolic | `mutation.md`: 129/129 killed (100%), with resolver and FeeRouter mutants added. `halmos.md`: 13 proved (code unchanged). Neither was re-run here (about 8 min; `contracts/src` code is unchanged) |
+| Semgrep | `semgrep 1.181.0 --config .github/semgrep/rules.yml app` plus `semgrep-gate.py`: 8 findings, 8 allowlisted, 0 new, 0 stale. The rules are the repo's own offline rules (96 lines), not a registry ruleset |
+| Slither | Not re-run locally (crytic-compile picked the wrong framework). `contracts/src` changed only in comments, and the allowlist is keyed by detector and element, not by line |
+| Secrets | `gitleaks detect --config .github/gitleaks.toml` (the CI command): no leaks. Without the config, 20 generic-api-key hits, all public token addresses or test nonces. hygiene_scan: no key files; `.env` ignored; `.env.example` present |
+| Dependencies | `bun install --frozen-lockfile --ignore-scripts`: no changes for `app/` and `contracts/`. `bun audit`: 9 high, unchanged (Info) |
+| CI | The GitHub result for 071fee4 was not observed in this run (the commit is not synced yet). Every job's command above ran locally except Slither |
+| Live check | **Not deployed** (pre-launch) |
 
 ## Score
 
 | Cat | Score | Weight | Weighted | Why |
 |---|---|---|---|---|
-| A | 10.0 | 35% | 3.500 | Read every line of IfsoEscrow, IfsoConditionEvaluator, IfsoOutcomeResolver, FeeRouter, ECDSA, SignatureChecker, SafeTransferLib and EIP712. No finding above Info |
-| B | 3.7 | 15% | 0.555 | 10 − 4 Mediums (4.8) − 5 Lows (1.5) |
-| C | 7.7 | 15% | 1.155 | See "C in detail" below |
-| D | 9.0 | 10% | 0.900 | See "D in detail" below |
-| E | 6.25 | 5% | 0.313 | See "E in detail" below |
-| F | 9.0 | 10% | 0.900 | See "F in detail" below |
-| G | 9.5 | 10% | 0.950 | See "G in detail" below |
-| **Total** | | | **8.27 → 8.2** | 8.9 cap for open Mediums, not binding |
+| A | 10.0 | 35% | 3.500 | No finding above Info. Code unchanged since the full run's line-by-line read |
+| B | 9.7 | 15% | 1.455 | 10 − 1 open Low (L-6, 0.3) |
+| C | 9.7 | 15% | 1.455 | 1.5 build and tests · 1.2 coverage (about 93%, under 95) · 1.0 negative · 1.0 fuzz · **2.0 invariants** (every fund-holding module: escrow, resolver, FeeRouter, 500k calls each) · 1.0 mutation · 1.0 integration (anvil and real Postgres ran) · 0.5 Halmos · 0.5 CI |
+| D | 9.0 | 10% | 0.900 | As before. **0 monitoring:** no alert on ownership, pause, cap or feed events, and the runbook names no signer contacts |
+| E | 9.25 | 5% | 0.463 | **2.0 lockfiles** (`app/bun.lock`, `contracts/bun.lock`; CI installs `--frozen-lockfile`; Semgrep and Halmos pip installs `--require-hashes`) · 1.5 pins · 2.5 advisories (none reachable) · **0.75 install controls** (Bun's default allow-list only; no `minimumReleaseAge`, no scanner) · **1.0 vendored** (each helper and interface says it is the repo's own implementation, or which spec it re-declares) · 0.5 submodules · 1.0 toolchains |
+| F | 9.0 | 10% | 0.900 | 3.0 secrets · 0.5 env · 1.5 CI tests · **0 static analysis:** Slither covers Solidity and Semgrep covers TypeScript (`.github/semgrep/rules.yml`: every rule is `[typescript, javascript]` or `generic`), but nothing analyses the in-scope Python release runner, and the item asks for each stack present · 1.5 Actions hardened · 1.0 LICENSE and SECURITY.md · 1.0 toolchain pins · 0.5 dev environment |
+| G | 9.5 | 10% | 0.950 | As before. **0 audit readiness:** SCOPE.md lists the scope, but there is still no tag on the audited commit, and the item needs both |
+| **Total** | | | **9.62 → 9.6** | No cap: no open Critical, High or Medium; full run within 30 days; nothing live |
 
-**C in detail (7.7):**
-
-| Points | Item | Evidence |
-|---|---|---|
-| 1.5 | Build and tests | All pass |
-| 1.2 | Coverage | About 92% |
-| 1.0 | Negative tests | Governance, MutationKillers and Review* suites; app reviewR* |
-| 1.0 | Fuzz | |
-| **0** | **Stateful invariants** | The escrow has 500k calls, but the resolver (which holds bonds) and the FeeRouter have no solvency invariant, and the rubric needs every fund-holding module |
-| 1.0 | Mutation | |
-| 1.0 | Integration | The anvil and real-Postgres suites ran |
-| 0.5 | Halmos | |
-| 0.5 | CI | |
-
-**D in detail (9.0):**
-
-| Points | Item | Evidence |
-|---|---|---|
-| 1.5 | Roles table | SECURITY.md plus `owner-powers-check.sh` |
-| 1.5 | Multisig owner | Safe 2-of-3 |
-| 1.5 | Upgrades | Contracts are immutable |
-| 1.0 | Pause with exits open | `test_Pause_GatesOnlyNewEntries` (IfsoEscrow.t.sol:176), `test_Cap_LoweredDoesNotBlockExits`, invariant R6 |
-| 1.0 | Bounded setters | |
-| 1.0 | Deploy scripts | |
-| 1.5 | Post-deploy script | Present (pre-launch) |
-| **0** | **Monitoring** | No alert on ownership, pause, cap or feed events; the runbook has no signer contacts |
-
-**E in detail (6.25):**
-
-| Points | Item | Evidence |
-|---|---|---|
-| **0** | **Lockfiles** | `contracts/package.json` has none |
-| 1.5 | Exact pins | |
-| 2.5 | Advisories | None reachable |
-| 0.75 | Install controls | Only Bun's default allow-list; no `minimumReleaseAge`, no scanner |
-| **0** | **Vendored code names source and version** | `contracts/README.md:3` calls `src/libraries` and `src/utils` vendored; none of ECDSA, SafeTransferLib, SignatureChecker, EIP712, ReentrancyGuard or Owned2Step names a source or version (independent check) |
-| 0.5 | No submodules | |
-| 1.0 | Toolchains clean | |
-
-**F in detail (9.0):**
-
-| Points | Item | Evidence |
-|---|---|---|
-| 3.0 | Secrets | |
-| 0.5 | Env handling | |
-| 1.5 | CI tests | |
-| **0** | **Static analysis** | Slither only; no Semgrep or CodeQL for the TypeScript stack |
-| 1.5 | Actions hardened | |
-| 1.0 | LICENSE and SECURITY.md | |
-| 1.0 | Toolchain pins | `foundry.toml` pins solc, optimizer, evm_version, bytecode_hash; fixed pragmas; Bun 1.4.4 pinned with checksum in `app/scripts/server/provision.sh:35` (asserted by `deploy-local.test.sh`) and in CI. Corrected after the independent check |
-| 0.5 | Dev environment | |
-
-**G in detail (9.5):**
-
-| Points | Item | Evidence |
-|---|---|---|
-| 1.5 | README | Build, test and deploy |
-| 1.5 | Architecture and actors | |
-| 2.0 | Invariants | INVARIANTS.md, linked to the tests |
-| 1.5 | Threat model | THREAT-MODEL.md, with residual risks |
-| 1.0 | NatSpec | CI gate |
-| 1.0 | Addresses | Pre-launch |
-| 1.0 | Audit history | |
-| **0** | **Audit tag** | The repo has no tags |
-
-**Independent check:** a fresh agent recomputed 8.27 → 8.2, upheld M-1 to M-4 (re-ran the PoCs) and found no missed Medium+ (one candidate Low: `prepareQuestion` lets anyone make the resolver key pay gas for planned questions, not added: unconfirmed). Adopted: E vendored-source item 1.0 → 0; F toolchain 0 → 1.0 (provision.sh pins Bun 1.4.4). Rejected: scoring coverage on contracts only (8.3); the rubric's in-scope core includes the off-chain service, so the combined ~92% stands. Kept M-2 open, not accepted (SECURITY.md row 79's "rare" reason does not cover one-source football questions); counting it accepted would give 8.3-8.4.
+**Independent check:** a fresh agent recomputed 9.62 → 9.6 and upheld the M-1 to M-4 fixes (no bypass found) and L-6 at Low (re-ran the PoC: control exit 1, graft exit 0). It found nothing Medium or above in the fix diff. Adopted: F static analysis 1.0 → 0 (Python in scope, Semgrep rules TS/JS only), which moves the total from 9.72 to 9.62. Also adopted: L-6 is wider than first written: the release user controls `origin`, and `deploy.sh` fetches every branch, so any owner-signed commit on any branch qualifies; the fix must also disable `commit-graph`. Added as a Lead: the M-3 residual, where about 30k paid escrows that expire earlier could delay (not starve) a settlement, and anyone can still `settle`. Spot-checks confirmed: C invariants 2.0 (the agent re-ran both new suites, 500k calls each), E vendored 1.0, E lockfiles 2.0.
 
 ## Path to 9+ (ranked by points per hour)
 
-The four Mediums come first. While any Medium is open, the 8.9 cap stops the other items from lifting the grade past
-8.9.
+Already above 9.5. What is left:
 
 | # | Change | Size | Points | Projected |
 |---|---|---|---|---|
-| 1 | M-1: charge the signer budget only after `simulate` (or check `authorizationState` and `validBefore`). The PoC flips | S | +0.18 | 8.45 |
-| 2 | M-3: `noteWait` for each non-final OUTCOME row (or per question). The PoC flips | S | +0.18 | 8.63 |
-| 3 | M-4: pin `gpg.ssh.program`, drop `safe.directory=*`, verify in a root-owned mirror. The sandbox case refuses | S | +0.18 | 8.81 |
-| 4 | M-2: refuse one-source football questions, and count a single contradicting final source as contradicted. The PoC flips | M | +0.18 | 8.99 |
-| 5 | Run Semgrep (or CodeQL) on `app/` in CI, SHA-pinned, with an allowlist like Slither's | S | +0.10 | 9.09 |
-| 6 | Commit a lockfile for `contracts/package.json`, or delete the optional Hardhat runner | S | +0.10 | 9.19 |
-| 7 | Invariant suite for IfsoOutcomeResolver (`balance == Σ claimableBond + Σ live bonds`, no double credit) and FeeRouter (`distribute` conserves), at least 100k calls, listed in INVARIANTS.md | M | +0.30 | 9.49 |
-| 8 | Header on every vendored helper naming its origin (own implementation or upstream + version/commit) | S | +0.05 | 9.54 |
-| 9 | Tag the audited commit (`audit-2026-10-31`) and list the scope files in `.audit-grade/` | S | +0.05 | 9.59 |
+| 1 | Semgrep on the Python release runner (`app/scripts/release/lib/*.py`): add Python rules, or the hash-locked `p/python` ruleset vendored offline, under the same allowlist gate | S | +0.10 | 9.72 |
+| 2 | Tag the audited commit (`audit-2026-10-31`). SCOPE.md already lists the files | S | +0.05 | 9.77 |
+| 3 | L-6: `GIT_GRAFT_FILE=/dev/null` and `-c core.commitGraph=false` in `rgit`, or ancestry checks in a root-owned mirror; add the PoC to `hardening-cases.sh` | S | +0.045 | 9.82 |
+| 4 | `bunfig.toml` with `minimumReleaseAge` in `app/` and `contracts/` (and `--ignore-scripts` in CI and deploy) | S | +0.04 | 9.85 |
+| 5 | Admin-event monitor (ownership, pause, cap, feed, fee changes on all four contracts) wired into `ops/monitors.ts` alerts, plus signer contacts in the runbook | M | +0.10 | 9.95 |
+| 6 | Combined line coverage to 95% (gaps: `api/claim.ts`, `sources/*`, `workers/pyth.ts`, `workers/deps.ts`) | M | +0.045 | 10.0 |
 
-**Later:**
-- L-1 to L-5: +0.045 each, S.
-- Admin-event monitor and runbook contacts: +0.10, M.
-- `bunfig.toml` with `minimumReleaseAge`, plus `--ignore-scripts` in CI and deploy: +0.04, S.
-- Combined coverage to 95%: +0.045, M.
+**No points, still worth doing:** bump hono, drizzle-orm, @trpc/server and zod past their advisories. Settle the three
+Leads with the tests named in the first report.
 
 **Before mainnet:**
-- Give PostDeployCheck hard-coded 4663 constants, a `REQUIRE_HANDED_OVER` mode and a bytecode comparison.
-- Add a mainnet deploy wrapper that folds the tx hashes into the deployments JSON.
-- Run `verify` once anything is live.
+- Run the deploy through `deploy-mainnet.sh` so the tx hashes are folded into the deployments JSON.
+- Run `PostDeployCheck` with `REQUIRE_HANDED_OVER=1` after the Safe accepts ownership.
+- Run audit-grade `verify` once anything is live. Until it passes, any live deployment caps the grade at 7.0.
 
 ## Paste-ready prompt for the dev
 
 ```
-Read backend/.audit-grade/REPORT.md (audit of b9af4a4). On branch audit-fixes in a fresh worktree, fix M-1, M-3, M-4,
-M-2 in that order, one commit each. For each one, first copy its PoC from the PoC bundle into
-app/test/ as a regression test, see it fail on the current behaviour, then fix and see it pass. Then do Path items 5-9: a SHA-pinned Semgrep job over app/ with an exact-match
-allowlist; a lockfile for contracts/package.json (or remove it); a Foundry invariant suite for IfsoOutcomeResolver
-bonds and FeeRouter conservation at 10,000 x 50, linked in contracts/INVARIANTS.md; source/version headers on the vendored helpers; tag audit-2026-10-31. Never touch
-private keys or send any transaction to a real chain; tests run on local anvil/mocks only. Run forge test, the
-invariant profile and IFSO_TEST_ANVIL_PORT=<free port> bun test before each push, then confirm CI is green and ask for
-a rescore.
+Read .audit-grade/REPORT.md (rescore of 071fee4, 9.6/10). In a fresh worktree: (0) extend the Semgrep job to the
+Python release runner (app/scripts/release/lib) with an offline ruleset under the same allowlist gate; (1) fix L-6 in
+app/scripts/release/sbin/common.sh: make rgit ignore grafts and commit-graph (GIT_GRAFT_FILE=/dev/null,
+-c core.commitGraph=false), or move the ancestry checks into a root-owned bare mirror root fetches itself; first add the
+L-6 PoC as a case in app/scripts/release/sandbox/hardening-cases.sh, see it fail, then fix and see it pass. (2) Add
+bunfig.toml with minimumReleaseAge to app/ and contracts/. (3) Add an admin-event monitor for OwnershipTransferred,
+Paused/Unpaused, cap, feed and fee events on all four contracts into ops/monitors.ts with a test, and signer contacts in
+the runbook. One signed conventional commit each. Never touch private keys or send a transaction to a real chain. Run
+forge test, the invariant profile, IFSO_TEST_ANVIL_PORT=<free port> bun test and the hardening cases before each push,
+then ask the owner to tag the audited commit and request a rescore.
 ```
 
 ---
