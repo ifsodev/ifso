@@ -86,6 +86,26 @@ jobs:
         working-directory: contracts
         run: python3 tools/slither-gate.py slither-report.json slither.allow
 
+  semgrep:
+    # static analysis of app/ with our own offline rules (.github/semgrep/rules.yml); exact-match allowlist like Slither's
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with: { python-version: "3.12" }
+      - name: semgrep 1.181.0 (hash-locked install)
+        run: |
+          python -m venv "$RUNNER_TEMP/semgrep-venv"
+          "$RUNNER_TEMP/semgrep-venv/bin/pip" install --only-binary=:all: --require-hashes -r .github/semgrep/requirements.txt
+      - name: scan app/
+        env: { SEMGREP_SEND_METRICS: "off", SEMGREP_ENABLE_VERSION_CHECK: "0" }
+        run: |
+          "$RUNNER_TEMP/semgrep-venv/bin/semgrep" --config .github/semgrep/rules.yml --metrics=off --disable-version-check --json --quiet app > "$RUNNER_TEMP/semgrep-report.json"
+      - name: exact-match allowlist gate
+        run: python3 .github/scripts/semgrep-gate.py "$RUNNER_TEMP/semgrep-report.json" .github/semgrep/semgrep.allow .
+
   app:
     runs-on: ubuntu-latest
     timeout-minutes: 15

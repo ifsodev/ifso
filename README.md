@@ -70,7 +70,7 @@ password file each; a raw private key in the environment is accepted only on a l
 | Fork | `RHC_FORK_RPC=<rpc> forge test --match-path 'test/fork/*'` | Real USDG, Chainlink and Stock Token state; skipped without the variable |
 | App | `cd app && bun test` | Parser, builder, signatures, relay, API, bot copy, keeper, price watcher and indexer on a private anvil |
 | Types | `cd app && bunx tsc --noEmit` | Type check |
-| Extra checks in CI | See `.github/workflows/` | Format, size limit, NatSpec, owner powers listed in `SECURITY.md`, Slither allowlist, mutation score, Halmos proofs, coverage, secret scan, banned-word copy test |
+| Extra checks in CI | See `.github/workflows/` | Format, size limit, NatSpec, owner powers listed in `SECURITY.md`, Slither allowlist, Semgrep on `app/` (own rules, exact-match allowlist), mutation score, Halmos proofs, coverage, secret scan, banned-word copy test |
 
 ## Trust assumptions and owner powers
 

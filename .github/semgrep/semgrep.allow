@@ -1,0 +1,12 @@
+# Semgrep exact-match allowlist (.github/scripts/semgrep-gate.py). One line per finding: "<rule> <file>: <source line>  # reason".
+# Scope: app/src and app/scripts, rules in rules.yml. Never silence a finding with a nosemgrep comment in source.
+# Every line was reviewed on 2026-10-31; a new finding or a stale line fails CI.
+
+ifso-fs-dynamic-path app/src/chain/keys.ts: export function loadHotKey(name: HotKeyName, env: KeyEnv, readFile: (p: string) => string = (p) => readFileSync(p, "utf8")): PrivateKeyAccount | undefined {  # the paths come from the operator-set KEYSTORE / PASSWORD_FILE variables read at start-up, never from a request; the reader is injectable for tests
+ifso-fs-dynamic-path app/src/chain/keys.ts: const password = readFile(pwPath).replace(/\r?\n$/, "");  # the paths come from the operator-set KEYSTORE / PASSWORD_FILE variables read at start-up, never from a request; the reader is injectable for tests
+ifso-fs-dynamic-path app/src/chain/keys.ts: return privateKeyToAccount(decryptKeystore(readFile(ksPath), password));  # the paths come from the operator-set KEYSTORE / PASSWORD_FILE variables read at start-up, never from a request; the reader is injectable for tests
+ifso-regexp-from-variable app/src/client/copyRules.ts: return BANNED_WORDS.flatMap((re) => text.match(new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g")) ?? []);  # the pattern is one of the module's own BANNED_WORDS constants re-created with the global flag, no input reaches it
+ifso-regexp-from-variable app/src/core/parser.ts: const HEAD = new RegExp(  # built from constant fragments only (AMOUNT and literals); the user text is matched against it, never put into it
+ifso-env-outside-config app/src/db/migrate.ts: const url = process.env.DATABASE_URL ?? "postgres://ifso:ifso@localhost:5442/ifso";  # stand-alone migration entry point (import.meta.main); DATABASE_URL is the same variable config.ts validates for the services
+ifso-fetch-dynamic-url app/src/sources/http.ts: const res = await fetch(url, { ...init, signal: ctrl.signal, headers: { accept: "application/json", ...(init?.headers ?? {}) } });  # every caller passes a URL from the validated config or a fixed source table; no request field reaches it, and failures log only the host
+ifso-fetch-dynamic-url app/src/workers/pyth.ts: const res = await fetch(url, { headers: deps.env.PYTH_API_KEY ? { "x-api-key": deps.env.PYTH_API_KEY } : {} });  # base is PYTH_HERMES_URL from the validated config; priceId is a typed Hex and ts an integer

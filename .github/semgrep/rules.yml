@@ -1,0 +1,96 @@
+# Semgrep rules for app/ (the Bun/TypeScript backend). Local, offline: no registry, no account, no telemetry.
+# Run by .github/workflows/ci.yml (job "semgrep") through .github/scripts/semgrep-gate.py, which compares every finding with
+# semgrep.allow (exact match, reason required, stale lines fail). Never silence a finding by editing source with a
+# nosemgrep comment: list it in semgrep.allow with a reason, or fix it.
+rules:
+  - id: ifso-no-dynamic-code
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: eval / new Function / string timers run attacker-influenced strings as code
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+      - pattern: setTimeout("...", ...)
+      - pattern: setInterval("...", ...)
+    paths: { include: ["/app/src/", "/app/scripts/"] }
+  - id: ifso-no-shell-exec
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: spawning a shell or process from application code; the API, bot and workers never need it
+    pattern-either:
+      - pattern: import $X from "node:child_process"
+      - pattern: import $X from "child_process"
+      - pattern: import {...} from "node:child_process"
+      - pattern: import {...} from "child_process"
+      - pattern: Bun.spawn(...)
+      - pattern: Bun.spawnSync(...)
+      - pattern: Bun.$`...`
+    paths: { include: ["/app/src/"], exclude: ["/app/src/**/*.test.ts"] }
+  - id: ifso-sql-raw
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: raw / unsafe SQL text; use parameters
+    pattern-either:
+      - pattern: $DB.unsafe(...)
+      - pattern: sql.raw(...)
+    paths: { include: ["/app/src/"] }
+  - id: ifso-regexp-from-variable
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: RegExp built from a non-literal (ReDoS / injection)
+    patterns:
+      - pattern: new RegExp($X, ...)
+      - pattern-not: new RegExp("...", ...)
+    paths: { include: ["/app/src/"] }
+  - id: ifso-math-random
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: Math.random is not a secret source; ids, nonces and keys use crypto.randomUUID / getRandomValues
+    pattern: Math.random()
+    paths: { include: ["/app/src/"] }
+  - id: ifso-tls-verification-off
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: TLS certificate verification disabled
+    pattern-either:
+      - pattern: "{..., rejectUnauthorized: false, ...}"
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+    paths: { include: ["/app/src/", "/app/scripts/"] }
+  - id: ifso-env-outside-config
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: environment is read through the validated config module (src/config), not process.env / Bun.env at the call site
+    pattern-either:
+      - pattern: process.env.$X
+      - pattern: process.env[...]
+      - pattern: Bun.env.$X
+    paths: { include: ["/app/src/"], exclude: ["/app/src/config/", "/app/src/**/*.test.ts"] }
+  - id: ifso-hardcoded-private-key
+    languages: [generic]
+    severity: ERROR
+    message: a 32-byte hex literal assigned to a key-like name
+    pattern-regex: (?i)(private[_-]?key|secret|mnemonic|seed)\w*["']?\s*[:=]\s*["']0x[0-9a-f]{64}["']
+    paths: { include: ["/app/src/"], exclude: ["/app/src/**/*.test.ts"] }
+  - id: ifso-fetch-dynamic-url
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: fetch to a URL built at runtime; check that no caller-controlled host can reach it (SSRF)
+    patterns:
+      - pattern: fetch($U, ...)
+      - pattern-not: fetch("...", ...)
+      - pattern-not: fetch(`${$BASE}/...`, ...)
+    paths: { include: ["/app/src/"], exclude: ["/app/src/**/*.test.ts"] }
+  - id: ifso-fs-dynamic-path
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: file read / write with a non-literal path (path traversal if any part is caller-controlled)
+    patterns:
+      - pattern-either:
+          - pattern: Bun.file($P, ...)
+          - pattern: Bun.write($P, ...)
+          - pattern: readFileSync($P, ...)
+          - pattern: writeFileSync($P, ...)
+          - pattern: readFile($P, ...)
+      - pattern-not: Bun.file("...", ...)
+      - pattern-not: Bun.write("...", ...)
+    paths: { include: ["/app/src/"], exclude: ["/app/src/**/*.test.ts"] }
