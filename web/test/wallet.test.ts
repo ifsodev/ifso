@@ -54,3 +54,15 @@ describe("status wording and conditions", () => {
     expect(describeOnChainCondition({ kind: 4 })).toMatch(/two hours|2 hours/);
   });
 });
+
+import { linkDomain, linkWalletMessage, parseLinkFragment } from "@/vendor/ifso/client";
+describe("/link fragment", () => {
+  test("token and expiry are read from the fragment; the message names the site and the expiry", () => {
+    const tok = "A".repeat(43);
+    expect(parseLinkFragment(`#${tok}.1800000000`)).toEqual({ token: tok, expiresAt: 1800000000 });
+    expect(parseLinkFragment(`#${tok}`)).toBeUndefined();
+    const m = linkWalletMessage(tok, { domain: linkDomain("https://ifso.tech"), expiresAt: 1800000000 });
+    expect(m).toContain("ifso.tech");
+    expect(m).toContain("Expires: 2027-01-15T08:00:00Z");
+  });
+});
