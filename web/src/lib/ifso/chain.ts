@@ -20,7 +20,7 @@ export async function escrowNonce(escrow: Address, owner: Address): Promise<bigi
 }
 
 /** A transaction the visitor's own wallet sends. Gas = estimate x 1.3. */
-export async function sendWithMargin(session: WalletSession, call: { address: Address; abi: Abi; functionName: string; args: readonly unknown[] }): Promise<Hex> {
-  const estimate = await publicClient().estimateContractGas({ ...call, account: session.address } as never);
+export async function sendWithMargin(session: WalletSession, call: { address: Address; abi: Abi; functionName: string; args: readonly unknown[] }, reader: Pick<PublicClient, "estimateContractGas"> = publicClient()): Promise<Hex> {
+  const estimate = await reader.estimateContractGas({ ...call, account: session.address } as never);
   return session.client.writeContract({ ...call, account: session.address, chain: viemChain, gas: gasWithMargin(estimate) } as never);
 }

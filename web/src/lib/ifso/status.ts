@@ -21,7 +21,7 @@ export const usdgText = (raw: string | bigint) => {
 
 export const when = (iso: string | number | Date) => {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZoneName: "short" }).format(d);
+  return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(d);
 };
 
 export const same = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();

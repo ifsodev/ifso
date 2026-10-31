@@ -61,6 +61,7 @@ export function PaymentComposer({ draft, onSave, onCancel, onCreated }: { draft?
     setV({ ...v, ...patch });
   };
   const recipientOk = v.recipient.trim() === "" || isAddressLike(v.recipient);
+  const referee = kind === "referee" ? (v.detail.match(/0x[0-9a-fA-F]{40}/)?.[0] as Address | undefined) : undefined;
   const open = parsed && parsed.questions.length === 0 && parsed.errors.length === 0 && parsed.ok;
   const stockBlocked = kind === "price" && geo && !geo.stockPriceConditionsAllowed;
 
@@ -76,12 +77,13 @@ export function PaymentComposer({ draft, onSave, onCancel, onCreated }: { draft?
   async function review() {
     if (!wallet.session) return wallet.openPicker();
     if (!open || !recipientOk) return;
+    if (kind === "referee" && !referee) return setNote("Put the referee's full wallet address in the condition details.");
     setWorking(true);
     setNote("");
     try {
       const ci = info ?? (await resolveChainInfo(api, config));
       setInfo(ci);
-      const b = await buildAndVerify({ api, chainId: ci.chainId, escrow: ci.escrow, usdg: ci.usdg, origin: location.origin }, { text, sender: wallet.session.address, recipient: isAddressLike(v.recipient) ? (v.recipient.trim() as Address) : undefined, cancellable: v.cancel, tzOffsetMin: tz });
+      const b = await buildAndVerify({ api, chainId: ci.chainId, escrow: ci.escrow, usdg: ci.usdg, origin: location.origin }, { text, sender: wallet.session.address, recipient: isAddressLike(v.recipient) ? (v.recipient.trim() as Address) : undefined, referee, cancellable: v.cancel, tzOffsetMin: tz });
       setBuilt(b);
       setAgreed(false);
       setStep("review");
@@ -100,10 +102,12 @@ export function PaymentComposer({ draft, onSave, onCancel, onCreated }: { draft?
       const s = wallet.session;
       const r = await signAndSubmit(
         { api, chainId: info.chainId, escrow: info.escrow, usdg: info.usdg, origin: location.origin, sign: (t) => signTyped(s, t) },
-        { text, sender: s.address, recipient: isAddressLike(v.recipient) ? (v.recipient.trim() as Address) : undefined, cancellable: v.cancel, tzOffsetMin: tz },
+        { text, sender: s.address, recipient: isAddressLike(v.recipient) ? (v.recipient.trim() as Address) : undefined, referee, cancellable: v.cancel, tzOffsetMin: tz },
         built,
       );
       setResult(r);
+      built.secret?.fill(0);
+      setBuilt(undefined);
       setStep("done");
       onCreated();
     } catch (e) {
