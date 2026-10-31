@@ -46,7 +46,19 @@ export async function buildAndVerify(deps: Omit<CreateDeps, "sign">, input: Crea
     cancellable: input.cancellable,
     tzOffsetMin: input.tzOffsetMin,
   });
-  verifyBuildAnswer(answer as never, { from: input.sender, chainId: deps.chainId, escrow: deps.escrow, usdg: deps.usdg });
+  // Compare the answer with every field this page knows on its own (audit L-3); the amount and condition come from the
+  // service's parse of the text and are shown in the review before anything is signed.
+  verifyBuildAnswer(answer as never, {
+    from: input.sender,
+    chainId: deps.chainId,
+    escrow: deps.escrow,
+    usdg: deps.usdg,
+    asked: {
+      ...(input.recipient ? { recipient: input.recipient } : { linkKey: linkKeyAddress(secret!) }),
+      ...(input.referee ? { referee: input.referee } : {}),
+      ...(input.cancellable !== undefined ? { cancellable: input.cancellable } : {}),
+    },
+  });
   return { answer, secret };
 }
 

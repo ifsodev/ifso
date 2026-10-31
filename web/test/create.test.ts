@@ -19,8 +19,8 @@ describe("create flow", () => {
   });
 
   test("signed payload equals the build answer (after verifyBuildAnswer), and the link carries the secret only in the fragment", async () => {
-    const answer = realBuildAnswer();
-    const api = { build: vi.fn(async () => answer), submit: vi.fn(async () => ({ txHash: SIG, id: answer.id })) };
+    let answer = realBuildAnswer();
+    const api = { build: vi.fn(async (i: Record<string, unknown>) => (answer = realBuildAnswer({ linkKey: i.linkKey as never }))), submit: vi.fn(async () => ({ txHash: SIG, id: answer.id })) };
     const sign = vi.fn(async () => SIG);
     const d = deps(api, sign);
     const input = { text: "/ifso link 20 on nov 1", sender: SENDER };
@@ -35,15 +35,19 @@ describe("create flow", () => {
     expect(JSON.stringify([api.build.mock.calls, api.submit.mock.calls])).not.toContain(out.claimUrl!.split("#1.")[1]!);
   });
 
-  test("a tampered build answer is refused before anything is signed", async () => {
-    const good = realBuildAnswer();
-    const bad = structuredClone(good);
-    bad.authorization.typedData.message.to = getAddress("0x9999999999999999999999999999999999999999");
-    const api = { build: vi.fn(async () => bad), submit: vi.fn() };
+  test("an answer for a different claim link than the one made here is refused (audit L-3)", async () => {
+    const api = { build: vi.fn(async () => realBuildAnswer({ linkKey: getAddress("0x8888888888888888888888888888888888888888") })), submit: vi.fn() };
     await expect(buildAndVerify(deps(api), { text: "/ifso link 20 on nov 1", sender: SENDER })).rejects.toThrow(/nothing was signed/);
-    const wrongAmount = structuredClone(good);
-    wrongAmount.authorization.typedData.message.value = "1";
-    const api2 = { build: vi.fn(async () => wrongAmount), submit: vi.fn() };
+    expect(api.submit).not.toHaveBeenCalled();
+  });
+
+  test("a tampered build answer is refused before anything is signed", async () => {
+    // the answer carries the link key this page made, so only the tampered field can be the reason for the refusal
+    const bad = (i: Record<string, unknown>) => { const a = realBuildAnswer({ linkKey: i.linkKey as never }); a.authorization.typedData.message.to = getAddress("0x9999999999999999999999999999999999999999"); return a; };
+    const api = { build: vi.fn(async (i: Record<string, unknown>) => bad(i)), submit: vi.fn() };
+    await expect(buildAndVerify(deps(api), { text: "/ifso link 20 on nov 1", sender: SENDER })).rejects.toThrow(/nothing was signed/);
+    const wrongAmount = (i: Record<string, unknown>) => { const a = realBuildAnswer({ linkKey: i.linkKey as never }); a.authorization.typedData.message.value = "1"; return a; };
+    const api2 = { build: vi.fn(async (i: Record<string, unknown>) => wrongAmount(i)), submit: vi.fn() };
     await expect(buildAndVerify(deps(api2), { text: "/ifso link 20 on nov 1", sender: SENDER })).rejects.toThrow(/nothing was signed/);
     expect(api.submit).not.toHaveBeenCalled();
   });
