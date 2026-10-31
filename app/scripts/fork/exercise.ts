@@ -48,6 +48,8 @@ async function m<T = any>(name: string, input: unknown, headers: Record<string, 
   if (!r.ok) throw new ApiError(j.error?.data?.code ?? String(r.status), j.error?.message ?? JSON.stringify(j));
   return j.result.data;
 }
+/** stop a worker and let any pass already in flight finish (a pass reads chain time per sub-step, a warp mid-pass would mix clocks) */
+const pauseWorker = async (name: string) => { await admin("/worker", { name, on: false }); await sleep(10_000); };
 const admin = (path: string, body?: unknown) => fetch(`${A.admin}${path}`, body ? { method: "POST", body: JSON.stringify(body) } : undefined).then((r) => r.json());
 
 // ------------------------------------------------------------------ report plumbing
@@ -557,7 +559,7 @@ await step("Claim", "passkey-style account and counterfactual account were paid 
 });
 
 // ---------------------------------------------------------------- stage: past the 3 h price deadlines and the first kickoff + 2h30
-await admin("/worker", { name: "resolver", on: false }); // so a stranger can propose first on two questions
+await pauseWorker("resolver"); // so a stranger can propose first on two questions
 const eplT = await (async () => {
   const rows = await q<any[]>("mine", { address: adr("alice") });
   return rows.find((r) => r.id === oc.win!.id.toString());
@@ -663,10 +665,10 @@ await step("Price", "TOUCH: price crosses the level inside the window; price wat
 await step("Price", "AT_DEADLINE on a controlled feed, fresh print before the deadline: TRUE, then a pause with a phase change", async () => {
   const mm = await apiCreate("alice", `/ifso ${carolA} 20 if eth is at or above 4000 by in 2 hours`);
   const dl = Number(paramsFromJson(mm.answer.params).condition.deadline);
+  const before = await bal(carolA);
   await mock.push(4100_00000000n, dl - 600);
   await warpTo(dl + 120);
   await mock.push(2000_00000000n, dl + 130); // after the deadline: must not decide it
-  const before = await bal(carolA);
   await waitStatus(mm.id, S.RELEASED, 120_000);
   eq((await bal(carolA)) - before, U(20), "carol received");
 });
@@ -735,7 +737,8 @@ await step("Pause", "owner pauses creation: create and accept are refused, every
 
 // ---------------------------------------------------------------- expiry: refunds primary / alternate / unaccepted / VOID
 await step("Refund", "keeper OFF; time passes beyond the 30 day expiry and the unaccepted window", async () => {
-  await admin("/worker", { name: "keeper", on: false });
+  chal.unaccepted2 = await apiCreate("alice", `/challenge ${bobA} 20 vs 10 if referee ${erinA} decides`);
+  await pauseWorker("keeper");
   const e = await getEscrow(redirected[0]!.id);
   await warpTo(Number(e.expiry) + 120);
 });
@@ -752,9 +755,12 @@ await step("Refund", "anyone refunds to the ALTERNATE address (gus) when the pri
 });
 await step("Refund", "unaccepted challenge: refund by anyone after the accept window (not accepted)", async () => {
   const before = await bal(adr("alice"));
-  await send("dave", ESCROW, ifsoEscrowAbi, "refund", [chal.unaccepted!.id, false, false]);
-  eq(await status(chal.unaccepted!.id), S.RETURNED, "status");
+  await send("dave", ESCROW, ifsoEscrowAbi, "refund", [chal.unaccepted2!.id, false, false]);
+  eq(await status(chal.unaccepted2!.id), S.RETURNED, "status");
   eq((await bal(adr("alice"))) - before, U(20), "refund");
+});
+await step("Refund", "an unaccepted challenge was already refunded by the keeper when its accept window closed", async () => {
+  eq(await status(chal.unaccepted!.id), S.RETURNED, "status");
 });
 await step("Refund", "accepted challenge nobody decided: VOID at expiry returns each side its own (acceptor to its refund address)", async () => {
   const fBefore = await bal(adr("fran")), aBefore = await bal(adr("alice"));
@@ -765,6 +771,7 @@ await step("Refund", "accepted challenge nobody decided: VOID at expiry returns 
 });
 await admin("/worker", { name: "keeper", on: true });
 await step("Refund", "keeper sweep refunds an expired payment on its own", async () => {
+  await warpTo(Number((await getEscrow(made.afterPause!.id)).expiry) + 120);
   await waitStatus(made.afterPause!.id, S.RETURNED, 120_000);
 });
 await refused("Refund", "refunding before the expiry is refused", async () => {
@@ -780,7 +787,7 @@ await step("Books", "fees: the router holds exactly the sum of the creation fees
   for (const l of logs) {
     try {
       const ev: any = decodeEventLog({ abi: ifsoEscrowAbi, data: l.data, topics: l.topics });
-      if (ev.eventName === "Created") { fees += BigInt(ev.args.fee); ids.push(BigInt(ev.args.id)); }
+      if (ev.eventName === "Created") { fees += BigInt(ev.args.feePaid); ids.push(BigInt(ev.args.id)); }
     } catch {}
   }
   let owed = 0n;
