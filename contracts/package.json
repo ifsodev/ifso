@@ -2,13 +2,11 @@
   "name": "@ifso/contracts",
   "private": true,
   "type": "module",
-  "description": "Optional Hardhat 3 runner for the Foundry-style Solidity tests (use when forge is unavailable).",
+  "description": "Tooling only: solc-js for tools/solcjs-compile.mjs (compile check and the service ABIs). Foundry is the toolchain for tests.",
   "scripts": {
-    "test:hh": "hardhat test solidity",
     "check": "node tools/solcjs-compile.mjs"
   },
   "devDependencies": {
-    "hardhat": "3.21.0",
     "solc": "0.8.28"
   }
 }

@@ -15,9 +15,7 @@ Solidity 0.8.28, dependency-free (all helpers vendored in `src/libraries`, `src/
 
 ```bash
 forge build --sizes && forge test -vvv            # primary
-# no forge? (Hardhat 3 runs the same .t.sol files)
-npm i && SOLC_JS=$PWD/node_modules/solc/soljson.js npx hardhat test solidity
-# compile-only check with solc-js
+# compile-only check with solc-js (no forge needed; `bun install --frozen-lockfile --ignore-scripts` fetches solc 0.8.28, bun.lock is committed)
 node tools/solcjs-compile.mjs                     # all of src/, test/, script/
 node tools/solcjs-compile.mjs --src-only --abi-ts-out ../app/src/abi   # regenerate service ABIs
 ```
