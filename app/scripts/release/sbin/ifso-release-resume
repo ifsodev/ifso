@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Root-owned; ifso-ops via sudo. resume: see lib/release.py (resume). Never touches production directly.
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+[[ $# == 0 ]] || die "no arguments"
+# A stale ABORT (ifso-release-abort while no pass was running) would fail the NEXT update at its first step: release.py resume
+# removes it when no pass holds the run lock, then removes PAUSE.
+release_py resume
+"${NOTIFY_BIN:-/usr/local/sbin/ifso-release-notify}" "release queue RESUMED" "What happened: $(caller) ended the planned pause.
+Users affected: no.
+What was done: releases continue.
+What is next: overdue updates go one at a time, a few minutes apart, then the normal slots." 0 || true

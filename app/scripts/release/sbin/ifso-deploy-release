@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Root-owned, run by the release runner through sudo. The ONLY way the runner reaches the production deploy.
+#
+#   ifso-deploy-release <40-hex-sha>      deploy that commit (a release or a revert)
+#   ifso-deploy-release --validate <sha>  check the sha as below, change nothing
+#   ifso-deploy-release --check           health-check every service (ifso-deploy --check), change nothing
+#
+# The sha must be on the private repo's main as fetched from GitHub itself (as the release user), a descendant of the
+# revision running now, at most 60 first-parent commits ahead, and every commit in between must carry a good SSH signature
+# from a key in /etc/ifso-release/allowed_signers. Anything else is refused before any file is touched. The deploy itself is
+# the pinned, root-owned `ifso-deploy <sha>` (release directory, backup, migrations, restart, health checks, automatic return to
+# the previous release). Exit 75: an infrastructure failure before anything was switched. Exit 1: failed and rolled back.
+# Exit 2: failed and the rollback failed too (a human is needed).
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+
+mode=deploy
+case "${1:-}" in
+  --check) [[ $# == 1 ]] || die "usage"; exec "$DEPLOY_BIN" --check ;;   # read-only, needs no arming
+  --validate) mode=validate; shift ;;
+esac
+[[ $# == 1 ]] || die "usage: ifso-deploy-release [--validate] <40-hex-sha> | --check"
+sha="$1"
+is_sha "$sha" || die "not a 40-hex sha"
+cur="$(current_rev)"
+is_sha "$cur" || die "cannot read the running revision ($OPT_DIR/current)"
+if [[ "$sha" == "$cur" ]]; then
+  # a pass that died right after the switch resumes here: the release is already live, so only check it
+  say "${sha:0:12} is already the running revision: checking it instead of deploying again"
+  exec "$DEPLOY_BIN" --check
+fi
+ok=0
+for i in 1 2 3; do
+  if as_rel git -C "$REPO_DIR" fetch -q origin main; then ok=1; break; fi
+  [[ $i == 3 ]] || { say "git fetch origin main failed (attempt $i of 3); retrying in $((i * ${FETCH_WAIT:-20})) s"; sleep $((i * ${FETCH_WAIT:-20})); }
+done
+[[ "$ok" == 1 ]] || { echo "$(basename "$0"): git fetch origin main failed 3 times (nothing touched)" >&2; exit 75; }
+tip="$(git -C "$REPO_DIR" rev-parse --verify refs/remotes/origin/main)"
+git -C "$REPO_DIR" cat-file -e "$sha^{commit}" 2>/dev/null || die "commit $sha is not in the release clone"
+git -C "$REPO_DIR" merge-base --is-ancestor "$sha" "$tip" || die "$sha is not on the private main"
+git -C "$REPO_DIR" merge-base --is-ancestor "$cur" "$sha" || die "$sha is not a descendant of the running revision ${cur:0:12}"
+n="$(git -C "$REPO_DIR" rev-list --first-parent --count "$cur..$sha")"
+(( n >= 1 && n <= 60 )) || die "$n commits between the running revision and $sha (1..60 allowed)"
+while read -r c; do
+  out="$(git -C "$REPO_DIR" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$ALLOWED_SIGNERS" verify-commit "$c" 2>&1)" \
+    || die "commit ${c:0:12} has no good signature from an allowed key: $(printf '%s' "$out" | tail -1)"
+done < <(git -C "$REPO_DIR" rev-list --first-parent "$cur..$sha")
+say "ok: ${sha:0:12} is $n commit(s) ahead of ${cur:0:12} on private main, all signed"
+[[ "$mode" == validate ]] && exit 0
+# two locks: the service sets IFSO_ALLOW_REAL_DEPLOY=1 (kept through sudo by env_keep), the root-owned file arms the server
+[[ "${IFSO_ALLOW_REAL_DEPLOY:-}" == 1 ]] || die "IFSO_ALLOW_REAL_DEPLOY=1 is not set by the caller: refusing to deploy"
+real_deploy_guard
+umask 022   # the release tree must be readable by the service users (an earlier project incident 1)
+set +e
+(
+  flock -w 120 -x 8 || { echo "$(basename "$0"): another deploy holds $DEPLOY_LOCK (nothing switched)" >&2; exit 75; }
+  exec "$DEPLOY_BIN" "$sha"
+) 8>>"$DEPLOY_LOCK"
+exit $?

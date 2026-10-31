@@ -1,0 +1,32 @@
+# Ifso release autopilot: ONE pass (releases every update that is due, one after the other). Started by ifso-release.timer.
+# Installed by install.sh. Inert until armed: the pass exits at once without LAUNCH_AT in schedule.json and without the
+# root-owned flag file /etc/ifso-release/ALLOW_REAL_DEPLOY (arm.sh creates both, last).
+[Unit]
+Description=Ifso tech-update release autopilot (one pass)
+Documentation=file:///usr/local/lib/ifso-release/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ifso-release
+Group=ifso-release
+WorkingDirectory=/var/lib/ifso-release
+Environment=HOME=/var/lib/ifso-release
+# every KEY=VALUE of paths.conf (no secrets in it) is the runner's configuration
+EnvironmentFile=/etc/ifso-release/paths.conf
+# first lock of the real-deploy guard; the second is the root-owned file ALLOW_REAL_DEPLOY
+Environment=IFSO_ALLOW_REAL_DEPLOY=1
+# flock: one pass at a time (the runner also holds its own lock); a pass that finds the lock busy exits at once
+ExecStart=/usr/bin/flock -n /var/lib/ifso-release/home/.service.lock /usr/bin/python3 /usr/local/lib/ifso-release/lib/release.py pass
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=20
+# a runaway gate must never starve or OOM-kill the live services
+MemoryHigh=2G
+MemoryMax=3G
+TasksMax=2000
+PrivateTmp=yes
+ProtectHome=yes
+# NoNewPrivileges is deliberately NOT set: the runner reaches the deploy through three narrow sudo rules.

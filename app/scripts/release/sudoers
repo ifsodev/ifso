@@ -1,0 +1,12 @@
+# /etc/sudoers.d/ifso-release  (installed by install.sh after `visudo -cf`; mode 0440)
+# The release runner may reach production only through these wrappers. Each one validates its own arguments.
+Defaults:ifso-release env_keep += "IFSO_ALLOW_REAL_DEPLOY"
+Defaults:ifso-release !requiretty
+Cmnd_Alias IFSO_RELEASE_RUNNER = /usr/local/sbin/ifso-deploy-release *, /usr/local/sbin/ifso-release-notify *, /usr/local/sbin/ifso-release-ghrelease *
+ifso-release ALL=(root) NOPASSWD: IFSO_RELEASE_RUNNER
+# Operators (group ifso-ops): read the status, pause, resume, abort, retry a held update, run a preflight. Nothing else.
+Cmnd_Alias IFSO_RELEASE_OPS = /usr/local/sbin/ifso-release-status, /usr/local/sbin/ifso-release-status --short, \
+  /usr/local/sbin/ifso-release-pause, /usr/local/sbin/ifso-release-pause *, /usr/local/sbin/ifso-release-resume, \
+  /usr/local/sbin/ifso-release-abort, /usr/local/sbin/ifso-release-retry TU[0-9][0-9], \
+  /usr/local/sbin/ifso-release-preflight, /usr/local/sbin/ifso-release-preflight TU[0-9][0-9]
+%ifso-ops ALL=(root) NOPASSWD: IFSO_RELEASE_OPS

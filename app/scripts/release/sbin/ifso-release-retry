@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Root-owned; ifso-ops via sudo: ifso-release-retry TUnn. Puts a HELD update back in the queue. Run it BEFORE any queue
+# rebase/remap (a rebase replays pending updates; held ones must be pending first or be remapped too). Never retry without a fix:
+# read logs/TUnn.log, reproduce, fix, then retry.
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+[[ $# == 1 && "$1" =~ ^TU[0-9]{2}$ ]] || die "usage: ifso-release-retry TUnn"
+release_py retry "$1"

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Root-owned; ifso-ops may run it through sudo (no arguments). Read-only summary of the release autopilot:
+# released / pending / held counts, the next slot, armed or not, paused or not, the services, the last log lines.
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+SYSTEMCTL="${SYSTEMCTL:-systemctl}"
+[[ $# == 0 || "${1:-}" == --short ]] || die "usage: ifso-release-status [--short]"
+echo "== autopilot"
+"$SYSTEMCTL" is-enabled "${TIMER:-ifso-release.timer}" 2>&1 | sed 's/^/timer enabled: /' || true
+"$SYSTEMCTL" is-active "${TIMER:-ifso-release.timer}" 2>&1 | sed 's/^/timer active:  /' || true
+if [[ -e "$RELEASE_HOME/PAUSE" ]]; then echo "PAUSED: $(head -c 300 "$RELEASE_HOME/PAUSE")"; else echo "not paused"; fi
+[[ -e "$ALLOW_FILE" ]] && echo "real deploys: ARMED" || echo "real deploys: NOT armed"
+echo "running revision: $(current_rev)"
+echo; echo "== queue"
+release_py status "$@" || true
+[[ "${1:-}" == --short ]] && exit 0
+echo; echo "== last alerts"
+tail -n 8 "$RELEASE_HOME/logs/alerts.log" 2>/dev/null || echo "(none yet)"

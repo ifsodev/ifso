@@ -1,0 +1,12 @@
+# Runs the release autopilot 2 minutes after boot and 5 minutes after each pass ends. Installed DISABLED; arm.sh enables it.
+[Unit]
+Description=Run the Ifso release autopilot every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+AccuracySec=15s
+Unit=ifso-release.service
+
+[Install]
+WantedBy=timers.target

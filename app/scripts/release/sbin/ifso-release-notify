@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Root-owned. ifso-release-notify <title> <message> [failure 0|1] [ops|test]
+# Posts to the OPS chat (owner + developer; there is no public group) when the runner is ARMED and TELEGRAM_BOT_TOKEN and
+# TELEGRAM_OPS_CHAT_ID exist in /etc/ifso-release/release.env (root, 0600). Unarmed = LOG ONLY: the alert goes to
+# logs/notify-log-only.log (title and length, never the text) and nothing is sent. "test" = an operator's explicit test.
+#        ifso-release-notify --ping ok|fail [note]   dead-man's switch: POST HEALTHCHECK_PING_URL (or <url>/fail)
+#        ifso-release-notify --ping status           says what is configured (never a value)
+# The token is read here, as root, and never leaves this script; failures log the title and length only, never the text.
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+val() { [[ -r "$RELEASE_ENV" ]] && sed -n "s/^$1=//p" "$RELEASE_ENV" | tail -1 | tr -d "\"' \\r" || true; }
+logline() { mkdir -p "$RELEASE_HOME/logs" 2>/dev/null || true; printf '%s\n' "$1" | as_rel tee -a "$RELEASE_HOME/logs/$2" >/dev/null 2>&1 || true; }
+if [[ "${1:-}" == --ping ]]; then
+  [[ $# -ge 2 && $# -le 3 ]] || die "usage: ifso-release-notify --ping ok|fail|status [note]"
+  kind="$2"; note="${3:-}"; note="${note:0:300}"
+  url="$(val HEALTHCHECK_PING_URL)"
+  if [[ "$kind" == status ]]; then
+    tok="$(val TELEGRAM_BOT_TOKEN)"; chat="$(val TELEGRAM_OPS_CHAT_ID)"
+    echo "telegram ops chat: $([[ -n "$tok" && -n "$chat" ]] && echo configured || echo "NOT configured (TELEGRAM_BOT_TOKEN / TELEGRAM_OPS_CHAT_ID in $RELEASE_ENV)")"
+    echo "healthcheck ping: $([[ -n "$url" ]] && echo configured || echo "NOT configured (HEALTHCHECK_PING_URL in $RELEASE_ENV)")"
+    exit 0
+  fi
+  [[ "$kind" == ok || "$kind" == fail ]] || die "--ping ok|fail|status"
+  [[ -n "$url" ]] || exit 0
+  [[ "$url" =~ ^https?://[A-Za-z0-9._:/-]+$ ]] || { echo "release.env HEALTHCHECK_PING_URL looks wrong" >&2; exit 0; }
+  [[ "$kind" == fail ]] && url="${url%/}/fail"
+  printf 'url = "%s"\n' "$url" | curl -sS -m 15 --retry 2 -K - --data-raw "${note:-$kind}" -o /dev/null || true
+  exit 0
+fi
+[[ $# -ge 2 && $# -le 4 ]] || die "usage: ifso-release-notify <title> <message> [0|1] [ops|test]"
+title="${1:0:200}"; msg="${2:0:3000}"; failed="${3:-0}"; channel="${4:-ops}"
+[[ "$failed" == 0 || "$failed" == 1 ]] || die "failure flag must be 0 or 1"
+[[ "$channel" == ops || "$channel" == test ]] || die "channel must be ops or test"
+if [[ "$channel" == ops ]]; then
+  launch="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])) or {}).get("launchAt") or "")' "$RELEASE_HOME/schedule.json" 2>/dev/null || true)"
+  if [[ -z "$launch" || ! -e "$ALLOW_FILE" ]]; then
+    logline "$(date -u +%Y-%m-%dT%H:%M:%SZ) log only (not armed): $title | ${#msg} chars" notify-log-only.log
+    exit 0
+  fi
+fi
+token="$(val TELEGRAM_BOT_TOKEN)"; chat="$(val TELEGRAM_OPS_CHAT_ID)"
+[[ -n "$token" && -n "$chat" ]] || exit 0
+[[ "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ && "$chat" =~ ^-?[0-9]+$ ]] || { echo "release.env telegram values look wrong" >&2; exit 0; }
+prefix=""; [[ "$failed" == 1 ]] && prefix="FAILED: "
+text="Ifso release: ${prefix}${title}"$'\n'"${msg}"
+# the token goes in a curl config on stdin, not on the command line; Telegram's answer is checked so silence cannot hide a lost alert
+api="$(val TELEGRAM_API_BASE)"; api="${api:-https://api.telegram.org}"
+resp="$(printf 'url = "%s/bot%s/sendMessage"\n' "$api" "$token" \
+  | curl -sS -m 20 --retry 2 -K - --data-urlencode "chat_id=$chat" --data-urlencode "text=$text" 2>&1)" || true
+if ! grep -q '"ok": *true' <<<"$resp"; then
+  why="$(printf '%s' "$resp" | tr -d '\n' | sed "s/$token/<token>/g" | cut -c1-200)"
+  echo "$(basename "$0"): Telegram did not accept the alert: ${why:-no answer}" >&2
+  logline "$(date -u +%Y-%m-%dT%H:%M:%SZ) alert NOT delivered (${why:-no answer}): $title | ${#msg} chars" notify-failures.log
+  "$0" --ping fail "telegram alert not delivered: ${why:0:120}" || true
+fi
+exit 0

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Root-owned; ifso-ops via sudo. pause: see lib/release.py (pause). Never touches production directly.
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+reason="${*:-planned pause}"
+[[ "${#reason}" -le 200 && "$reason" != *$'\n'* ]] || die "reason must be one short line"
+release_py pause "$(caller): $reason"

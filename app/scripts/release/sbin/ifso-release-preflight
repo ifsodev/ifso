@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Root-owned; ifso-ops via sudo: ifso-release-preflight [TUnn]. Tests every pending and held update against the CURRENT private
+# main with the runner's own gate, at nice 19, in its own folders. It never takes the release lock (an earlier project incident 36).
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+[[ $# -le 1 ]] || die "usage: ifso-release-preflight [TUnn]"
+envs=()
+while IFS= read -r l; do envs+=("$l"); done < <(runner_env)
+if [[ $# == 1 ]]; then
+  [[ "$1" =~ ^TU[0-9]{2}$ ]] || die "usage: ifso-release-preflight [TUnn]"
+  as_rel env "${envs[@]}" nice -n 19 python3 "$RUNNER_LIB/preflight.py" run --only "$1"
+else
+  as_rel env "${envs[@]}" nice -n 19 python3 "$RUNNER_LIB/preflight.py" run
+fi

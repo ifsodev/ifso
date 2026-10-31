@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Root-owned. ifso-release-ghrelease <tag> <title> <notes-file> [public-sha]
+# Creates (idempotently) the GitHub Release for one update on the PUBLIC repo with its poster on top, through a fine-grained
+# token (public repo only, Contents read/write) kept in /etc/ifso-release/release.env as GITHUB_RELEASE_TOKEN (root, 0600).
+# The poster is posters/<tag>.png under the release home (staged by exact tag); it is uploaded once as an asset and linked at
+# the top of the notes. Best effort: the runner never lets a failure here block a release. Exit 0 also when the Release exists.
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+val() { [[ -r "$RELEASE_ENV" ]] && sed -n "s/^$1=//p" "$RELEASE_ENV" | tail -1 | tr -d "\"' \\r" || true; }
+[[ $# -ge 3 && $# -le 4 ]] || die "usage: ifso-release-ghrelease <tag> <title> <notes-file> [public-sha]"
+tag="$1"; title="$2"; notes="$3"; sha="${4:-}"
+[[ "$tag" =~ ^(update|bonus)-[0-9]{2}$|^fix-[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]{1,60}$ ]] || die "bad tag '$tag'"
+[[ -r "$notes" ]] || die "cannot read the notes file"
+token="$(val GITHUB_RELEASE_TOKEN)"; repo="$(val PUBLIC_REPO)"; api="$(val GITHUB_API_BASE)"; api="${api:-https://api.github.com}"
+[[ -n "$token" ]] || { echo "no token (GITHUB_RELEASE_TOKEN missing in $RELEASE_ENV)"; exit 3; }
+[[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "PUBLIC_REPO must be owner/name in $RELEASE_ENV"
+call() { # call <method> <url> [curl args...]  -> body on stdout, status on fd 3's file
+  local m="$1" u="$2"; shift 2
+  printf 'url = "%s"\nheader = "Authorization: Bearer %s"\nheader = "Accept: application/vnd.github+json"\n' "$u" "$token" \
+    | curl -sS -m 60 -X "$m" -K - -w '\n%{http_code}' "$@"
+}
+status_of() { tail -n1 <<<"$1"; }
+body_of() { sed '$d' <<<"$1"; }
+r="$(call GET "$api/repos/$repo/releases/tags/$tag" || true)"
+if [[ "$(status_of "$r")" == 200 ]]; then echo "release $tag already exists"; exit 0; fi
+[[ "$(status_of "$r")" == 404 ]] || { echo "GET release $tag: HTTP $(status_of "$r")"; exit 4; }
+text="$(cat "$notes")"
+poster="$RELEASE_HOME/posters/$tag.png"
+payload="$(python3 -c 'import json,sys; print(json.dumps({"tag_name": sys.argv[1], "name": sys.argv[2], "target_commitish": sys.argv[3] or "main", "body": sys.argv[4], "draft": False}))' "$tag" "$title" "$sha" "$text")"
+r="$(call POST "$api/repos/$repo/releases" -H 'Content-Type: application/json' --data "$payload" || true)"
+code="$(status_of "$r")"
+[[ "$code" == 201 ]] || { echo "create release $tag: HTTP $code"; exit 4; }
+if [[ -r "$poster" ]]; then
+  id="$(body_of "$r" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+  up="$(val GITHUB_UPLOAD_BASE)"; up="${up:-https://uploads.github.com}"
+  a="$(call POST "$up/repos/$repo/releases/$id/assets?name=$tag.png" -H 'Content-Type: image/png' --data-binary "@$poster" || true)"
+  if [[ "$(status_of "$a")" == 201 ]]; then
+    url="$(body_of "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["browser_download_url"])')"
+    newbody="$(printf '![%s](%s)\n\n%s' "$tag" "$url" "$text")"
+    p2="$(python3 -c 'import json,sys; print(json.dumps({"body": sys.argv[1]}))' "$newbody")"
+    call PATCH "$api/repos/$repo/releases/$id" -H 'Content-Type: application/json' --data "$p2" >/dev/null || true
+  else
+    echo "poster upload for $tag: HTTP $(status_of "$a") (release created without the picture)"
+  fi
+fi
+echo "release $tag created"
