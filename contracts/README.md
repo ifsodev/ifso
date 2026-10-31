@@ -62,6 +62,18 @@ guard only when the node proves it is anvil; the record goes to the gitignored `
 anvil --fork-url https://rpc.mainnet.chain.robinhood.com -p 8645 --silent & bash script/fork-dryrun.sh 8645
 ```
 
+The dry run folds every tx hash into the record (`script/fold-txs.sh`, which also proves each creation tx on chain),
+then runs `PostDeployCheck` four ways: ownership pending (pass), handed-over mode while pending (must fail), a
+tampered FeeRouter runtime (must fail), and handed-over mode after the owner multisig accepted (pass, inside an anvil
+snapshot that is reverted).
+
+`PostDeployCheck` on 4663 takes the launch values from constants (USDG, feed proxies, cap, fees, bond, windows,
+multisig singletons (official SafeL2 contracts)), requires the operator to pin the deploy-time addresses (`EXPECT_OWNER_MULTISIG`,
+`EXPECT_PANEL_MULTISIG`, `EXPECT_RESOLVER_CREATOR`, `EXPECT_FEE_WORK` / `_TREASURY` / `_PERKS` / `_BURN`), compares
+each contract's runtime bytecode with the build (immutables masked), and with `REQUIRE_HANDED_OVER=1` asserts the
+owner multisig accepted everywhere and the deployer holds no role. The real mainnet deploy is `script/deploy-mainnet.sh`,
+run by the owner only (armed flag and file required).
+
 ## Checks run in CI
 
 `forge fmt --check`, `tools/size-gate.sh` (24,576-byte runtime limit), `tools/natspec-check.py`, `forge doc`,

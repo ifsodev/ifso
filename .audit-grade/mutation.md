@@ -2,16 +2,16 @@
 
 Hand-written mutants (`contracts/tools/mutants.py`) are patched one at a time into a throwaway copy of
 `contracts/src`; the default `forge test` suite (unit, fuzz and the short invariant profile) must fail.
-Re-run: `python3 contracts/tools/mutation.py` (needs Foundry 1.8.4; about 7 minutes). A stale or non-compiling mutant fails the run.
+Re-run: `python3 contracts/tools/mutation.py` (needs Foundry 1.8.4; about 8 minutes). A stale or non-compiling mutant fails the run.
 
-**Total: 122/122 killed (100.0%)** (1 equivalent mutant(s) excluded, listed below)
+**Total: 129/129 killed (100.0%)** (1 equivalent mutant(s) excluded, listed below)
 
 | File | Killed | Total | Score |
 |---|---|---|---|
 | `IfsoConditionEvaluator.sol` | 40 | 40 | 100.0% |
 | `IfsoEscrow.sol` | 57 | 57 | 100.0% |
-| `IfsoOutcomeResolver.sol` | 15 | 15 | 100.0% |
-| `FeeRouter.sol` | 6 | 6 | 100.0% |
+| `IfsoOutcomeResolver.sol` | 19 | 19 | 100.0% |
+| `FeeRouter.sol` | 9 | 9 | 100.0% |
 | `utils/Owned2Step.sol` | 4 | 4 | 100.0% |
 
 ## Review finding mutants (each undoes one fix)
@@ -66,12 +66,12 @@ None.
 | M1-a | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_Challenge_AcceptByPlusMaxStaleEqualDeadline_Refused() (gas: 445160) |
 | M1-b | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_AtDeadlineChallenge_AcceptByMustPrecedeDeadline() (gas: 439980) |
 | M2-a | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_TouchChallenge_RefusedAtCreation() (gas: 439824) |
-| M3-a | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 492560) |
+| M3-a | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 567468) |
 | M3-b | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 573238) |
-| M3-c | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 568870) |
+| M3-c | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 574642) |
 | M4-a | `IfsoEscrow.sol` | KILLED | [FAIL: EvmError: Revert] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 588347) |
 | M4-b | `IfsoEscrow.sol` | KILLED | [FAIL: EvmError: Revert] test_Void_OwedAcceptorSide_CanRedirectThenIsPaid() (gas: 549601) |
-| M4-c | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("starved side marked owed: 32 != 0")] test_R1_M4_OutOfGasInsideTransferReverts_NotOwed() (gas: 70 |
+| M4-c | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("starved side marked owed: 32 != 0")] test_R2_I1_ProxyUsdg_StarvedRefundNeverMarksAPayableSideOwe |
 | R2-I1-a | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("starved side marked owed: 32 != 0")] test_R2_I1_ProxyUsdg_StarvedRefundNeverMarksAPayableSideOwe |
 | M4-d | `IfsoEscrow.sol` | KILLED | [FAIL: Error != expected error: TransferFailed() != NotOpen()] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas |
 | M4-e | `IfsoEscrow.sol` | KILLED | [FAIL: Error != expected error: TransferFailed() != NotOpen()] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas |
@@ -81,7 +81,7 @@ None.
 | M4-i | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("sender side owed: 0 != 32")] test_R1_M4_OwedSenderSide_RedirectThenAnyoneClaims() (gas: 630861) |
 | M5-a | `IfsoEscrow.sol` | KILLED | [FAIL: next call did not revert as expected] test_R1_M5_NoOpRevertsNoChange_RealChangesStillWork() (gas: 400976) |
 | M5-b | `IfsoEscrow.sol` | KILLED | [FAIL: next call did not revert as expected] test_R1_M5_NoOpRevertsNoChange_RealChangesStillWork() (gas: 539936) |
-| L1-a | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: AssertionFailed("pending change: decided result stands")] test_R2_L1_ProvablyUnchangedStillDecides() (gas: 110304 |
+| L1-a | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: AssertionFailed("deadline price was pre-split and decided: should release")] test_R1_L1_PendingSplitAfterDeadline |
 | L1-b | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: AssertionFailed("decided on a re-based price: 17571 != 1000000000000000000") |
 | L1-c | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: AssertionFailed("VOID on corporate action")] test_MultiplierChange_Voids() (gas: 721063) |
 | L1-e | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: AssertionFailed("VOID, not RELEASED, when the multiplier is unreadable")] test_Multiplier_UnreadableFailsClosedTo |
@@ -97,7 +97,7 @@ None.
 | R2-L2-c | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: AssertionFailed("covers the review's 30 h late sources: 259200 != 172800")] test_R2_L2_LateProposal_DisputeStillR |
 | E-cross-gte | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: AssertionFailed("inclusive comparators")] test_AtDeadline_EqualityCountsForGteAndLte() (gas: 1179866) |
 | E-cross-lte | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: AssertionFailed("inclusive comparators")] test_AtDeadline_EqualityCountsForGteAndLte() (gas: 1203500) |
-| E-time | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: ConditionPending()] test_Cap_LoweredDoesNotBlockExits() (gas: 2514622) |
+| E-time | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: ConditionPending()] test_CreateBatch_PayrollRun() (gas: 811496) |
 | E-after-deadline | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_AtDeadline_NotSettleableAtTheDeadlineSecond() (gas: 670738) |
 | E-round-after | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: ConditionPending()] test_AtDeadline_EarlierRoundIsNotLastWhenNextIsAtTheDeadline() (gas: 786621) |
 | E-last-round | `IfsoConditionEvaluator.sol` | KILLED | [FAIL: next call did not revert as expected] test_AtDeadline_EarlierRoundIsNotLastWhenNextIsAtTheDeadline() (gas: 767665 |
@@ -121,7 +121,7 @@ None.
 | X-fee-kind | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("creation + resolver fee: 250000 != 750000")] test_ResolverFeeChargedForOutcome() (gas: 387859) |
 | X-fee-create | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("batch pull == sum of amount + reported fee: 41200000 != 42100000")] test_CreateBatch_PullsSumOfA |
 | X-fee-pull | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("router fee == reported fee: 0 != 2000000")] test_CreateWithAuthorization_SignedValueEqualsPulled |
-| X-fee-auth | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("both stakes held: 40250000 != 40000000")] test_AcceptWithAuthorization_Gasless() (gas: 533416) |
+| X-fee-auth | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("both stakes held: 40250000 != 40000000")] test_Accept_AllowedAtTheAcceptByInstant() (gas: 420068 |
 | X-fee-cap | `IfsoEscrow.sol` | KILLED | [FAIL: next call did not revert as expected] test_OwnerHasNoPathToEscrowedFunds() (gas: 504063) |
 | X-fee-total | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("batch pull == sum of amount + reported fee: 40000000 != 42100000")] test_CreateBatch_PullsSumOfA |
 | X-min-amount | `IfsoEscrow.sol` | KILLED | [FAIL: InvalidParams() |
@@ -132,7 +132,7 @@ None.
 | X-referee-acceptor | `IfsoEscrow.sol` | KILLED | [FAIL: Error != expected error: TransferFromFailed() != BadRecipient()] test_Accept_RefereeAsAcceptor_Refused() (gas: 46 |
 | X-accept-window | `IfsoEscrow.sol` | KILLED | [FAIL: AcceptWindowClosed()] test_Accept_AllowedAtTheAcceptByInstant() (gas: 379651) |
 | X-accept-self | `IfsoEscrow.sol` | KILLED | [FAIL: next call did not revert as expected] test_Accept_SenderOwnLinkChallenge_Refused() (gas: 481451) |
-| X-accept-status | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("balance == obligations: 961553554 != 258720155")] invariant_BalanceMatchesObligations |
+| X-accept-status | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("everything owed went out: 88914472 != 87914310")] invariant_BalanceMatchesObligations |
 | X-accept-twice | `IfsoEscrow.sol` | KILLED | [FAIL: next call did not revert as expected] test_Accept_Twice_Reverts() (gas: 504416) |
 | X-activefrom | `IfsoEscrow.sol` | EQUIVALENT |  |
 | X-claim-sig | `IfsoEscrow.sol` | KILLED | [FAIL: next call did not revert as expected] test_Link_FrontRunnerCannotRedirect() (gas: 419670) |
@@ -152,7 +152,7 @@ None.
 | X-sig-deadline-refund | `IfsoEscrow.sol` | KILLED | [FAIL: next call did not revert as expected] test_RefundRedirectBySig_ExpiredRefused() (gas: 425742) |
 | X-nonce-decide | `IfsoEscrow.sol` | KILLED | [FAIL: Error != expected error: NoChange() != BadSignature()] test_DecideBySig_Eoa_And_Replay() (gas: 432166) |
 | X-nonce-refund | `IfsoEscrow.sol` | KILLED | [FAIL: Error != expected error: NoChange() != BadSignature()] test_RefundRedirectBySig_SenderNeverTransacts() (gas: 4562 |
-| X-release-to | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("recipient receives both stakes in full: 0 != 40000000")] test_NamedChallenge_RefereeToRecipient_ |
+| X-release-to | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("to recipient: 1000000000000 != 1000020000000")] test_Referee_OnlyTwoPaths() (gas: 444948) |
 | X-release-pot | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("recipient receives both stakes in full: 20000000 != 40000000")] test_NamedChallenge_RefereeToRec |
 | X-return-pot | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("sender side receives both stakes: 20000000 != 40000000")] test_NamedChallenge_RefereeToSender()  |
 | X-void-sides | `IfsoEscrow.sol` | KILLED | [FAIL: AssertionFailed("sender own stake: 30000000 != 20000000")] test_PanelTimeout_VoidsAndBondsReturn_TwoSidedVoided() |
@@ -176,13 +176,20 @@ None.
 | R-propose-early | `IfsoOutcomeResolver.sol` | KILLED | [FAIL: next call did not revert as expected] test_Undisputed_Finalize_Settles() (gas: 498903) |
 | R-outcome-range | `IfsoOutcomeResolver.sol` | KILLED | [FAIL: next call did not revert as expected] test_Resolver_OutcomeAboveRangeRefused() (gas: 240695) |
 | R-bond-snapshot | `IfsoOutcomeResolver.sol` | KILLED | [FAIL: AssertionFailed("disputer matches the snapshotted bond: 250000000 != 100000000")] test_Resolver_PanelWindowBounda |
-| F-treasury | `FeeRouter.sol` | KILLED | [FAIL: AssertionFailed("treasury 10%: 110000 != 100000")] test_Distribute_80_10_5_5() (gas: 230390) |
+| F-treasury | `FeeRouter.sol` | KILLED | [FAIL: AssertionFailed("work: 790000 != 800000")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 362352) |
 | F-perks | `FeeRouter.sol` | KILLED | [FAIL: AssertionFailed("perks 5%: 60000 != 50000")] test_Distribute_80_10_5_5() (gas: 237023) |
-| F-burn | `FeeRouter.sol` | KILLED | [FAIL: AssertionFailed("work: 810000 != 800000")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 362352) |
-| F-dust | `FeeRouter.sol` | KILLED | [FAIL: TransferFailed()] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 324148) |
+| F-burn | `FeeRouter.sol` | KILLED | [FAIL: AssertionFailed("burn 5%: 40000 != 50000")] test_Distribute_80_10_5_5() (gas: 244765) |
+| F-dust | `FeeRouter.sol` | KILLED | [FAIL: TransferFailed()] test_Distribute_80_10_5_5() (gas: 192169) |
 | F-sweep-usdg | `FeeRouter.sol` | KILLED | [FAIL: next call did not revert as expected] test_SweepCannotTouchUsdg() (gas: 52260) |
 | F-recipients-zero | `FeeRouter.sol` | KILLED | [FAIL: next call did not revert as expected] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 85352) |
 | O-accept-who | `utils/Owned2Step.sol` | KILLED | [FAIL: next call did not revert as expected] test_TwoStepOwnership_OnEveryOwnedContract() (gas: 123087) |
 | O-only-owner | `utils/Owned2Step.sol` | KILLED | [FAIL: next call did not revert as expected] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 55439) |
 | O-pending-clear | `utils/Owned2Step.sol` | KILLED | [FAIL: AssertionFailed("pending cleared")] test_TwoStepOwnership_OnEveryOwnedContract() (gas: 157485) |
 | O-zero-owner | `utils/Owned2Step.sol` | KILLED | [FAIL: next call did not revert as expected] test_ZeroOwnerRefusedAtDeploy() (gas: 6437) |
+| INV-OR1-withdraw | `IfsoOutcomeResolver.sol` | KILLED | [FAIL: AssertionFailed("bond returned: 99999999 != 100000000")] test_Undisputed_Finalize_Settles() (gas: 879012) |
+| INV-OR2-refinalize | `IfsoOutcomeResolver.sol` | KILLED | [FAIL: ConditionPending()] test_OtherOutcome_Returns() (gas: 596985) |
+| INV-OR3-timeout-party | `IfsoOutcomeResolver.sol` | KILLED | [FAIL: AssertionFailed("proposer bond back: 200000000 != 100000000")] test_PanelTimeout_VoidsAndBondsReturn_TwoSidedVoid |
+| INV-OR4-repropose | `IfsoOutcomeResolver.sol` | KILLED | [FAIL: AssertionFailed("OR4: a question moved backwards or left a terminal state")] invariant_ResolverStatesOnlyMoveForw |
+| INV-FR1-leak | `FeeRouter.sol` | KILLED | [FAIL: AssertionFailed("burn: 0 != 50000")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 379442) |
+| INV-FR2-misroute | `FeeRouter.sol` | KILLED | [FAIL: AssertionFailed("treasury 10%: 0 != 100000")] test_Distribute_80_10_5_5() (gas: 201022) |
+| INV-FR3-stuck | `FeeRouter.sol` | KILLED | [FAIL: AssertionFailed("work 80% + dust: 800000 != 800001")] test_Distribute_80_10_5_5() (gas: 253542) |

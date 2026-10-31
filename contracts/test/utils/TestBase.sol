@@ -66,6 +66,11 @@ interface Vm {
     function rpc(string calldata method, string calldata params) external returns (bytes memory data);
     function getBlockNumber() external view returns (uint256 height);
     function getBlockTimestamp() external view returns (uint256 timestamp);
+    function parseJsonKeys(string calldata json, string calldata key) external pure returns (string[] memory keys);
+    function parseJson(string calldata json, string calldata key) external pure returns (bytes memory abiEncodedData);
+    function parseJsonBytes(string calldata json, string calldata key) external pure returns (bytes memory);
+    function parseJsonBytes32(string calldata json, string calldata key) external pure returns (bytes32);
+    function keyExistsJson(string calldata json, string calldata key) external view returns (bool);
     function expectRevert(bytes4 revertData, address reverter) external;
 }
 

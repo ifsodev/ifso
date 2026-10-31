@@ -38,23 +38,6 @@ import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 ///   GIT_COMMIT        commit sha recorded in the deployment file (the wrapper scripts pass it)
 ///   IFSO_WRITE_DEPLOYMENT   "0" skips writing the deployment file (tests)
 contract Deploy is DeployBase {
-    // Robinhood Chain mainnet (verified on-chain 2026-10-25; feeds and Stock Tokens re-proved on a fork 2026-10-30)
-    address internal constant RHC_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
-    // Chainlink PROXY addresses (never the aggregator behind them: an upgrade moves the proxy to a new aggregator)
-    address internal constant FEED_ETH_USD = 0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9;
-    address internal constant FEED_SPY = 0x319724394D3A0e3669269846abE664Cd621f9f6A;
-    address internal constant FEED_NVDA = 0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15;
-    address internal constant FEED_TSLA = 0x4A1166a659A55625345e9515b32adECea5547C38;
-    address internal constant FEED_AAPL = 0x6B22A786bAa607d76728168703a39Ea9C99f2cD0;
-    // ERC-8056 Stock Tokens paired with the feeds above
-    address internal constant TOKEN_SPY = 0x117cc2133c37B721F49dE2A7a74833232B3B4C0C;
-    address internal constant TOKEN_NVDA = 0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC;
-    address internal constant TOKEN_TSLA = 0x322F0929c4625eD5bAd873c95208D54E1c003b2d;
-    address internal constant TOKEN_AAPL = 0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9;
-
-    uint64 internal constant DISPUTE_WINDOW = 2 hours;
-    uint64 internal constant PANEL_WINDOW = 72 hours;
-
     struct Deployed {
         IfsoConditionEvaluator evaluator;
         IfsoOutcomeResolver resolver;
@@ -84,10 +67,10 @@ contract Deploy is DeployBase {
             x.pyth = vm.envOr("PYTH", address(0));
         }
         x.seqFeed = vm.envOr("SEQ_UPTIME_FEED", address(0));
-        x.creationFee = uint96(vm.envOr("CREATION_FEE", uint256(250_000)));
-        x.resolverFee = uint96(vm.envOr("RESOLVER_FEE", uint256(500_000)));
-        x.bond = uint96(vm.envOr("RESOLVER_BOND", uint256(100e6)));
-        x.maxAmount = uint96(vm.envOr("MAX_AMOUNT", uint256(1_000e6)));
+        x.creationFee = uint96(vm.envOr("CREATION_FEE", uint256(MAINNET_CREATION_FEE)));
+        x.resolverFee = uint96(vm.envOr("RESOLVER_FEE", uint256(MAINNET_RESOLVER_FEE)));
+        x.bond = uint96(vm.envOr("RESOLVER_BOND", uint256(MAINNET_BOND)));
+        x.maxAmount = uint96(vm.envOr("MAX_AMOUNT", uint256(MAINNET_CAP)));
         x.disputeWindow = DISPUTE_WINDOW;
         x.panelWindow = PANEL_WINDOW;
     }
@@ -143,12 +126,7 @@ contract Deploy is DeployBase {
     ///      Local: one mock feed.
     function _feeds() internal returns (address[] memory feeds, address[] memory tokens) {
         if (block.chainid == RHC_MAINNET) {
-            feeds = new address[](5);
-            tokens = new address[](5);
-            (feeds[0], feeds[1], feeds[2], feeds[3], feeds[4]) =
-            (FEED_ETH_USD, FEED_SPY, FEED_NVDA, FEED_TSLA, FEED_AAPL);
-            (tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]) =
-            (address(0), TOKEN_SPY, TOKEN_NVDA, TOKEN_TSLA, TOKEN_AAPL);
+            (feeds, tokens) = _mainnetFeeds();
         } else if (block.chainid == 31337) {
             feeds = new address[](1);
             tokens = new address[](1);

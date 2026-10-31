@@ -12,6 +12,8 @@
 # The deployer is a throwaway keystore made here (never an anvil default key: those are swept on 4663). The owner
 # and panel are fresh 2-of-3 Safe 1.4.1 proxies created on the fork, so the post-deploy multisig checks run for
 # real. Output: deployments/4663-fork.json (gitignored) with tx hashes, gas used and the fork block.
+# After the deploy it runs PostDeployCheck four ways: ownership pending (pass), handed-over mode while pending (must
+# fail), a tampered FeeRouter runtime (must fail), and handed-over mode after the owner Safe accepted (pass).
 set -euo pipefail
 port="${1:?usage: fork-dryrun.sh <anvil port>}"
 rpc="http://127.0.0.1:${port}"
@@ -68,17 +70,49 @@ forge script script/Deploy.s.sol --rpc-url "$rpc" --keystore "$tmp/ifso-fork" --
 
 run="broadcast/Deploy.s.sol/4663/run-latest.json"
 out="deployments/4663-fork.json"
-jq --slurpfile run "$run" --arg fb "$fork_block" '
-  def num: if type == "string" then (ltrimstr("0x") | ascii_downcase | explode
-    | map(if . >= 97 then . - 87 else . - 48 end) | reduce .[] as $d (0; . * 16 + $d)) else . end;
-  .txs = [$run[0].receipts[] as $r | $run[0].transactions[] | select(.hash == $r.transactionHash)
-          | {hash, contractName, contractAddress, function, gasUsed: ($r.gasUsed | num)}]
-  | .gasUsedTotal = ([.txs[].gasUsed] | add)
-  | .forkBlock = ($fb | tonumber)
-  | .deployBlock = ([$run[0].receipts[].blockNumber | num] | min)
-  | del(.deployBlockAtSimulation)' "$out" >"$tmp/out.json"
+bash script/fold-txs.sh "$rpc" "$out" "$run"
+jq --arg fb "$fork_block" '.forkBlock = ($fb | tonumber)' "$out" >"$tmp/out.json"
 mv "$tmp/out.json" "$out"
 
-forge script script/PostDeployCheck.s.sol --rpc-url "$rpc" -q
+# Operator pins for the deploy-time addresses (PostDeployCheck refuses on 4663 without them).
+export EXPECT_OWNER_MULTISIG="$OWNER_MULTISIG" EXPECT_PANEL_MULTISIG="$PANEL_MULTISIG" \
+  EXPECT_RESOLVER_CREATOR="$RESOLVER_CREATOR" EXPECT_FEE_WORK="$FEE_WORK" EXPECT_FEE_TREASURY="$FEE_TREASURY" \
+  EXPECT_FEE_PERKS="$FEE_PERKS" EXPECT_FEE_BURN="$FEE_BURN"
+# --no-storage-caching: a fork keeps its block number across anvil_setCode, so a cached read would hide the change.
+check() { REQUIRE_HANDED_OVER="$1" forge script script/PostDeployCheck.s.sol --rpc-url "$rpc" --no-storage-caching 2>&1; }
+# must_fail <why> <expected message> <REQUIRE_HANDED_OVER>
+must_fail() {
+  local log
+  if log="$(check "$3")"; then echo "fork-dryrun: $1 was not detected" >&2; exit 1; fi
+  grep -q "$2" <<<"$log" || { echo "fork-dryrun: $1 failed for another reason:" >&2; tail -5 <<<"$log" >&2; exit 1; }
+  echo "fork-dryrun: $1 detected ($2)"
+}
+
+check 0 >"$tmp/check.log" || { tail -20 "$tmp/check.log" >&2; exit 1; }
+echo "fork-dryrun: post-deploy check passed (ownership pending)"
+must_fail "pending handover in handed-over mode" "handed over: owner is not the multisig" 1
+
+# Bytecode comparison: one flipped byte in the FeeRouter runtime must fail, then the real code is put back.
+router="$(jq -r '.contracts.FeeRouter.address' "$out")"
+code="$(cast code "$router" --rpc-url "$rpc")"
+last="${code: -2}"
+cast rpc anvil_setCode "$router" "${code:0:${#code}-2}$(printf '%02x' $((0x$last ^ 1)))" --rpc-url "$rpc" >/dev/null
+must_fail "tampered FeeRouter runtime" "FeeRouter: runtime code differs from the build" 0
+cast rpc anvil_setCode "$router" "$code" --rpc-url "$rpc" >/dev/null
+
+# Hand over: the owner Safe accepts ownership of all four contracts (impersonated on the fork only), inside an anvil
+# snapshot that is reverted afterwards, so callers (app/scripts/fork-up.sh) still find the 2-step handover pending.
+snap="$(cast rpc evm_snapshot --rpc-url "$rpc" | tr -d '"')"
+cast rpc anvil_setBalance "$OWNER_MULTISIG" 0x8AC7230489E80000 --rpc-url "$rpc" >/dev/null
+cast rpc anvil_impersonateAccount "$OWNER_MULTISIG" --rpc-url "$rpc" >/dev/null
+for name in IfsoConditionEvaluator IfsoOutcomeResolver FeeRouter IfsoEscrow; do
+  cast send "$(jq -r ".contracts.$name.address" "$out")" 'acceptOwnership()' --from "$OWNER_MULTISIG" --unlocked \
+    --rpc-url "$rpc" >/dev/null
+done
+cast rpc anvil_stopImpersonatingAccount "$OWNER_MULTISIG" --rpc-url "$rpc" >/dev/null
+check 1 >"$tmp/check.log" || { tail -20 "$tmp/check.log" >&2; exit 1; }
+echo "fork-dryrun: post-deploy check passed in handed-over mode (multisig owns all 4, deployer holds no role)"
+[ "$(cast rpc evm_revert "$snap" --rpc-url "$rpc")" = "true" ] || { echo "fork-dryrun: snapshot revert failed" >&2; exit 1; }
+
 echo "fork-dryrun: ok, chain 4663 (anvil fork of block $fork_block), $(jq '.txs | length' "$out") txs," \
   "gas used $(jq '.gasUsedTotal' "$out"), post-deploy assertions passed"

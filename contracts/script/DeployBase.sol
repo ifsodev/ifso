@@ -44,6 +44,36 @@ abstract contract DeployBase {
     bytes32 internal constant SAFE_GUARD_SLOT = keccak256("guard_manager.guard.address");
     address internal constant SAFE_SENTINEL = address(0x1);
 
+    // ------------------------------------------------------------------ Robinhood Chain mainnet launch values
+    // Hard-coded so PostDeployCheck never takes its expectations from the JSON the deploy itself wrote (audit Info).
+    // Robinhood Chain mainnet (verified on-chain 2026-10-25; feeds and Stock Tokens re-proved on a fork 2026-10-30)
+    address internal constant RHC_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
+    // Chainlink PROXY addresses (never the aggregator behind them: an upgrade moves the proxy to a new aggregator)
+    address internal constant FEED_ETH_USD = 0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9;
+    address internal constant FEED_SPY = 0x319724394D3A0e3669269846abE664Cd621f9f6A;
+    address internal constant FEED_NVDA = 0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15;
+    address internal constant FEED_TSLA = 0x4A1166a659A55625345e9515b32adECea5547C38;
+    address internal constant FEED_AAPL = 0x6B22A786bAa607d76728168703a39Ea9C99f2cD0;
+    // ERC-8056 Stock Tokens paired with the feeds above
+    address internal constant TOKEN_SPY = 0x117cc2133c37B721F49dE2A7a74833232B3B4C0C;
+    address internal constant TOKEN_NVDA = 0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC;
+    address internal constant TOKEN_TSLA = 0x322F0929c4625eD5bAd873c95208D54E1c003b2d;
+    address internal constant TOKEN_AAPL = 0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9;
+
+    uint64 internal constant DISPUTE_WINDOW = 2 hours;
+    uint64 internal constant PANEL_WINDOW = 72 hours;
+    /// @dev Launch values on 4663 (DECISIONS #6 and the deploy defaults); asserted by `_checkMainnetConstants`.
+    uint96 internal constant MAINNET_CAP = 1_000e6; //          1,000 USDG per escrow side
+    uint96 internal constant MAINNET_CREATION_FEE = 250_000; // 0.25 USDG
+    uint96 internal constant MAINNET_RESOLVER_FEE = 500_000; // 0.50 USDG
+    uint96 internal constant MAINNET_BOND = 100e6; //            100 USDG
+
+    /// @dev One masked range of runtime code that holds an immutable (from the solc artifact).
+    struct ImmutableRef {
+        uint256 length;
+        uint256 start;
+    }
+
     error NotArmed(uint256 chainId);
     error CheckFailed(string what);
     error NotForkDryRun();
@@ -161,6 +191,88 @@ abstract contract DeployBase {
         _check(maxAmount != 0 && maxAmount <= LAUNCH_CAP_CEILING, "launch cap must be 1..1,000 USDG on RHC");
     }
 
+    /// @notice The feed proxies and their Stock Tokens registered on 4663 (ETH/USD has no Stock Token).
+    function _mainnetFeeds() internal pure returns (address[] memory feeds, address[] memory tokens) {
+        feeds = new address[](5);
+        tokens = new address[](5);
+        (feeds[0], feeds[1], feeds[2], feeds[3], feeds[4]) = (FEED_ETH_USD, FEED_SPY, FEED_NVDA, FEED_TSLA, FEED_AAPL);
+        (tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]) =
+        (address(0), TOKEN_SPY, TOKEN_NVDA, TOKEN_TSLA, TOKEN_AAPL);
+    }
+
+    /// @notice On 4663 every expectation that is known before the deploy must equal the hard-coded launch value:
+    ///         USDG, the five feed proxies and their tokens, no Pyth, no sequencer feed, the cap, both fees, the bond
+    ///         and both windows. The Safe singleton set is checked by `_checkMultisig`.
+    function _checkMainnetConstants(Expect memory x) internal view {
+        if (block.chainid != RHC_MAINNET) return;
+        _check(x.usdg == RHC_USDG, "mainnet: USDG is not the RHC USDG");
+        _check(x.pyth == address(0), "mainnet: Pyth must be 0");
+        _check(x.seqFeed == address(0), "mainnet: sequencer feed must be 0 (none on RHC)");
+        _check(x.maxAmount == MAINNET_CAP, "mainnet: launch cap != 1,000 USDG");
+        _check(x.creationFee == MAINNET_CREATION_FEE, "mainnet: creation fee != 0.25 USDG");
+        _check(x.resolverFee == MAINNET_RESOLVER_FEE, "mainnet: resolver fee != 0.50 USDG");
+        _check(x.bond == MAINNET_BOND, "mainnet: resolver bond != 100 USDG");
+        _check(x.disputeWindow == DISPUTE_WINDOW, "mainnet: dispute window != 2 h");
+        _check(x.panelWindow == PANEL_WINDOW, "mainnet: panel window != 72 h");
+        (address[] memory feeds, address[] memory tokens) = _mainnetFeeds();
+        _check(x.feeds.length == feeds.length && x.feedTokens.length == tokens.length, "mainnet: feed count");
+        for (uint256 i; i < feeds.length; ++i) {
+            _check(x.feeds[i] == feeds[i], "mainnet: feed proxy mismatch");
+            _check(x.feedTokens[i] == tokens[i], "mainnet: feed stock token mismatch");
+        }
+    }
+
+    /// @notice Runtime bytecode on chain == the build output (`out/<name>.sol/<name>.json`), with every immutable
+    ///         range (solc `immutableReferences`) zeroed on both sides. The immutables themselves are asserted by
+    ///         value in `_assertDeployment` (usdg, evaluator, router, windows, bond token).
+    function _checkRuntimeCode(address deployed, string memory name) internal view {
+        string memory art = vm.readFile(string.concat("out/", name, ".sol/", name, ".json"));
+        bytes memory built = vm.parseJsonBytes(art, ".deployedBytecode.object");
+        bytes memory live = deployed.code;
+        _check(live.length == built.length, string.concat(name, ": runtime code length differs from the build"));
+        string[] memory ids = vm.parseJsonKeys(art, ".deployedBytecode.immutableReferences");
+        for (uint256 i; i < ids.length; ++i) {
+            ImmutableRef[] memory refs = abi.decode(
+                vm.parseJson(art, string.concat(".deployedBytecode.immutableReferences.", ids[i])), (ImmutableRef[])
+            );
+            for (uint256 j; j < refs.length; ++j) {
+                for (uint256 k; k < refs[j].length; ++k) {
+                    built[refs[j].start + k] = 0;
+                    live[refs[j].start + k] = 0;
+                }
+            }
+        }
+        _check(keccak256(live) == keccak256(built), string.concat(name, ": runtime code differs from the build"));
+    }
+
+    /// @notice "Handed over" (REQUIRE_HANDED_OVER=1): the multisig has accepted ownership of every contract (no
+    ///         pending owner left) and the deployer key holds no role anywhere: not owner, not pending owner, not
+    ///         question creator, not panel or pending panel, not a registered resolver, not a fee recipient.
+    function _checkHandedOver(
+        IfsoConditionEvaluator evaluator,
+        IfsoOutcomeResolver resolver,
+        FeeRouter router,
+        IfsoEscrow escrow,
+        Expect memory x
+    ) internal view {
+        address[4] memory cs = [address(evaluator), address(resolver), address(router), address(escrow)];
+        for (uint256 i; i < 4; ++i) {
+            (, bytes memory o) = cs[i].staticcall(abi.encodeWithSignature("owner()"));
+            (, bytes memory p) = cs[i].staticcall(abi.encodeWithSignature("pendingOwner()"));
+            _check(abi.decode(o, (address)) == x.ownerMultisig, "handed over: owner is not the multisig");
+            _check(abi.decode(p, (address)) == address(0), "handed over: a pending owner is left");
+        }
+        address d = x.deployer;
+        _check(d != x.ownerMultisig && d != x.panel && d != x.creator, "handed over: deployer is a configured role");
+        _check(!resolver.isCreator(d), "handed over: deployer can create questions");
+        _check(resolver.panel() != d && resolver.pendingPanel() != d, "handed over: deployer is the panel");
+        _check(!evaluator.resolverAllowed(d), "handed over: deployer is a registered resolver");
+        _check(
+            router.work() != d && router.treasury() != d && router.perks() != d && router.burn() != d,
+            "handed over: deployer is a fee recipient"
+        );
+    }
+
     /// @notice Post-deploy assertions (DEP-2). Reverts with the first mismatch.
     function _assertDeployment(
         IfsoConditionEvaluator evaluator,
@@ -169,6 +281,7 @@ abstract contract DeployBase {
         IfsoEscrow escrow,
         Expect memory x
     ) internal view {
+        _checkMainnetConstants(x);
         _check(IDecimals(x.usdg).decimals() == 6, "USDG decimals != 6");
         _checkMultisig(x.ownerMultisig, "owner multisig");
         _checkMultisig(x.panel, "panel multisig");

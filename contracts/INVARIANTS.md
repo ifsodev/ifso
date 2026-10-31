@@ -1,4 +1,10 @@
-# IfsoEscrow invariants
+# Invariants
+
+Three contracts hold or route value, and each has a handler-based suite: IfsoEscrow (R4-R8), IfsoOutcomeResolver
+(OR1-OR4) and FeeRouter (FR1-FR3). Each suite runs 10,000 runs x depth 50 (500,000 random calls) in the
+`invariant` profile.
+
+## IfsoEscrow
 
 Each property below is checked by a test that runs in CI. The handler-based suite lives in
 `test/invariant/` and runs 10,000 runs x depth 50 (500,000 random calls) in the `invariants` CI job:
@@ -26,6 +32,54 @@ handler path stops reaching its success branch, so the suite can never pass by d
 | R7 | No owner function changes any escrow's record (recipient, amounts, refund addresses, status) or the escrow's USDG balance. | `invariant_OwnerCannotMoveFunds` |
 | R8 | No challenge whose deciding result could be known before its accept window closes is ever created: two-sided TOUCH and AT_DEADLINE with `acceptBy + maxStale >= deadline` are refused (review R1-M1, R1-M2). | `invariant_NoKnowableChallengeCreated` |
 
+## IfsoOutcomeResolver
+
+Suite: `test/invariant/ResolverInvariants.t.sol`. The handler creates questions, proposes (any outcome, from four
+bonded actors), disputes, finalizes, answers as the panel (agreeing and disagreeing, VOID included), times the panel
+out, withdraws bonds (to self and to another address), changes the bond between a proposal and its dispute, sends
+stray USDG to the resolver and warps time. Expected credits are computed in the handler from the rules in the
+contract header, never read back from the resolver. `test_ResolverHandlerReachesEveryPath` fails if any path stops
+reaching its success branch.
+
+| # | Invariant (in words) | Test |
+|---|---|---|
+| OR1 | The resolver's USDG balance equals the sum of every claimable bond plus every live bond (one bond for a PROPOSED question, two for a DISPUTED one, each at the bond snapshotted at proposal), plus USDG sent to it by mistake. | `invariant_ResolverBalanceEqualsBonds` |
+| OR2 | No double credit: no question is credited by two terminal calls; everything ever credited (claimable + withdrawn) equals the pots of the questions that reached FINAL or VOID; credited + live equals every bond ever posted. | `invariant_ResolverNoDoubleCredit` |
+| OR3 | Each pot goes to the right party: undisputed FINAL pays the proposer its bond; a panel answer equal to the proposal pays the proposer both bonds, any other answer (VOID included) pays the disputer both; a panel time-out returns each side its own bond. | `invariant_ResolverCreditsRightParty` |
+| OR4 | A question's state only moves forward (OPEN -> PROPOSED -> FINAL, or PROPOSED -> DISPUTED -> FINAL / VOID). FINAL and VOID never change again. | `invariant_ResolverStatesOnlyMoveForward` |
+
+## FeeRouter
+
+Suite: `test/invariant/FeeRouterInvariants.t.sol`. The handler sends fee inflows of any size (most do not divide by
+20, so rounding is exercised), calls the permissionless `distribute`, changes recipients as the owner (one address
+may hold two roles), freezes and unfreezes a recipient at the USDG issuer, sweeps a stray token and tries to sweep
+USDG. Expected amounts come from the documented 80/10/5/5 rule computed in the handler.
+`test_FeeRouterHandlerReachesEveryPath` covers rounding, a shared address, a frozen recipient (the whole distribute
+is refused and the router keeps everything, never a partial split) and both sweep paths.
+
+| # | Invariant (in words) | Test |
+|---|---|---|
+| FR1 | Conservation: every USDG unit that reached the router is either still in it or was paid to a configured recipient. USDG can never be swept. | `invariant_FeeRouterConserves` |
+| FR2 | Exact split: each recipient received exactly treasury = floor(10%), perks = floor(5%), burn = floor(5%), work = the rest, of every distribute, with the recipients configured at that moment. | `invariant_FeeRouterExactSplit` |
+| FR3 | No stuck dust: a successful distribute leaves 0 USDG in the router, and the rounding remainder that goes to work is at most 3 base units (0.000003 USDG) per distribute. This is the documented rounding. | `invariant_FeeRouterNoStuckDust` |
+
+## Mutation check of the resolver and fee router invariants (2026-10-31)
+
+Each mutant is in `tools/mutants.py` (ids `INV-*`), so `tools/mutation.sh` runs it on every mutation run. Below,
+each was also run against the two new suites alone (default profile) to show which invariant it breaks.
+
+| Mutant | Change | Broken invariant (assertion) |
+|---|---|---|
+| `INV-OR1-withdraw` | `withdrawBond` sends one unit less than it clears | OR1 (`balance != claimable + live bonds + stray`) |
+| `INV-OR2-refinalize` | `finalize` leaves the question PROPOSED, so it can be finalized again | OR2 (`credited + live != bonds posted`, run alone), OR1 |
+| `INV-OR3-timeout-party` | panel time-out returns the disputer's bond to the proposer | OR3 (`actor credited a different amount than the rules give`) |
+| `INV-OR4-repropose` | a VOID question can be proposed again | OR4 (`a question moved backwards or left a terminal state`) |
+| `INV-FR1-leak` | the burn share goes to an address that is not a recipient | FR1 (`USDG in != held + paid`), FR2 |
+| `INV-FR2-misroute` | the treasury share goes to the work address | FR2 (`recipient paid != its share`) |
+| `INV-FR3-stuck` | work takes floor(80%), so the rounding remainder stays in the router | FR3 (`USDG left in the router after distribute`), FR2 |
+
+Result: 7 / 7 killed by the targeted invariant.
+
 ## Launch cap rules
 
 | Rule | Test |
@@ -44,6 +98,9 @@ handler path stops reaching its success branch, so the suite can never pass by d
 | Pause gates only new entries | `test_Pause_GatesOnlyNewEntries` |
 | Deploy script refuses on Robinhood Chain (4663, 46630) unless armed; every broadcasting script carries the guard | `test_Deploy_RefusesUnarmedOnRealChainIds`, `test_Deploy_EveryBroadcastingScriptIsGuarded` |
 | A local run of the deploy script passes the post-deploy assertions with the launch values | `test_Deploy_LocalRunPassesAssertions` |
+| PostDeployCheck: on 4663 the launch values are hard-coded constants (USDG, five feed proxies and their Stock Tokens, 1,000 USDG cap, fees, bond, 2 h / 72 h windows); any drift fails | `test_PostDeploy_MainnetConstants` |
+| PostDeployCheck: runtime code of all four contracts equals the build output with immutables masked; one flipped byte or a different contract fails | `test_PostDeploy_RuntimeCodeMatchesBuild`, `script/fork-dryrun.sh` |
+| PostDeployCheck `REQUIRE_HANDED_OVER=1`: fails while ownership is pending or if the deployer kept a role; passes once the owner multisig accepted everywhere | `test_PostDeploy_HandedOverMode`, `script/fork-dryrun.sh` |
 
 ## Mutation check of the invariant suite (2026-10-30)
 

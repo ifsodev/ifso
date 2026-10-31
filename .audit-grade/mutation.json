@@ -1,6 +1,6 @@
 {
- "killed": 122,
- "total": 122,
+ "killed": 129,
+ "total": 129,
  "score": 100.0,
  "results": [
   {
@@ -33,7 +33,7 @@
    "finding": "R1-M3",
    "why": "OUTCOME expiry ignores the panel window",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 492560)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 567468)"
   },
   {
    "id": "M3-b",
@@ -49,7 +49,7 @@
    "finding": "R1-M3",
    "why": "OUTCOME expiry ignores the settle margin",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 568870)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 574642)"
   },
   {
    "id": "M4-a",
@@ -73,7 +73,7 @@
    "finding": "R1-M4",
    "why": "a gas-starved transfer can push a payable side into owed",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"starved side marked owed: 32 != 0\")] test_R1_M4_OutOfGasInsideTransferReverts_NotOwed() (gas: 70"
+   "killedBy": "[FAIL: AssertionFailed(\"starved side marked owed: 32 != 0\")] test_R2_I1_ProxyUsdg_StarvedRefundNeverMarksAPayableSideOwe"
   },
   {
    "id": "R2-I1-a",
@@ -153,7 +153,7 @@
    "finding": "R1-L1",
    "why": "a change still pending at settle VOIDs a decided result",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"pending change: decided result stands\")] test_R2_L1_ProvablyUnchangedStillDecides() (gas: 110304"
+   "killedBy": "[FAIL: AssertionFailed(\"deadline price was pre-split and decided: should release\")] test_R1_L1_PendingSplitAfterDeadline"
   },
   {
    "id": "L1-b",
@@ -281,7 +281,7 @@
    "finding": "-",
    "why": "TIME unlocks one second late",
    "status": "KILLED",
-   "killedBy": "[FAIL: ConditionPending()] test_Cap_LoweredDoesNotBlockExits() (gas: 2514622)"
+   "killedBy": "[FAIL: ConditionPending()] test_CreateBatch_PayrollRun() (gas: 811496)"
   },
   {
    "id": "E-after-deadline",
@@ -473,7 +473,7 @@
    "finding": "-",
    "why": "the fee is not forwarded to the router (gasless create)",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"both stakes held: 40250000 != 40000000\")] test_AcceptWithAuthorization_Gasless() (gas: 533416)"
+   "killedBy": "[FAIL: AssertionFailed(\"both stakes held: 40250000 != 40000000\")] test_Accept_AllowedAtTheAcceptByInstant() (gas: 420068"
   },
   {
    "id": "X-fee-cap",
@@ -561,7 +561,7 @@
    "finding": "-",
    "why": "accept works on a closed escrow",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"balance == obligations: 961553554 != 258720155\")] invariant_BalanceMatchesObligations"
+   "killedBy": "[FAIL: AssertionFailed(\"everything owed went out: 88914472 != 87914310\")] invariant_BalanceMatchesObligations"
   },
   {
    "id": "X-accept-twice",
@@ -721,7 +721,7 @@
    "finding": "-",
    "why": "release pays the sender",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"recipient receives both stakes in full: 0 != 40000000\")] test_NamedChallenge_RefereeToRecipient_"
+   "killedBy": "[FAIL: AssertionFailed(\"to recipient: 1000000000000 != 1000020000000\")] test_Referee_OnlyTwoPaths() (gas: 444948)"
   },
   {
    "id": "X-release-pot",
@@ -913,7 +913,7 @@
    "finding": "-",
    "why": "treasury share changed",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"treasury 10%: 110000 != 100000\")] test_Distribute_80_10_5_5() (gas: 230390)"
+   "killedBy": "[FAIL: AssertionFailed(\"work: 790000 != 800000\")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 362352)"
   },
   {
    "id": "F-perks",
@@ -929,7 +929,7 @@
    "finding": "-",
    "why": "burn share changed",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"work: 810000 != 800000\")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 362352)"
+   "killedBy": "[FAIL: AssertionFailed(\"burn 5%: 40000 != 50000\")] test_Distribute_80_10_5_5() (gas: 244765)"
   },
   {
    "id": "F-dust",
@@ -937,7 +937,7 @@
    "finding": "-",
    "why": "the work share forgets the burn share",
    "status": "KILLED",
-   "killedBy": "[FAIL: TransferFailed()] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 324148)"
+   "killedBy": "[FAIL: TransferFailed()] test_Distribute_80_10_5_5() (gas: 192169)"
   },
   {
    "id": "F-sweep-usdg",
@@ -986,6 +986,62 @@
    "why": "a zero initial owner is accepted",
    "status": "KILLED",
    "killedBy": "[FAIL: next call did not revert as expected] test_ZeroOwnerRefusedAtDeploy() (gas: 6437)"
+  },
+  {
+   "id": "INV-OR1-withdraw",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "withdrawBond pays one unit less than it clears (OR1)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"bond returned: 99999999 != 100000000\")] test_Undisputed_Finalize_Settles() (gas: 879012)"
+  },
+  {
+   "id": "INV-OR2-refinalize",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "finalize leaves the question PROPOSED, so it credits again (OR2)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: ConditionPending()] test_OtherOutcome_Returns() (gas: 596985)"
+  },
+  {
+   "id": "INV-OR3-timeout-party",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "panel time-out returns the disputer's bond to the proposer (OR3)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"proposer bond back: 200000000 != 100000000\")] test_PanelTimeout_VoidsAndBondsReturn_TwoSidedVoid"
+  },
+  {
+   "id": "INV-OR4-repropose",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "-",
+   "why": "a VOID question can be proposed again (OR4)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"OR4: a question moved backwards or left a terminal state\")] invariant_ResolverStatesOnlyMoveForw"
+  },
+  {
+   "id": "INV-FR1-leak",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "the burn share goes to an address that is not a recipient (FR1)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"burn: 0 != 50000\")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 379442)"
+  },
+  {
+   "id": "INV-FR2-misroute",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "the treasury share goes to the work address (FR2)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"treasury 10%: 0 != 100000\")] test_Distribute_80_10_5_5() (gas: 201022)"
+  },
+  {
+   "id": "INV-FR3-stuck",
+   "file": "FeeRouter.sol",
+   "finding": "-",
+   "why": "work takes floor(80%), so the rounding remainder stays in the router (FR3)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"work 80% + dust: 800000 != 800001\")] test_Distribute_80_10_5_5() (gas: 253542)"
   }
  ]
 }
