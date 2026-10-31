@@ -30,9 +30,8 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R2-H1: unverifiable stranger p
     env.setSources({ down: ["tsdb"] }); // the second source has not published the result yet (lag, outage, rate limit)
     await proposeAs(env, env.chain.bob, q.id, wrong); // the losing party proposes its own answer at earliestResolve
     await resolverTick(env.deps);
-    expect(Number((await questionOnchain(env, q.id)).state)).toBe(2); // R3-H1: not yet, re-checked every tick
-    await warpToLastCall(env, q.id); // still unconfirmed in the last-call slot: disputed now
-    await resolverTick(env.deps);
+    // audit M-2: the source that is final contradicts it and none backs it, so it is disputed at once
+    expect(Number((await questionOnchain(env, q.id)).state)).toBe(3);
     await env.chain.warpTo((await env.chain.now()) + 7300n); // dispute window (2 h) passes
     env.setSources(); // the lagging source is back, too late
     await resolverTick(env.deps);
@@ -72,7 +71,7 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R2-H1: unverifiable stranger p
     expect(await onchainState(env, q.id)).toEqual([4, truth]);
   });
 
-  test("bond float too small: no dispute is possible, so a human is paged in the last-call slot (and the proposal is never finalized by us)", async () => {
+  test("bond float too small: no dispute is possible, so a human is told at once (and the proposal is never finalized by us)", async () => {
     const q = await env.question(3);
     const truth = expectedFootball(eplEvents[3]!);
     const wrong = truth === 1 ? 2 : 1;
@@ -86,7 +85,9 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R2-H1: unverifiable stranger p
     await warpToLastCall(env, q.id);
     await resolverTick(env.deps);
     expect(Number((await questionOnchain(env, q.id)).state)).toBe(2);
-    expect(env.alerts.some(([c]) => c.startsWith(`resolver-dispute-budget:${q.id}`))).toBe(true); // a human is paged in the slot
+    // audit M-2: the final source contradicts the proposal, so it is "contradicted": with no bond left a human is told
+    // at once (resolver-bond-short), not only in the last-call slot
+    expect(env.alerts.some(([c, m]) => c === "resolver-bond-short" && String(m).includes(q.id))).toBe(true);
     await env.chain.warpTo((await env.chain.now()) + 7300n);
     await resolverTick(env.deps);
     expect(Number((await questionOnchain(env, q.id)).state)).toBe(2); // the service does not finalize it
