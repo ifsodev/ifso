@@ -52,6 +52,7 @@ const deps = { env, db, clients, log, alert: async (cause: string, text: string)
 // ---- recorded provider data. Fixture i is "<home> vs <away>" with a recorded final score; kickoff is set relative to now
 // by the listing below, so a question built through the API opens, closes and resolves on the fork clock.
 const base = fixtureSources();
+const marketEnd = Date.now() + 3 * 3600_000; // fixed once: the open market ends 3 hours after the stack starts
 const marketSlug = pmMarkets[0]!.gamma.slug;
 deps.sources = {
   ...base,
@@ -59,7 +60,8 @@ deps.sources = {
     const r = await base.gamma(slug);
     if (!r.market) return r;
     // an open, liquid market ending in 3 hours (fork clock); the recorded payout (ctf) says how it settled
-    const m = { ...r.market, endDate: new Date(Date.now() + 3 * 3600_000).toISOString(), closed: false, active: true, liquidity: "50000", volume: "250000", liquidityNum: 50000, volumeNum: 250000, outcomePrices: '["0.55","0.45"]' } as typeof r.market;
+    if (Date.now() >= marketEnd) return r; // after its end the recorded, resolved market is what the sources show
+    const m = { ...r.market, endDate: new Date(marketEnd).toISOString(), closed: false, active: true, liquidity: "50000", volume: "250000", liquidityNum: 50000, volumeNum: 250000, outcomePrices: '["0.55","0.45"]' } as typeof r.market;
     return { report: r.report, market: m };
   },
 };
@@ -90,10 +92,11 @@ Bun.serve({ port: env.PORT, hostname: "127.0.0.1", fetch: (req, server) => app.f
 log(`api listening on 127.0.0.1:${env.PORT}`);
 
 // ---- workers on timers (one pass at a time each, like a BullMQ tick)
+const paused = new Set<string>(); // admin port: POST /worker {name, on}
 const every = (name: string, ms: number, fn: () => Promise<void>) => {
   let busy = false;
   setInterval(async () => {
-    if (busy) return;
+    if (busy || paused.has(name)) return;
     busy = true;
     try {
       await fn();
@@ -120,6 +123,12 @@ Bun.serve({
       if (req.method === "POST") offsetMs = Number(((await req.json()) as { ms: number }).ms);
       return Response.json({ ms: offsetMs });
     }
+    if (u.pathname === "/worker" && req.method === "POST") {
+      const b = (await req.json()) as { name: string; on: boolean };
+      if (b.on) paused.delete(b.name);
+      else paused.add(b.name);
+      return Response.json({ paused: [...paused] });
+    }
     if (u.pathname === "/alerts") return Response.json(alerts);
     if (u.pathname === "/sources") return Response.json({ marketSlug });
     return new Response("not found", { status: 404 });
@@ -137,9 +146,15 @@ Bun.serve({
     const u = new URL(req.url);
     if (u.pathname === "/accounts") return Response.json([...accounts.values()].map((x) => ({ name: x.n, address: x.a.address })), { headers: cors });
     if (u.pathname === "/sign" && req.method === "POST") {
-      const b = (await req.json()) as { address: string; kind: "typed" | "message"; typedData?: any; message?: string };
+      const b = (await req.json()) as { address: string; kind: "typed" | "message" | "send"; typedData?: any; message?: string; tx?: { to?: `0x${string}`; data?: `0x${string}`; value?: string; gas?: string } };
       const who = accounts.get(b.address.toLowerCase());
       if (!who) return Response.json({ error: "unknown account" }, { status: 404, headers: cors });
+      if (b.kind === "send") {
+        const { createWalletClient, http } = await import("viem");
+        const w = createWalletClient({ account: who.a, chain: clients.chain, transport: http(env.RHC_RPC_URLS.split(",")[0]!) });
+        const hash = await w.sendTransaction({ to: b.tx?.to, data: b.tx?.data, value: b.tx?.value ? BigInt(b.tx.value) : undefined, gas: b.tx?.gas ? BigInt(b.tx.gas) : undefined } as never);
+        return Response.json({ hash }, { headers: cors });
+      }
       const sig = b.kind === "typed" ? await who.a.signTypedData(b.typedData) : await who.a.signMessage({ message: b.message ?? "" });
       return Response.json({ signature: sig }, { headers: cors });
     }

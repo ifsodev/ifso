@@ -282,7 +282,8 @@ export const appRouter = t.router({
       twoSided: parsed.twoSided,
       recipient: parsed.recipient?.type === "address" ? (getAddress(parsed.recipient.address) as Address) : input.recipient,
       linkKey: parsed.recipient?.type === "address" ? undefined : input.linkKey,
-      referee: input.referee,
+      // a referee typed as 0x... in the text is already parsed; an explicit field (a handle the caller resolved) wins
+      referee: input.referee ?? (parsed.condition.kind === "APPROVE" && parsed.condition.mode === "REFEREE" && parsed.condition.referee.type === "address" ? (getAddress(parsed.condition.referee.address) as Address) : undefined),
       altRefundTo: input.altRefundTo,
       cancellable: input.cancellable,
     };
