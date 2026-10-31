@@ -10,7 +10,7 @@ const schema = z.object({
   PORT: z.coerce.number().default(8080),
   // Address the API listens on. The VPS template sets 127.0.0.1 (only Caddy, on the same host, reaches it).
   HOST: z.string().default("0.0.0.0"),
-  PUBLIC_APP_URL: z.string().url().default("https://ifso.app"),
+  PUBLIC_APP_URL: z.string().url().default("https://ifso.tech"),
   WEB_ORIGINS: z.string().default(""), // extra browser origins allowed to call the API (comma separated); PUBLIC_APP_URL is always allowed
   CHAIN_ID: z.coerce.number().default(4663),
   RHC_RPC_URLS: z.string().default(DEFAULT_RPC_URLS), // comma separated, tried in this order

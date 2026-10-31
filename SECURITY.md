@@ -1,7 +1,7 @@
 # Security policy
 
 ## Reporting a vulnerability
-Email **security@ifso.app** with a description, the affected contract or service, and steps or a proof of concept
+Email **security@ifso.tech** with a description, the affected contract or service, and steps or a proof of concept
 (a Foundry test is ideal). Please do not open a public issue and do not test against live deployments with real
 funds. We aim to acknowledge reports within 72 hours and to share a fix plan within 7 days. There is no paid
 reward programme yet.

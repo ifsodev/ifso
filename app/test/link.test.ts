@@ -32,7 +32,7 @@ describe("link key derivation", () => {
 describe("claim URLs", () => {
   test("round trip; secret only in the fragment", () => {
     const id = 2n ** 255n + 12345n;
-    const url = buildClaimUrl("https://ifso.app/", id, secret);
+    const url = buildClaimUrl("https://ifso.tech/", id, secret);
     const u = new URL(url);
     expect(u.hash.startsWith("#1.")).toBe(true);
     expect(u.pathname + u.search).not.toContain(u.hash.slice(3)); // secret never in path/query (sent to servers)
@@ -42,9 +42,9 @@ describe("claim URLs", () => {
   });
 
   test("rejects foreign or malformed links", () => {
-    expect(() => parseClaimUrl("https://ifso.app/x/abc#1.zzz")).toThrow();
-    expect(() => parseClaimUrl("https://ifso.app/c/" + "A".repeat(43) + "#2.abc")).toThrow();
-    expect(() => parseClaimUrl("https://ifso.app/c/" + "A".repeat(43) + "#1.short")).toThrow();
+    expect(() => parseClaimUrl("https://ifso.tech/x/abc#1.zzz")).toThrow();
+    expect(() => parseClaimUrl("https://ifso.tech/c/" + "A".repeat(43) + "#2.abc")).toThrow();
+    expect(() => parseClaimUrl("https://ifso.tech/c/" + "A".repeat(43) + "#1.short")).toThrow();
   });
 });
 

@@ -59,7 +59,7 @@ export function linkKeyAddress(secret: Uint8Array): Address {
   return linkAccount(secret).address;
 }
 
-/** https://ifso.app/c/<id base64url>#1.<secret base64url> — the id is public (it's on-chain), the secret is not. */
+/** https://ifso.tech/c/<id base64url>#1.<secret base64url> — the id is public (it's on-chain), the secret is not. */
 export function buildClaimUrl(baseUrl: string, id: bigint, secret: Uint8Array): string {
   const idBytes = toBytes(numberToHex(id, { size: 32 }));
   return `${baseUrl.replace(/\/$/, "")}/c/${b64urlEncode(idBytes)}#${LINK_VERSION}.${b64urlEncode(secret)}`;
