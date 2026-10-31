@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+// Origin: Re-declared here, reduced to the calls this repo makes, from Pyth's public Core interface and structs. No
+//         upstream file is vendored, so there is no upstream version to pin.
+
 /// @notice Minimal Pyth Core (pull oracle) interface. RHC Core: 0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a.
 library PythStructs {
     struct Price {

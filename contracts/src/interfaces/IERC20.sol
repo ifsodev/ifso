@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
+// Origin: Re-declared here from EIP-20 (function and event signatures only). No upstream file is vendored.
 
 interface IERC20 {
     event Transfer(address indexed from, address indexed to, uint256 value);

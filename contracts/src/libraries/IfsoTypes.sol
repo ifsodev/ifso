@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
+// Origin: Own definitions for this protocol; no upstream.
 
 /// @notice Condition kinds supported at launch. Every kind is resolvable with infrastructure live on
 ///         Robinhood Chain today (block time, Chainlink/Pyth feeds, signatures, the IFSO outcome resolver).

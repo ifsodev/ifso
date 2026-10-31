@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
+// Origin: Own implementation, written for this repo (ECDSA for EOAs, EIP-1271 staticcall for contracts). No code
+//         copied from OpenZeppelin, solmate or solady.
 
 import {ECDSA} from "./ECDSA.sol";
 import {IERC1271} from "../interfaces/IERC1271.sol";

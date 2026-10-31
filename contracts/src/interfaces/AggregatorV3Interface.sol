@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+// Origin: Re-declared here from Chainlink's public AggregatorV3Interface (function signatures only). No upstream
+//         file is vendored, so there is no upstream version to pin.
+
 /// @notice Chainlink Data Feeds proxy interface. On RHC, tokenized-equity feeds are 8 decimals, 24/5,
 ///         heartbeat 86400 s, 0.5% deviation, and already include the Stock Token multiplier.
 interface AggregatorV3Interface {

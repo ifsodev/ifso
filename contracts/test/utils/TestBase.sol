@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+// Origin: Own test base. The Vm interface below re-declares the cheatcodes used here from Foundry's public cheatcode
+//         list (same signatures as forge-std's Vm); no forge-std source is vendored.
+
 /// @notice Subset of the Foundry cheatcode interface (same address/signatures as forge-std's Vm), vendored
 ///         so the repo compiles and tests run without `forge install`. Works under Foundry and Hardhat 3.
 interface Vm {

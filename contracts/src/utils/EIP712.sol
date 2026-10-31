@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+// Origin: Own implementation, written for this repo (EIP-712 domain separator, recomputed when the chain id
+//         changes). No code copied from OpenZeppelin, solmate or solady.
+
 /// @notice Minimal EIP-712 domain with chain-id fork protection.
 abstract contract EIP712 {
     bytes32 private constant DOMAIN_TYPEHASH =

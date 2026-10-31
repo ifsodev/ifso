@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+// Origin: Own implementation, written for this repo (ecrecover with the low-s and v checks of EIP-2). No code copied
+//         from OpenZeppelin, solmate or solady.
+
 /// @notice Minimal ECDSA recovery for 65-byte (r,s,v) signatures with malleability checks.
 library ECDSA {
     error InvalidSignatureLength();

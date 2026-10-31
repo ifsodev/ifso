@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+// Origin: Own implementation, written for this repo (low-level call that accepts tokens returning nothing or true).
+//         No code copied from OpenZeppelin, solmate or solady.
+
 /// @notice Minimal safe ERC-20 transfer helpers (handles tokens that return nothing or false).
 library SafeTransferLib {
     error TransferFailed();

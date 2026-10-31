@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+// Origin: Own implementation, written for this repo (two-step ownership transfer). No code copied from OpenZeppelin,
+//         solmate or solady.
+
 /// @notice Two-step ownership (owner = brand multisig). Owner powers in IFSO never reach escrowed funds.
 abstract contract Owned2Step {
     error NotOwner();
