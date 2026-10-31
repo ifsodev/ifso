@@ -64,7 +64,9 @@ export interface Plan {
 // never sit at the head of a sweep and hide the rows behind it. In memory: a restart simply tries every row once more.
 const BACKOFF_BASE_MS = 2 * 60_000;
 const BACKOFF_MAX_MS = 6 * 3600_000;
-const backoff = new Map<string, { fails: number; until: number }>();
+// Audit L-4: waits (nothing to send yet) and failures (a send that reverted or errored) keep separate counters, so a row
+// that waited through a long hold window is retried after BACKOFF_BASE_MS on its first real failure, not after the cap.
+const backoff = new Map<string, { fails: number; waits: number; until: number }>();
 export const resetKeeperBackoff = () => backoff.clear();
 const bkey = (pass: string, id: string) => `${pass}:${id}`;
 const skipping = (pass: string, id: string, nowMs: number) => (backoff.get(bkey(pass, id))?.until ?? 0) > nowMs;
@@ -72,7 +74,7 @@ const skippedIds = (pass: string, nowMs: number) => [...backoff].filter(([k, v])
 function noteFailure(pass: string, id: string, nowMs: number) {
   const prev = backoff.get(bkey(pass, id));
   const fails = (prev?.fails ?? 0) + 1;
-  backoff.set(bkey(pass, id), { fails, until: nowMs + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS) });
+  backoff.set(bkey(pass, id), { fails, waits: prev?.waits ?? 0, until: nowMs + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), BACKOFF_MAX_MS) });
 }
 const noteSuccess = (pass: string, id: string) => backoff.delete(bkey(pass, id));
 // Review R2-M3: a row with nothing to send yet (no proof round, hold window, Pyth update missing) never fails, so it
@@ -86,9 +88,9 @@ const URGENT_WAIT_MAX_MS = 5 * 60_000;
 export const URGENT_PER_PASS = 50;
 function noteWait(pass: string, id: string, nowMs: number, urgent = false) {
   const prev = backoff.get(bkey(pass, id));
-  const fails = (prev?.fails ?? 0) + 1;
+  const waits = (prev?.waits ?? 0) + 1;
   const [base, max] = urgent ? [URGENT_WAIT_BASE_MS, URGENT_WAIT_MAX_MS] : [BACKOFF_BASE_MS, WAIT_MAX_MS];
-  backoff.set(bkey(pass, id), { fails, until: nowMs + Math.min(base * 2 ** (fails - 1), max) });
+  backoff.set(bkey(pass, id), { fails: prev?.fails ?? 0, waits, until: nowMs + Math.min(base * 2 ** (waits - 1), max) });
 }
 /** SQL: rows a keeper can act on at all (an unaccepted challenge never settles; it only refunds at expiry). */
 const actionable = () => or(eq(escrows.twoSided, false), eq(escrows.accepted, true));
