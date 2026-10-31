@@ -1,0 +1,2 @@
+.ink-transition{position:fixed;inset:0;z-index:2147483000;pointer-events:none;overflow:hidden;display:grid;place-items:center}.ink-transition.is-active{pointer-events:auto;touch-action:none}.ink-paper{position:absolute;inset:0;background:#f0e9dd}.ink-emblem{position:relative;display:block;width:clamp(180px,26vmin,300px);height:auto;overflow:visible}
+.ink-drawing path{fill:none;stroke:#af4236;stroke-linecap:round;stroke-linejoin:round}.ink-frame{stroke-width:3;opacity:.7}.ink-letter{stroke-width:8}.ink-letter-i{stroke-width:7}

@@ -1,0 +1,10 @@
+{
+  "name": "IFSO — Money that moves when something happens",
+  "short_name": "IFSO",
+  "description": "Conditional payments on Robinhood Chain.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4ece0",
+  "theme_color": "#f4ece0",
+  "icons": [{"src":"/ifso-seal-transparent.png","sizes":"any","type":"image/png","purpose":"any"}]
+}

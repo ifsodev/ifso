@@ -1,0 +1,769 @@
+/* `source("../")` limits class detection to `src/` (this file lives in src/app).
+   Without it Tailwind v4 scans the whole repo — including obsidian/ and .claude/,
+   where documented class *patterns* like duration-[var(--duration-*)] parse as
+   real candidates and emit CSS warnings. Docs are not a source of utilities. */
+@import "tailwindcss" source("../");
+
+/* ---------------------------------------------------------------------------
+   TIER 1 — PRIMITIVES  (`--raw-*`)
+   Raw literal values. The only tier allowed to contain a hex/px/ms literal.
+   Never referenced in markup, never bound into @theme. Rename freely.
+   Grammar: --raw-<category>-<name>[-<shade>]
+   See obsidian/frontend/design-system.md → "Token naming convention".
+   --------------------------------------------------------------------------- */
+:root {
+  --raw-color-white: #ffffff;
+  --raw-color-neutral-100: #ededed;
+  --raw-color-neutral-900: #171717;
+  --raw-color-neutral-950: #0a0a0a;
+
+  /* CRT overlay treatment — scanlines, vignette, grain.
+     Ratios and periods are the effect's own geometry, not design values. */
+  --raw-color-black: #000000;
+
+  /* 4px, not 3px: the period must land on whole DEVICE pixels or the lines beat
+     against the image underneath and throw diagonal moire. 4 CSS px is 4/6/8/12
+     device px at DPR 1/1.5/2/3 — always integer. Same for the 2px half. */
+  --raw-size-scanline-period: 4px;
+  --raw-size-grain-tile: 180px;
+  /* Edge falloff scales with the screen's short side: 240px / -20px on the
+     1440x900 frame, the same share of a phone or tablet screen. */
+  --raw-size-vignette-blur: 26.667vmin;
+  --raw-size-vignette-spread: -2.222vmin;
+
+  --raw-opacity-faint: 0.05;
+  /* CRT variant D: warm scanlines, light edge falloff. */
+  --raw-opacity-scanline: 0.12;
+  --raw-opacity-vignette: 0.28;
+
+  --raw-layer-overlay: 100;
+
+  /* Layers palette — from the Figma concept (Templates | Diana → Concept 15). */
+  --raw-color-paper: #f4ece0;
+  --raw-color-ink: #14110f;
+  --raw-color-gold: #b94338;
+  --raw-color-ascii: #8f5149;
+  --raw-color-ascii-deep: #402a29;
+  --raw-color-bezel: #0a0908;
+  --raw-color-cloud: #eee9df;
+  /* Burger menu CTA and link hover. */
+  --raw-color-ember: #b94338;
+  --raw-color-glass: rgb(255 255 255 / 0.28);
+
+  /* CRT bezel — rounded screen corners, 32px at the 1440 design width. */
+  --raw-radius-screen: 2rem;
+  --raw-size-bezel-spread: 4rem;
+
+  /* Type, intro-screen and tablet sizes — see the semantic tokens below. */
+  --raw-type-display: 4.5rem;
+  --raw-type-display-leading: 5rem;
+  --raw-type-running: 8rem;
+  --raw-type-running-leading: 8.5rem;
+  --raw-type-title: 3rem;
+  --raw-type-title-leading: 3rem;
+  --raw-type-subtitle: 2.5rem;
+  --raw-type-subtitle-leading: 3rem;
+  --raw-type-link: 2rem;
+  --raw-type-link-leading: 2.25rem;
+  --raw-type-body: 1.25rem;
+  --raw-type-body-leading: 1.75rem;
+  --raw-tv-width: 72rem;
+  --raw-tv-height: 33.0625rem;
+  --raw-open-width: 84rem;
+  --raw-open-height: 36.0625rem;
+  --raw-type-display-tablet: 4rem;
+  --raw-type-display-leading-tablet: 4.5rem;
+  --raw-type-running-tablet: 6rem;
+  --raw-type-running-leading-tablet: 6.5rem;
+  --raw-type-title-tablet: 2.25rem;
+  --raw-type-title-leading-tablet: 2.75rem;
+  --raw-type-subtitle-tablet: 2.25rem;
+  --raw-type-subtitle-leading-tablet: 2.75rem;
+  --raw-type-link-tablet: 1.75rem;
+  --raw-type-link-leading-tablet: 2rem;
+  --raw-type-body-tablet: 1.125rem;
+  --raw-type-body-leading-tablet: 1.75rem;
+  --raw-tv-width-tablet: 60rem;
+  --raw-tv-height-tablet: 31.1875rem;
+  --raw-open-width-tablet: 60rem;
+  --raw-open-height-tablet: 34.0625rem;
+
+  --raw-type-nav: 1rem;
+  --raw-type-nav-leading: 1.5rem;
+  --raw-type-label: 0.875rem;
+  --raw-type-label-leading: 1.25rem;
+  --raw-type-meta: 0.75rem;
+  --raw-type-meta-leading: 1rem;
+  --raw-type-micro: 0.625rem;
+  --raw-type-micro-leading: 0.875rem;
+  --raw-type-kanji: 1.375rem;
+  --raw-type-kanji-leading: 1.625rem;
+  --raw-type-counter: 2rem;
+  --raw-type-counter-leading: 2.5rem;
+  --raw-type-display-portrait: 4rem;
+  --raw-type-display-leading-portrait: 4.5rem;
+  --raw-type-body-portrait: 1.5rem;
+  --raw-type-body-leading-portrait: 2.125rem;
+  --raw-type-title-portrait: 3rem;
+  --raw-type-title-leading-portrait: 3.25rem;
+  --raw-type-subtitle-portrait: 3rem;
+  --raw-type-subtitle-leading-portrait: 3.5rem;
+  --raw-type-running-portrait: 6rem;
+  --raw-type-running-leading-portrait: 6.5rem;
+  --raw-type-link-portrait: 2rem;
+  --raw-type-link-leading-portrait: 2.5rem;
+  --raw-type-nav-portrait: 1.25rem;
+  --raw-type-nav-leading-portrait: 1.75rem;
+  --raw-type-label-portrait: 1rem;
+  --raw-type-label-leading-portrait: 1.5rem;
+  --raw-type-meta-portrait: 0.875rem;
+  --raw-type-meta-leading-portrait: 1.25rem;
+  --raw-type-micro-portrait: 0.75rem;
+  --raw-type-micro-leading-portrait: 1rem;
+  --raw-type-kanji-portrait: 1.75rem;
+  --raw-type-kanji-leading-portrait: 2.125rem;
+  --raw-type-counter-portrait: 2.5rem;
+  --raw-type-counter-leading-portrait: 3rem;
+  --raw-tv-width-portrait: 44rem;
+  --raw-tv-height-portrait: 40.0625rem;
+  --raw-open-width-portrait: 44rem;
+  --raw-open-height-portrait: 49.625rem;
+
+  --raw-type-menu: 2.75rem;
+  --raw-type-menu-leading: 3.25rem;
+  --raw-type-menu-mobile: 2rem;
+  --raw-type-menu-leading-mobile: 2.5rem;
+  --raw-type-tag: 1rem;
+  --raw-type-tag-leading: 1.5rem;
+  --raw-type-tag-portrait: 1rem;
+  --raw-type-tag-leading-portrait: 1.5rem;
+  --raw-type-mark: 2rem;
+  --raw-type-mark-leading: 2.5rem;
+  --raw-type-mark-portrait: 2rem;
+  --raw-type-mark-leading-portrait: 2.5rem;
+  --raw-type-display-mobile: 2.75rem;
+  --raw-type-display-leading-mobile: 3rem;
+  --raw-type-body-mobile: 1.125rem;
+  --raw-type-body-leading-mobile: 1.625rem;
+  --raw-type-title-mobile: 2rem;
+  --raw-type-title-leading-mobile: 2.25rem;
+  --raw-type-subtitle-mobile: 2rem;
+  --raw-type-subtitle-leading-mobile: 2.25rem;
+  --raw-type-running-mobile: 4rem;
+  --raw-type-running-leading-mobile: 4.5rem;
+  --raw-type-link-mobile: 1.5rem;
+  --raw-type-link-leading-mobile: 2rem;
+  --raw-type-nav-mobile: 1rem;
+  --raw-type-nav-leading-mobile: 1.5rem;
+  --raw-type-label-mobile: 0.875rem;
+  --raw-type-label-leading-mobile: 1.25rem;
+  --raw-type-meta-mobile: 0.75rem;
+  --raw-type-meta-leading-mobile: 1rem;
+  --raw-type-micro-mobile: 0.625rem;
+  --raw-type-micro-leading-mobile: 0.875rem;
+  --raw-type-kanji-mobile: 1.375rem;
+  --raw-type-kanji-leading-mobile: 1.625rem;
+  --raw-type-counter-mobile: 2rem;
+  --raw-type-counter-leading-mobile: 2.5rem;
+  --raw-type-tag-mobile: 0.9375rem;
+  --raw-type-tag-leading-mobile: 1.5rem;
+  --raw-type-mark-mobile: 1.75rem;
+  --raw-type-mark-leading-mobile: 2.5rem;
+  --raw-tv-width-mobile: 21.875rem;
+  --raw-tv-height-mobile: 32.25rem;
+  --raw-open-width-mobile: 21.875rem;
+  --raw-open-height-mobile: 38.75rem;
+
+  --raw-layer-header: 80;
+  --raw-layer-intro: 90; /* under the CRT overlay: the intro plays on the same screen */
+
+  --raw-shadow-text: 0 1px 0.75rem rgb(20 17 15 / 0.45);
+  --raw-shadow-mark: 0 0 1px rgb(20 17 15 / 0.85), 0 1px 0.1875rem rgb(20 17 15 / 0.7),
+    0 0 0.75rem rgb(20 17 15 / 0.5);
+  --raw-blur-cloud-far: 0.1875rem;
+  --raw-blur-cloud-near: 0.125rem;
+  --raw-blur-cloud-soft: 0.09375rem;
+  --raw-shadow-card: 0 0.5rem 1.5rem rgb(20 18 15 / 0.12);
+  --raw-shadow-sheet: 0 0.5rem 2rem rgb(20 17 15 / 0.08);
+  --raw-tracking-slate: 0.0625rem;
+  --raw-tracking-tight: -0.0625rem;
+
+  --raw-duration-fast: 150ms;
+  --raw-duration-normal: 250ms;
+  --raw-duration-flip: 350ms;
+}
+
+/* ---------------------------------------------------------------------------
+   TIER 2 — SEMANTIC  (role names, no namespace prefix)
+   Purpose, not appearance. Always `var(--raw-*)` — never a literal.
+   This is the themeable layer: dark mode overrides happen HERE, which is why
+   these are separate from the @theme bindings below (see the note there).
+   Grammar: --<role>[-<variant>][-<state>]
+   --------------------------------------------------------------------------- */
+:root {
+  --background: var(--raw-color-paper);
+  --foreground: var(--raw-color-ink);
+
+  /* CRT overlay — consumed by .crt-* in @layer components below and by
+     <CrtOverlay>; see obsidian/frontend/components/common.md. */
+  --overlay-tint: var(--raw-color-black);
+  --overlay-scanline-period: var(--raw-size-scanline-period);
+  /* Scanlines are gold on multiply: they tint the picture instead of greying it. */
+  --overlay-scanline-tint: var(--raw-color-gold);
+  --overlay-scanline-opacity: var(--raw-opacity-scanline);
+  --overlay-vignette-blur: var(--raw-size-vignette-blur);
+  --overlay-vignette-spread: var(--raw-size-vignette-spread);
+  --overlay-vignette-opacity: var(--raw-opacity-vignette);
+  --overlay-grain-tile: var(--raw-size-grain-tile);
+  --overlay-grain-opacity: var(--raw-opacity-faint);
+  --layer-overlay: var(--raw-layer-overlay);
+  --layer-header: var(--raw-layer-header);
+  --layer-intro: var(--raw-layer-intro);
+
+  --paper: var(--raw-color-paper);
+  --ink: var(--raw-color-ink);
+  /* Type set over a picture rather than paper: pure white, where --paper
+     reads warm against a photographic frame. */
+  --ink-over-image: var(--raw-color-white);
+  --accent: var(--raw-color-gold);
+  --ascii: var(--raw-color-ascii);
+  --ascii-deep: var(--raw-color-ascii-deep);
+  --glass: var(--raw-color-glass);
+  --cloud: var(--raw-color-cloud);
+  --cloud-blur-far: var(--raw-blur-cloud-far);
+  --cloud-blur-near: var(--raw-blur-cloud-near);
+  --cloud-blur-soft: var(--raw-blur-cloud-soft);
+  --card-shadow: var(--raw-shadow-card);
+  --sheet-shadow: var(--raw-shadow-sheet);
+  --ember: var(--raw-color-ember);
+  --glass-edge: color-mix(in srgb, var(--raw-color-white) 60%, transparent);
+  --bezel: var(--raw-color-bezel);
+  /* The frame's "Glass edge": a 1px bezel-ink line at 25%, blurred 3px. */
+  --bezel-edge: color-mix(in srgb, var(--raw-color-bezel) 25%, transparent);
+  --radius-screen-corner: var(--raw-radius-screen);
+  --bezel-spread: var(--raw-size-bezel-spread);
+  --shadow-legible: var(--raw-shadow-text);
+  --shadow-mark: var(--raw-shadow-mark);
+  --letter-slate: var(--raw-tracking-slate);
+  --letter-tight: var(--raw-tracking-tight);
+
+  /* Responsive type scale — 1440 design; the tablet block below overrides. */
+  --type-display: var(--raw-type-display);
+  --type-display-leading: var(--raw-type-display-leading);
+  --type-running: var(--raw-type-running);
+  --type-running-leading: var(--raw-type-running-leading);
+  --type-title: var(--raw-type-title);
+  --type-title-leading: var(--raw-type-title-leading);
+  --type-subtitle: var(--raw-type-subtitle);
+  --type-subtitle-leading: var(--raw-type-subtitle-leading);
+  --type-link: var(--raw-type-link);
+  --type-link-leading: var(--raw-type-link-leading);
+  --type-body: var(--raw-type-body);
+  --type-body-leading: var(--raw-type-body-leading);
+
+  --type-nav: var(--raw-type-nav);
+  --type-nav-leading: var(--raw-type-nav-leading);
+  --type-label: var(--raw-type-label);
+  --type-label-leading: var(--raw-type-label-leading);
+  --type-meta: var(--raw-type-meta);
+  --type-meta-leading: var(--raw-type-meta-leading);
+  --type-micro: var(--raw-type-micro);
+  --type-micro-leading: var(--raw-type-micro-leading);
+  --type-kanji: var(--raw-type-kanji);
+  --type-kanji-leading: var(--raw-type-kanji-leading);
+  --type-counter: var(--raw-type-counter);
+  --type-counter-leading: var(--raw-type-counter-leading);
+
+  --type-menu: var(--raw-type-menu);
+  --type-menu-leading: var(--raw-type-menu-leading);
+  --type-tag: var(--raw-type-tag);
+  --type-tag-leading: var(--raw-type-tag-leading);
+  --type-mark: var(--raw-type-mark);
+  --type-mark-leading: var(--raw-type-mark-leading);
+
+  /* Scale of the cloud column and the works ring against the rem grid. */
+  --ring-zoom: 1;
+
+  /* Intro screen window: loading TV and opened screen, at the 1440 design. */
+  --tv-width: var(--raw-tv-width);
+  --tv-height: var(--raw-tv-height);
+  --open-width: var(--raw-open-width);
+  --open-height: var(--raw-open-height);
+
+  --duration-fast: var(--raw-duration-fast);
+  --duration-normal: var(--raw-duration-normal);
+  --duration-hover: var(--raw-duration-fast);
+  /* Nav label rolling up to its Japanese twin. */
+  --duration-flip: var(--raw-duration-flip);
+}
+
+/* Tablet (<= 1024px): the 1024 layout of the concept. Must match the html
+   font-size breakpoint below, so rem values read 1:1 against the 1024 frames. */
+
+@media (max-width: 1024px) {
+  :root {
+    --type-display: var(--raw-type-display-tablet);
+    --type-display-leading: var(--raw-type-display-leading-tablet);
+    --type-running: var(--raw-type-running-tablet);
+    --type-running-leading: var(--raw-type-running-leading-tablet);
+    --type-title: var(--raw-type-title-tablet);
+    --type-title-leading: var(--raw-type-title-leading-tablet);
+    --type-subtitle: var(--raw-type-subtitle-tablet);
+    --type-subtitle-leading: var(--raw-type-subtitle-leading-tablet);
+    --type-link: var(--raw-type-link-tablet);
+    --type-link-leading: var(--raw-type-link-leading-tablet);
+    --type-body: var(--raw-type-body-tablet);
+    --type-body-leading: var(--raw-type-body-leading-tablet);
+    /* Clouds and ring keep their share of the screen width: 1024/1440 of the
+       1440 geometry, which the rem grid alone would blow up by 1440/1024. */
+    --ring-zoom: 0.7111;
+    --tv-width: var(--raw-tv-width-tablet);
+    --tv-height: var(--raw-tv-height-tablet);
+    --open-width: var(--raw-open-width-tablet);
+    --open-height: var(--raw-open-height-tablet);
+  }
+}
+
+/* Portrait tablet (<= 768px): the 768 layout of the concept. */
+
+@media (width < 64.0625rem) and (orientation: portrait), (width < 48.0625rem) and (height > 31.25rem) {
+  :root {
+    --type-display: var(--raw-type-display-portrait);
+    --type-display-leading: var(--raw-type-display-leading-portrait);
+    --type-body: var(--raw-type-body-portrait);
+    --type-body-leading: var(--raw-type-body-leading-portrait);
+    --type-title: var(--raw-type-title-portrait);
+    --type-title-leading: var(--raw-type-title-leading-portrait);
+    --type-subtitle: var(--raw-type-subtitle-portrait);
+    --type-subtitle-leading: var(--raw-type-subtitle-leading-portrait);
+    --type-running: var(--raw-type-running-portrait);
+    --type-running-leading: var(--raw-type-running-leading-portrait);
+    --type-link: var(--raw-type-link-portrait);
+    --type-link-leading: var(--raw-type-link-leading-portrait);
+    --type-nav: var(--raw-type-nav-portrait);
+    --type-nav-leading: var(--raw-type-nav-leading-portrait);
+    --type-label: var(--raw-type-label-portrait);
+    --type-label-leading: var(--raw-type-label-leading-portrait);
+    --type-meta: var(--raw-type-meta-portrait);
+    --type-meta-leading: var(--raw-type-meta-leading-portrait);
+    --type-micro: var(--raw-type-micro-portrait);
+    --type-micro-leading: var(--raw-type-micro-leading-portrait);
+    --type-kanji: var(--raw-type-kanji-portrait);
+    --type-kanji-leading: var(--raw-type-kanji-leading-portrait);
+    --type-counter: var(--raw-type-counter-portrait);
+    --type-counter-leading: var(--raw-type-counter-leading-portrait);
+    --type-tag: var(--raw-type-tag-portrait);
+    --type-tag-leading: var(--raw-type-tag-leading-portrait);
+    --type-mark: var(--raw-type-mark-portrait);
+    --type-mark-leading: var(--raw-type-mark-leading-portrait);
+    --ring-zoom-x: 0.6;
+    --ring-zoom-y: 0.815;
+    --tv-width: var(--raw-tv-width-portrait);
+    --tv-height: var(--raw-tv-height-portrait);
+    --open-width: var(--raw-open-width-portrait);
+    --open-height: var(--raw-open-height-portrait);
+  }
+}
+
+/* Phone (<= 640px): the 390 layout of the concept. */
+@media (width < 40.0625rem) and (orientation: portrait), (width < 40.0625rem) and (height > 31.25rem) {
+  :root {
+    --type-menu: var(--raw-type-menu-mobile);
+    --type-menu-leading: var(--raw-type-menu-leading-mobile);
+    --type-display: var(--raw-type-display-mobile);
+    --type-display-leading: var(--raw-type-display-leading-mobile);
+    --type-body: var(--raw-type-body-mobile);
+    --type-body-leading: var(--raw-type-body-leading-mobile);
+    --type-title: var(--raw-type-title-mobile);
+    --type-title-leading: var(--raw-type-title-leading-mobile);
+    --type-subtitle: var(--raw-type-subtitle-mobile);
+    --type-subtitle-leading: var(--raw-type-subtitle-leading-mobile);
+    --type-running: var(--raw-type-running-mobile);
+    --type-running-leading: var(--raw-type-running-leading-mobile);
+    --type-link: var(--raw-type-link-mobile);
+    --type-link-leading: var(--raw-type-link-leading-mobile);
+    --type-nav: var(--raw-type-nav-mobile);
+    --type-nav-leading: var(--raw-type-nav-leading-mobile);
+    --type-label: var(--raw-type-label-mobile);
+    --type-label-leading: var(--raw-type-label-leading-mobile);
+    --type-meta: var(--raw-type-meta-mobile);
+    --type-meta-leading: var(--raw-type-meta-leading-mobile);
+    --type-micro: var(--raw-type-micro-mobile);
+    --type-micro-leading: var(--raw-type-micro-leading-mobile);
+    --type-kanji: var(--raw-type-kanji-mobile);
+    --type-kanji-leading: var(--raw-type-kanji-leading-mobile);
+    --type-counter: var(--raw-type-counter-mobile);
+    --type-counter-leading: var(--raw-type-counter-leading-mobile);
+    --type-tag: var(--raw-type-tag-mobile);
+    --type-tag-leading: var(--raw-type-tag-leading-mobile);
+    --type-mark: var(--raw-type-mark-mobile);
+    --type-mark-leading: var(--raw-type-mark-leading-mobile);
+    --ring-zoom-x: 0.56;
+    --ring-zoom-y: 0.73;
+    --tv-width: var(--raw-tv-width-mobile);
+    --tv-height: var(--raw-tv-height-mobile);
+    --open-width: var(--raw-open-width-mobile);
+    --open-height: var(--raw-open-height-mobile);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: var(--raw-color-neutral-950);
+    --foreground: var(--raw-color-neutral-100);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   THEME BINDINGS — map semantic tokens into Tailwind namespaces.
+   Every entry is exactly `--<tw-namespace>-<role>: var(--<role>)`.
+   `inline` is required: it inlines the var() into each utility, so the
+   dark-mode overrides on the Tier 2 tokens above cascade. Binding a literal
+   here instead would freeze the value and break theming.
+
+   Only these namespaces generate utilities (verified against tailwindcss
+   v4.3.3): --color-* --spacing-* --radius-* --leading-* --tracking-* --text-*
+   --font-* --ease-* --breakpoint-* --container-* --shadow-* --blur-* --animate-*
+   NOTE: there is NO --duration-* namespace in v4 — `duration-fast` compiles to
+   nothing. Durations stay Tier 2 only and are used as duration-[var(--duration-fast)].
+   --------------------------------------------------------------------------- */
+/* Portrait and phone layouts are picked by orientation as well as width: a
+   portrait tablet up to 1024px wide takes the 768 frames, and a phone held
+   sideways (landscape, at most 500px tall) keeps the 1024 frames rather than
+   squeezing a portrait layout into a letterbox. Registered after the core
+   `max-tablet` breakpoint and in this order, so portrait overrides tablet and
+   mobile overrides portrait. Kept in step with the media blocks below. */
+@custom-variant max-portrait {
+  @media (width < 64.0625rem) and (orientation: portrait), (width < 48.0625rem) and (height > 31.25rem) {
+    @slot;
+  }
+}
+@custom-variant max-mobile {
+  @media (width < 40.0625rem) and (orientation: portrait), (width < 40.0625rem) and (height > 31.25rem) {
+    @slot;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-onest);
+
+  /* Layout breakpoints, used as `max-tablet:` (<= 1024px, the 1024 frames)
+     `max-portrait:` (<= 768px, the 768 frames) and
+     `max-mobile:` (<= 640px, the 390 frames). Tailwind orders max-*
+     variants largest first, so portrait overrides tablet. Kept in step with
+     the html font-size and :root token media queries below. */
+  --breakpoint-tablet: 64.0625rem;
+  --font-display: var(--font-reggae);
+  --font-mono: var(--font-plex-mono);
+  --font-kanji: var(--font-noto-serif-jp);
+
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-over-image: var(--ink-over-image);
+  --color-accent: var(--accent);
+  --color-ascii: var(--ascii);
+  --color-glass: var(--glass);
+  --color-cloud: var(--cloud);
+  --blur-cloud-far: var(--cloud-blur-far);
+  --blur-cloud-near: var(--cloud-blur-near);
+  --blur-cloud-soft: var(--cloud-blur-soft);
+  --shadow-card: var(--card-shadow);
+  --shadow-sheet: var(--sheet-shadow);
+  --color-ember: var(--ember);
+  --color-glass-edge: var(--glass-edge);
+  --text-shadow-legible: var(--shadow-legible);
+  --text-shadow-mark: var(--shadow-mark);
+  --tracking-slate: var(--letter-slate);
+  --tracking-tight: var(--letter-tight);
+
+  /* Type scale at the 1440 design width (1rem = 16px there). */
+  --text-display: var(--type-display);
+  --text-display--line-height: var(--type-display-leading);
+  --text-running: var(--type-running);
+  --text-running--line-height: var(--type-running-leading);
+  --text-title: var(--type-title);
+  --text-title--line-height: var(--type-title-leading);
+  --text-subtitle: var(--type-subtitle);
+  --text-subtitle--line-height: var(--type-subtitle-leading);
+  --text-link: var(--type-link);
+  --text-link--line-height: var(--type-link-leading);
+  --text-menu: var(--type-menu);
+  --text-menu--line-height: var(--type-menu-leading);
+  --text-tag: var(--type-tag);
+  --text-tag--line-height: var(--type-tag-leading);
+  --text-mark: var(--type-mark);
+  --text-mark--line-height: var(--type-mark-leading);
+  --text-counter: var(--type-counter);
+  --text-counter--line-height: var(--type-counter-leading);
+  --text-logo: 2rem;
+  --text-body: var(--type-body);
+  --text-body--line-height: var(--type-body-leading);
+  --text-nav: var(--type-nav);
+  --text-nav--line-height: var(--type-nav-leading);
+  --text-label: var(--type-label);
+  --text-label--line-height: var(--type-label-leading);
+  --text-meta: var(--type-meta);
+  --text-meta--line-height: var(--type-meta-leading);
+  --text-micro: var(--type-micro);
+  --text-micro--line-height: var(--type-micro-leading);
+  --text-kanji: var(--type-kanji);
+  --text-kanji--line-height: var(--type-kanji-leading);
+  --text-kanji-logo: 2.125rem;
+  --text-glyph: 1rem;
+  --text-glyph--line-height: 1rem;
+
+  /* Leading floor for clipped TextEngine reveals — see
+     obsidian/frontend/text-engine.md → "Alignment & line-height". */
+  --leading-display: 1.1;
+
+  --ease-entrance: cubic-bezier(0.2, 0, 0, 1);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  /* min-height, not height: a fixed height caps the document, so nothing
+     taller than the viewport can scroll. svh matches the unit sections are
+     sized in and avoids the mobile URL-bar jump. width is 100%, not 100vw,
+     because 100vw includes the scrollbar gutter and would add a horizontal
+     scrollbar. */
+  min-height: 100svh;
+  width: 100%;
+}
+
+@layer base {
+  /* Adaptive scaling grid — scales the root font-size with the viewport so a
+     rem-based layout stays proportional. Each breakpoint divides FONT_BASE
+     (16px) by the design base width its range was laid out at:
+       font-size: 16 * 100 / baseWidth  (vw)
+     Above 1440px — the design width — the AdaptiveGrid component takes over
+     and scales up proportionally, so wider screens show the 1440 layout 1:1.
+     Keep in sync with src/components/common/grid/grid.config.ts. */
+  /* No browser scrollbar: the page is a scrubbed timeline driven by Lenis,
+     and the bar's thumb jumping through pinned scenes read as a broken
+     control. Scrolling itself — wheel, touch, keys — is untouched. */
+  html {
+    scrollbar-width: none;
+  }
+  html::-webkit-scrollbar {
+    display: none;
+  }
+
+  html {
+    font-size: 16px;
+  }
+
+  /* Each size is also capped by height, so a screen shorter than its frame
+     scales the layout down to fit instead of crowding it: 1440 frames need
+     800px of height, 1024 frames 640px (landscape phones land here), 768
+     frames 900px and 390 frames 700px. A phone layout never grows past 20px
+     a rem — on a 600px-wide screen the 390 frame would otherwise read huge.
+     The reference sizes (1440x900, 1024x768, 768x1024, 390x844) hit the
+     width term exactly, so they render 1:1. */
+  @media (max-width: 1440px) {
+    html {
+      font-size: min(1.111111vw, 2svh); /* 16 * 100 / 1440, 16 * 100 / 800 */
+    }
+  }
+
+  @media (max-width: 1024px) {
+    html {
+      font-size: min(1.5625vw, 2.5svh); /* 16 * 100 / 1024, 16 * 100 / 640 */
+    }
+  }
+
+  @media (width < 64.0625rem) and (orientation: portrait), (width < 48.0625rem) and (height > 31.25rem) {
+    html {
+      font-size: min(2.083333vw, 1.777778svh); /* 16 * 100 / 768, 16 * 100 / 900 */
+    }
+  }
+
+  @media (width < 40.0625rem) and (orientation: portrait), (width < 40.0625rem) and (height > 31.25rem) {
+    html {
+      font-size: min(4.102564vw, 2.285714svh, 1.25rem); /* 16 * 100 / 390, 16 * 100 / 700 */
+    }
+  }
+}
+
+@layer utilities {
+}
+
+@layer components {
+  /* CRT overlay layers, rendered by <CrtOverlay>. These live here rather than in
+     utilities because each is a multi-stop gradient / generated asset — the
+     "complex selectors" exception in [[design-system]] (ADR-0012). Every value
+     is a Tier 2 token; the numbers below are the effect's geometry.
+     Static by design: no keyframes (hard rule #1) and no per-frame work. */
+
+  /* Horizontal TV scanlines — a 50% duty cycle over one period.
+     One period taller than its container: <CrtOverlay> drifts it upward by
+     exactly one period and loops, so the extra row covers the gap that would
+     otherwise open at the bottom. */
+  .crt-scanlines {
+    height: calc(100% + var(--overlay-scanline-period));
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc(var(--overlay-scanline-period) * 0.5),
+      var(--overlay-scanline-tint) calc(var(--overlay-scanline-period) * 0.5),
+      var(--overlay-scanline-tint) var(--overlay-scanline-period)
+    );
+    opacity: var(--overlay-scanline-opacity);
+    mix-blend-mode: multiply;
+    /* --overlay-scanline-drift is a unitless 0-1 supplied by <CrtOverlay>; the
+       distance stays here so the period is still described in one place. The
+       fallback keeps the layer put before hydration and under reduced motion. */
+    transform: translate3d(
+      0,
+      calc(var(--overlay-scanline-period) * var(--overlay-scanline-drift, 0) * -1),
+      0
+    );
+    will-change: transform;
+  }
+
+  /* CRT bezel falloff. An inset shadow hugs all four EDGES evenly and darkens
+     the corners where they meet — a centred radial-gradient instead pools in the
+     middle of each edge and leaves the corners weak. */
+  .crt-vignette {
+    box-shadow: inset 0 0 var(--overlay-vignette-blur)
+      var(--overlay-vignette-spread) var(--overlay-tint);
+    opacity: var(--overlay-vignette-opacity);
+  }
+
+  /* Film grain — an inline feTurbulence tile, so no network request and no asset to ship. */
+  .crt-grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23grain)'/%3E%3C/svg%3E");
+    background-size: var(--overlay-grain-tile) var(--overlay-grain-tile);
+    background-repeat: repeat;
+    opacity: var(--overlay-grain-opacity);
+  }
+
+  /* CRT bezel — dark rounded screen corners over the whole viewport. A rounded
+     transparent box whose huge spread shadow paints only outside the radius,
+     so the corners stay round at any aspect ratio (an SVG would stretch). */
+  .crt-bezel {
+    border-radius: var(--radius-screen-corner);
+    box-shadow:
+      0 0 0 var(--bezel-spread) var(--bezel),
+      inset 0 0 0.1875rem 0.0625rem var(--bezel-edge);
+  }
+
+  /* Intro screen window. <Preloader> writes two bare 0-1 numbers:
+     --screen-open (loading TV -> opened screen) and --screen-reveal
+     (opened screen -> full viewport) — today both the same value, so the
+     window grows linearly from the TV to the full viewport and the easing
+     lives in that one number. The sizes are the --tv-* / --open-* tokens:
+     1152x529 -> 1344x577 at 1440, 960x499 -> 960x545 at 1024. The final
+     height overshoots the viewport so the barrel's curved top and bottom
+     edges end up off-screen and the window reads as flat. Computed once on
+     the overlay so the screen and its surround read the same size. */
+  .intro-screen {
+    --screen-w: calc(
+      var(--tv-width) + (var(--open-width) - var(--tv-width)) * var(--screen-open, 0) +
+        (100vw - var(--open-width)) * var(--screen-reveal, 0)
+    );
+    --screen-h: calc(
+      var(--tv-height) + (var(--open-height) - var(--tv-height)) * var(--screen-open, 0) +
+        (106svh - var(--open-height)) * var(--screen-reveal, 0)
+    );
+  }
+
+  /* Clips content to the screen. */
+  .intro-screen-mask {
+    mask-image: url("/assets/home/screen-mask.svg");
+    mask-repeat: no-repeat;
+    mask-position: center;
+    mask-size: var(--screen-w) var(--screen-h);
+  }
+
+  /* The inverse: a full layer minus the screen, so paper covers everything
+     around the window and the page shows through it. */
+  .intro-surround {
+    mask-image: linear-gradient(black, black), url("/assets/home/screen-mask.svg");
+    mask-repeat: no-repeat;
+    mask-position: center;
+    mask-size: 100% 100%, var(--screen-w) var(--screen-h);
+    mask-composite: exclude;
+  }
+
+  /* ASCII noise over the opening screen: the glyphs are cut out of the hero
+     frame itself (background-clip: text) under a deep-blue tint, so the noise
+     carries the picture's light rather than a flat colour. */
+  .ascii-noise {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--ascii-deep) 50%, transparent), color-mix(in srgb, var(--ascii-deep) 50%, transparent)),
+      url("/assets/sequence-1/frame-00000.webp");
+    background-size: auto, cover;
+    background-position: center;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* The ring scales with a transform, not zoom: zoom mis-projects the 3D
+     cards. Scaling the flattened perspective box keeps every proportion. */
+  .zoom-ring {
+    --zx: var(--ring-zoom-x, var(--ring-zoom));
+    --zy: var(--ring-zoom-y, var(--ring-zoom));
+    width: calc(100% / var(--zx));
+    height: calc(100% / var(--zy));
+    transform: scale(var(--zx), var(--zy));
+    transform-origin: 0 0;
+  }
+
+  /* Header ink: a mix of the two inks by --light (0 ink -> 1 paper), set by
+     <SiteHeader> from scroll. */
+  .header-ink {
+    color: color-mix(in oklab, var(--paper) calc(var(--light, 0) * 100%), var(--ink));
+  }
+
+  /* Portrait and phones drop the dark top scrim — it swallowed half the
+     screen — so light ink gets a soft shadow instead, fading in with --light. */
+  @media (width < 64.0625rem) and (orientation: portrait), (width < 48.0625rem) and (height > 31.25rem) {
+    .header-ink {
+      text-shadow: 0 1px 0.75rem
+        color-mix(in srgb, var(--ink) calc(var(--light, 0) * 55%), transparent);
+    }
+  }
+
+  /* Cloud edge: a solid band whose top is cut to the silhouette of the cloud
+     bank, tiled at two scales so the lumps never line up. It replaces a
+     straight gradient, which read as a ruled line across the screen. Fully
+     opaque along the bottom, so it runs seamlessly into the solid cloud. */
+  .cloud-edge {
+    /* Third layer: the bank art is not fully opaque along its bottom, so a
+       gradient guarantees a solid foot — whatever meets the band below (the
+       cloud body, the paper) starts inside it and leaves no step. */
+    mask-image:
+      url("/assets/home/cloud-bank.png"), url("/assets/home/cloud-bank.png"),
+      linear-gradient(transparent 62%, black 84%);
+    mask-size:
+      auto 100%,
+      auto 72%,
+      100% 100%;
+    /* The bank image has empty margins at both ends; start the tiles off
+       the band's edge (the band is wider than the screen) so they never
+       leave a flat gap on screen. */
+    mask-position:
+      -4rem 100%,
+      41% 100%,
+      0 0;
+    mask-repeat: repeat-x, repeat-x, no-repeat;
+    mask-composite: add;
+  }
+}
+
+/* The consent banner is server-rendered (it paints with the page). Hidden before
+   paint for a visitor who already chose (`consent-flag.ts`) and on the robot
+   form, which has no visitor to ask (D-016). */
+html[data-consent] [data-cookie-banner],
+html:has(meta[name="x-robot-view"]) [data-cookie-banner] {
+  display: none;
+}
+
+/* Grade the original scroll imagery into IFSO’s warm paper and ink palette. */
+main canvas { filter: grayscale(.35) sepia(.12) saturate(.9); }
+
+/* Reference pages use clean, undistorted UI; the landing retains its CRT. */
+body:has(.workspace) .crt-scanlines,body:has(.workspace) .crt-vignette,body:has(.workspace) .crt-grain,body:has(.workspace) .crt-bezel,body:has(.folder-page) .crt-scanlines,body:has(.folder-page) .crt-vignette,body:has(.folder-page) .crt-grain,body:has(.folder-page) .crt-bezel,body:has(.samurai-page) .crt-scanlines,body:has(.samurai-page) .crt-vignette,body:has(.samurai-page) .crt-grain,body:has(.samurai-page) .crt-bezel,body:has(.scrapbook) .crt-scanlines,body:has(.scrapbook) .crt-vignette,body:has(.scrapbook) .crt-grain,body:has(.scrapbook) .crt-bezel{display:none}
