@@ -285,6 +285,7 @@ export const appRouter = t.router({
   /** Build exact CreateParams + the EIP-3009 typed data the sender signs (gasless create). The link secret
    *  stays in the browser: only its derived address (linkKey) is sent here. */
   build: t.procedure.input(buildInput).mutation(async ({ input, ctx }) => {
+    await readBudget(ctx); // audit L-2: up to four RPC reads per call
     const { deps } = ctx;
     let text = input.text;
     let tzOffsetMin = input.tzOffsetMin;
@@ -447,6 +448,7 @@ export const appRouter = t.router({
 
   /** Claim page: everything shown is read from the chain, not from the URL (anti-phishing). */
   escrow: t.procedure.input(z.object({ id: uint })).query(async ({ input, ctx }) => {
+    await readBudget(ctx); // audit L-2
     const { e, c } = await readEscrow(ctx.deps, input.id);
     if (e.status === 0) throw new TRPCError({ code: "NOT_FOUND" });
     return jsonSafe({ escrow: e, condition: c, amountText: formatUsdg(e.amount) });
@@ -537,12 +539,14 @@ export const appRouter = t.router({
     }),
 
   mine: t.procedure.input(z.object({ address: addr })).query(async ({ input, ctx }) => {
+    await readBudget(ctx); // audit L-2
     const a = input.address.toLowerCase();
     const rows = await ctx.deps.db.select().from(escrows).where(or(eq(escrows.sender, a), eq(escrows.recipient, a))).orderBy(desc(escrows.createdBlock)).limit(100);
     return jsonSafe(rows);
   }),
 
   question: t.procedure.input(z.object({ specHash: hex })).query(async ({ input, ctx }) => {
+    await readBudget(ctx); // audit L-2
     const [q] = await ctx.deps.db.select().from(questions).where(eq(questions.specHash, input.specHash));
     if (!q) throw new TRPCError({ code: "NOT_FOUND" });
     return jsonSafe({ id: q.id, spec: q.spec, title: q.title, state: q.state, finalOutcome: q.finalOutcome });

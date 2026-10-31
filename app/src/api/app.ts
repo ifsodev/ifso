@@ -14,6 +14,9 @@ import { userStats } from "./stats";
 import { webhookPath } from "../bot/webhook";
 import { stockPriceConditionAllowed } from "../core/geo";
 
+/** How long one /readyz probe run answers every caller (probes cost a DB query and two RPC reads). */
+export const READY_TTL_MS = 5_000;
+
 export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: Record<string, Probe> = {}) {
   const app = new Hono();
   // strict headers; the claim page itself (web app) additionally ships a CSP with no third-party scripts
@@ -25,9 +28,20 @@ export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: R
 
   app.get("/healthz", (c) => c.json({ ok: true, chainId: deps.clients.chain.id, escrow: deps.clients.escrow ?? null }));
 
+  // Audit L-2: unauthenticated reads that touch the database or RPC share the per-network read budget.
+  const readOk = (c: { req: { raw: Request }; env: unknown }) =>
+    limiter.hit(`read:ip:${RateLimiter.ipHash(clientIp(c.req.raw.headers, deps.env.TRUST_PROXY, (c.env as { socketIp?: string } | undefined)?.socketIp), deps.env.IP_HASH_SALT)}`, deps.env.READS_PER_IP_PER_HOUR, 3600);
+  const tooMany = { error: "too many requests from this network, try again later" };
+
+  // Audit L-2: one probe run per READY_TTL_MS for every caller, and only the probe's short name goes out (the raw
+  // error text, which can name hosts, stays in the log).
+  let ready: { at: number; value: Promise<{ ok: boolean; reasons: string[] }> } | undefined;
   app.get("/readyz", async (c) => {
-    const r = await readiness(probes);
-    return c.json(r, r.ok ? 200 : 503);
+    if (!(await readOk(c))) return c.json(tooMany, 429);
+    if (!ready || Date.now() - ready.at >= READY_TTL_MS) ready = { at: Date.now(), value: readiness(probes) };
+    const r = await ready.value;
+    if (!r.ok) deps.log("readyz not ready", { reasons: r.reasons });
+    return c.json({ ok: r.ok, reasons: r.reasons.map((x) => x.split(": ")[0]!) }, r.ok ? 200 : 503);
   });
 
   // region rule for the site: the country comes from the trusted edge header only; unknown = not allowed
@@ -42,13 +56,13 @@ export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: R
     const since = c.req.query("since");
     if (since !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(since)) return c.json({ error: "since must be YYYY-MM-DD" }, 400);
     // review R3-L1: same per-network read budget as the tRPC reads; the result itself is cached for 60 s
-    const ip = clientIp(c.req.raw.headers, deps.env.TRUST_PROXY, (c.env as { socketIp?: string } | undefined)?.socketIp);
-    if (!(await limiter.hit(`read:ip:${RateLimiter.ipHash(ip, deps.env.IP_HASH_SALT)}`, deps.env.READS_PER_IP_PER_HOUR, 3600))) return c.json({ error: "too many requests from this network, try again later" }, 429);
+    if (!(await readOk(c))) return c.json(tooMany, 429);
     return c.json(await userStats(deps, since ? Math.floor(Date.parse(`${since}T00:00:00Z`) / 1000) : undefined));
   });
 
   // question specs are public (their hash is on-chain); served from the DB
   app.get("/q/:file", async (c) => {
+    if (!(await readOk(c))) return c.json(tooMany, 429);
     const specHash = c.req.param("file").replace(/\.json$/, "");
     const [q] = await deps.db.select().from(questions).where(eq(questions.specHash, specHash));
     return q ? c.json(jsonSafe(q.spec) as object) : c.notFound();
