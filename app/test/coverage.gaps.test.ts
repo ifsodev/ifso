@@ -136,11 +136,11 @@ describe("worker deps", () => {
     const logs: string[] = [];
     const alerts: string[] = [];
     const base = { log: (m: string) => void logs.push(m) } as unknown as Deps;
-    await raise({ ...base, alert: async (c: string) => void alerts.push(c) } as Deps, "cause-1", "text");
+    await raise({ ...base, alert: async (c: string) => (alerts.push(c), true) } as unknown as Deps, "cause-1", "text");
     expect(alerts).toEqual(["cause-1"]);
     await raise(base, "cause-2", "text");
     expect(logs).toEqual(["ALERT cause-2"]);
-    await raise({ ...base, alert: async () => { throw new Error("telegram down"); } } as Deps, "cause-3", "text");
+    await raise({ ...base, alert: async () => { throw new Error("telegram down"); } } as unknown as Deps, "cause-3", "text");
     expect(logs).toContain("alert failed");
   });
 });
@@ -166,8 +166,9 @@ describe("provider fetchers", () => {
   test("a provider error status is thrown with the host only, never the key in the URL", async () => {
     stubFetch(() => ({ status: 503, body: "down" }));
     const err = await fetchScore("SECRET-KEY", "soccer_epl", "ev1").catch((e) => e as Error);
-    expect(String(err.message)).toContain("503");
-    expect(String(err.message)).not.toContain("SECRET-KEY");
+    const msg = String((err as Error).message);
+    expect(msg).toContain("503");
+    expect(msg).not.toContain("SECRET-KEY");
   });
 
   test("The Odds API: events list and score for one event", async () => {

@@ -101,4 +101,26 @@ function can move, redirect or freeze escrowed USDG (invariant R7, `contracts/IN
    wallet or block explorer).
 4. Publish a post-incident note and add a regression test for the cause.
 
+## Admin-event monitor and signer contacts
+The worker (`app/src/workers/adminWatch.ts`, every 30 seconds) reads the owner and admin events of the escrow, conditions,
+questions and fee router contracts and posts each one to the ops chat in plain words: ownership transfers (started and
+done), fee changes, the new-payment pause, the launch cap, feed / price id / outcome-source changes, question creators,
+the bond amount, panel changes (queued and applied), fee recipients and sweeps. It starts at the chain head the first time it
+runs and follows a cursor. Set `FEE_ROUTER_ADDRESS` so the fee router is watched too, and `ALERTS_ARMED=1` so the messages
+leave the log. **Every one of these messages needs a matching signer announcement in the signer chat; one without it is an
+incident** (start at "Incident response" above).
+
+### Signer contacts (fill in before mainnet; keep real phone numbers and emails out of this public file)
+| Role | Name | Handle in the signer chat | Backup contact route |
+|---|---|---|---|
+| Owner multisig signer 1 | _name_ | _handle_ | _how to reach them if the chat is down_ |
+| Owner multisig signer 2 | _name_ | _handle_ | _..._ |
+| Owner multisig signer 3 | _name_ | _handle_ | _..._ |
+| Panel multisig signers (decide disputes within 72 h) | _names_ | _handle_ | _..._ |
+| On-call engineer (ops chat) | _name_ | _handle_ | _..._ |
+| Security reports | see "Reporting" above | | |
+
+Agree before launch: who may pause (any one owner signer, then confirm in the chat within 15 minutes), who answers the
+ops chat at night, and where the signers meet if the usual chat is unavailable.
+
 See also `contracts/THREAT-MODEL.md` and `contracts/INVARIANTS.md`.

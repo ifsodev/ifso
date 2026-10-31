@@ -21,6 +21,7 @@ const schema = z.object({
   ESCROW_ADDRESS: addr.optional(),
   EVALUATOR_ADDRESS: addr.optional(),
   RESOLVER_ADDRESS: addr.optional(),
+  FEE_ROUTER_ADDRESS: addr.optional(), //  only read by the admin-event monitor
   USDG_ADDRESS: addr.default("0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"),
   ESCROW_DEPLOY_BLOCK: z.coerce.bigint().default(0n),
   CONFIRMATIONS: z.coerce.bigint().min(0n).default(3n), // the indexer trails the head by this many blocks

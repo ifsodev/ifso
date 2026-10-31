@@ -32,6 +32,7 @@ export function makeClients(env: Env, rpc: Omit<RpcOptions, "chain"> = {}) {
     escrow: env.ESCROW_ADDRESS as Address | undefined,
     evaluator: env.EVALUATOR_ADDRESS as Address | undefined,
     resolverContract: env.RESOLVER_ADDRESS as Address | undefined,
+    feeRouter: env.FEE_ROUTER_ADDRESS as Address | undefined,
     usdg: env.USDG_ADDRESS as Address,
   };
 }

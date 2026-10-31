@@ -4,6 +4,7 @@ import { KeyError } from "./chain/keys";
 import { alertFromEnv } from "./ops/alerts";
 import { defaultProbes } from "./ops/health";
 import { runMonitors } from "./ops/monitors";
+import { adminWatchTick } from "./workers/adminWatch";
 import { makeClients } from "./chain";
 import { createDb } from "./db/client";
 import { createApp } from "./api/app";
@@ -67,6 +68,7 @@ if (role === "worker" || role === "all") {
   tick(QUEUES.keeper, () => keeperTick(deps), 30_000);
   tick(QUEUES.priceWatch, () => priceWatchTick(deps), 15_000);
   tick(QUEUES.resolver, () => resolverTick(deps), 60_000);
+  tick(QUEUES.adminWatch, async () => void (await adminWatchTick(deps)), 30_000);
   tick(QUEUES.indexer, () => indexerTick(deps, async (ev) => void (await notifyQ.add("event", JSON.parse(JSON.stringify(ev, (_k, v) => (typeof v === "bigint" ? v.toString() : v)))))), 5_000);
   makeWorker<{ name: string; escrowId?: string; questionId?: string; txHash?: string; args: Record<string, unknown> }>(QUEUES.notify, conn, async (job) => notifyEvent(deps, send, job.data), 4);
   setInterval(() => void runMonitors(deps, alert).catch((e) => deps.log("monitor failed", { error: String(e?.message ?? e) })), 60_000);

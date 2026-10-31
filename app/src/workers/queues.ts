@@ -7,6 +7,7 @@ export const QUEUES = {
   resolver: "ifso-resolver",
   indexer: "ifso-indexer",
   notify: "ifso-notify",
+  adminWatch: "ifso-admin-watch",
 } as const;
 
 export function redisConnection(url: string) {
