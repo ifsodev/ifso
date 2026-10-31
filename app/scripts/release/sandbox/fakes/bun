@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Stand-in for bun in the gate: install and typecheck succeed; `bun test` fails when $SANDBOX_CTL/test-fail-TUnn exists for the
+# update under test (named in the subject of the commit checked out). install fails while $SANDBOX_CTL/install-fail exists.
+# shellcheck disable=SC1091
+. "$(dirname "$0")/sandbox.env"   # SANDBOX_CTL of the current world, written by run-sandbox.sh
+case "${1:-}" in
+  install) [[ -e "$SANDBOX_CTL/install-fail" ]] && { echo "error: registry unreachable"; exit 1; }; echo "installed"; exit 0 ;;
+  run) echo "typecheck ok"; exit 0 ;;
+  test)
+    subj="$(git -c safe.directory='*' log -1 --format=%s)"
+    tu="$(grep -o 'TU[0-9][0-9]' <<<"$subj" | head -1 || true)"
+    if [[ -n "$tu" && -e "$SANDBOX_CTL/test-fail-$tu" ]]; then echo "1 fail ($tu)"; exit 1; fi
+    echo "all pass"; exit 0 ;;
+esac
+exit 0

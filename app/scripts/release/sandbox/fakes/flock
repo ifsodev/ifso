@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+# flock(1) stand-in for hosts without it (macOS): supports `flock [-w SEC] [-x|-n] FD` as the wrappers use it.
+import fcntl, sys, time
+a = sys.argv[1:]
+wait, nb, fd = 0, False, None
+i = 0
+while i < len(a):
+    if a[i] == "-w":
+        wait = float(a[i + 1]); i += 2; continue
+    if a[i] == "-n":
+        nb = True
+    elif a[i] == "-x":
+        pass
+    else:
+        fd = int(a[i])
+    i += 1
+end = time.time() + wait
+while True:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB); sys.exit(0)
+    except OSError:
+        if nb or time.time() >= end:
+            sys.exit(1)
+        time.sleep(0.1)

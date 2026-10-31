@@ -1,0 +1,4 @@
+#!/bin/sh
+# sandbox stand-in: the timer is reported as enabled and active
+case "$1" in is-enabled) echo enabled;; is-active) echo active;; esac
+exit 0

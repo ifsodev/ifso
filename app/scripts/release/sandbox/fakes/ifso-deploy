@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Stand-in for /usr/local/sbin/ifso-deploy (the real one is app/scripts/server/deploy.sh; it is proven by deploy-local.test.sh and
+# the VPS rehearsal). Exit codes as the real one: 0 done, 1 failed and rolled back, 2 rollback failed too, 75 nothing switched.
+# Injected failures are files in $SANDBOX_CTL: deploy-75-TUnn, deploy-fail-TUnn, deploy-fail2-TUnn (not applied to reverts),
+# deploy-fail-revert (the redeploy of a reverted tree fails too: a rollback that cannot finish).
+set -uo pipefail
+if [[ "${1:-}" == --check ]]; then [[ -e "$SANDBOX_CTL/check-fail" ]] && { echo "check: unhealthy"; exit 1; }; echo "check: healthy"; exit 0; fi
+sha="${1:?sha}"
+subj="$(git -c safe.directory='*' -C "$REPO_DIR" log -1 --format=%s "$sha")"
+tu="$(grep -o 'TU[0-9][0-9]' <<<"$subj" | head -1 || true)"
+revert=0; [[ "$subj" == Revert* || "$subj" == Reapply* ]] && revert=1
+echo "fake ifso-deploy $sha ($subj)" >>"$SANDBOX_CTL/deploys.log"
+if [[ $revert == 0 && -n "$tu" ]]; then
+  [[ -e "$SANDBOX_CTL/deploy-75-$tu" ]] && { echo "fetch failed; nothing switched"; exit 75; }
+  mkdir -p "$OPT_DIR/releases/$sha"
+  [[ -e "$SANDBOX_CTL/deploy-fail2-$tu" ]] && { echo "migration failed AND the rollback failed"; exit 2; }
+  [[ -e "$SANDBOX_CTL/deploy-fail-$tu" ]] && { echo "services unhealthy after the switch; rolled back to the previous release"; exit 1; }
+fi
+[[ $revert == 1 && -e "$SANDBOX_CTL/deploy-fail-revert" ]] && { echo "rollback deploy failed"; exit 2; }
+mkdir -p "$OPT_DIR/releases/$sha"
+ln -sfn "$OPT_DIR/releases/$sha" "$OPT_DIR/current"
+echo "deployed $sha"
