@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { SECRET_STATIC_HEADERS } from "./src/lib/ifso/csp";
 
 const nextConfig: NextConfig = {
   // Keep the development-only route indicator out of the site preview.
@@ -13,6 +14,24 @@ const nextConfig: NextConfig = {
       process.env.NODE_ENV === "production"
         ? { exclude: ["error", "warn"] }
         : false,
+  },
+
+  // The claim page and /link hold a secret: no caching, no referrer, framing denied. The nonce-based script policy is set
+  // per request in src/proxy.ts (it needs a fresh nonce each time).
+  async headers() {
+    const list = Object.entries(SECRET_STATIC_HEADERS).map(([key, value]) => ({ key, value }));
+    return [
+      { source: "/c/:id", headers: list },
+      { source: "/link", headers: list },
+    ];
+  },
+
+  // Reown AppKit's ethers helpers import Base Account, a server-heavy SDK that drags in optional payment packages. The
+  // site never offers that wallet type, so it is pointed at an empty stand-in.
+  turbopack: {
+    resolveAlias: {
+      "@base-org/account": "./src/vendor/empty-module.ts",
+    },
   },
 
   images: {

@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { config as ifsoConfig } from "@/lib/ifso/config";
+import { SECRET_STATIC_HEADERS, isSecretPath, secretCsp } from "@/lib/ifso/csp";
 import { isBotUserAgent } from "@/utils/bot-ua";
 
 /**
@@ -12,6 +14,18 @@ import { isBotUserAgent } from "@/utils/bot-ua";
  * prerendered and CDN-cached. A person who types `/robot-view` is sent to `/`.
  */
 export function proxy(request: NextRequest) {
+  // The claim page and the wallet-link page hold a secret: strict CSP with a per-request nonce, no caching.
+  if (isSecretPath(request.nextUrl.pathname)) {
+    const nonce = btoa(crypto.randomUUID());
+    const csp = secretCsp({ nonce, connectOrigins: ifsoConfig.connectOrigins, dev: process.env.NODE_ENV !== "production" });
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-nonce", nonce);
+    requestHeaders.set("content-security-policy", csp);
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
+    for (const [k, v] of Object.entries(SECRET_STATIC_HEADERS)) res.headers.set(k, v);
+    res.headers.set("Content-Security-Policy", csp);
+    return res;
+  }
   const bot = isBotUserAgent(request.headers.get("user-agent"));
   const { pathname } = request.nextUrl;
   if (pathname === "/" && bot) {
@@ -24,5 +38,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/robot-view"],
+  matcher: ["/", "/robot-view", "/c/:id", "/link"],
 };

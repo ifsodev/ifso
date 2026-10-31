@@ -15,7 +15,7 @@ import { ReducedMotion } from "@/components/common/reduced-motion";
 import { ScrollLayout } from "@/layouts/scroll-layout";
 import { SocialLinks } from "@/components/common/social-links";
 
-import "@/app/globals.css";
+import "./globals.css";
 
 /*
  * Onest (variable, 100-900) and Reggae One, self-hosted as Latin subsets
@@ -30,14 +30,14 @@ import "@/app/globals.css";
  * each: Onest 51 → 29 KB, Reggae One 20 → 10 KB, CSS ~30 KB lighter.
  */
 const onest = localFont({
-  src: "../fonts/onest-latin.woff2",
+  src: "../../fonts/onest-latin.woff2",
   variable: "--font-onest",
   weight: "100 900",
   display: "swap",
 });
 
 const reggae = localFont({
-  src: "../fonts/reggae-one-latin.woff2",
+  src: "../../fonts/reggae-one-latin.woff2",
   variable: "--font-reggae",
   weight: "400",
   display: "swap",
@@ -52,7 +52,7 @@ const reggae = localFont({
 //   fonttools varLib.instancer NotoSerifJP[wght].ttf wght=700
 //   pyftsubset … --text="<every CJK glyph in src/data>" --unicodes=U+0020 --flavor=woff2
 const notoSerifJp = localFont({
-  src: "../fonts/noto-serif-jp-kanji-700.woff2",
+  src: "../../fonts/noto-serif-jp-kanji-700.woff2",
   variable: "--font-noto-serif-jp",
   weight: "700",
   display: "swap",
