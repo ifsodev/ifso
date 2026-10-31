@@ -8,6 +8,7 @@ command next to it.
 | [mutation.md](mutation.md) | Mutation score: killed/total per source file, a mutant for every contract finding (round 1: M1 to M5, L1; round 2: L1, L2, I1), survivors and equivalent mutants listed | `bash contracts/tools/mutation.sh` (CI job `mutation`, fails below 90% or on a stale mutant) |
 | [halmos.md](halmos.md) | Symbolic proofs of the comparison, threshold, fee and cap arithmetic and of the round-1 (M1, M2, L1) and round-2 (L1) multiplier and challenge fixes | `bash contracts/tools/halmos.sh` (CI job `halmos`) |
 | [coverage.md](coverage.md) | Line, statement, branch and function coverage per source file | `bash contracts/tools/coverage.sh` (CI job `coverage`, floor 90% lines) |
+| [SCOPE.md](SCOPE.md) | The files in scope, with git blob ids at the audited commit | `git ls-tree -r b9af4a4 -- contracts/src app/src` |
 | [reviews/](reviews/README.md) | Security review reports, published as each round closes | not yet populated |
 
 ## Mutation history
