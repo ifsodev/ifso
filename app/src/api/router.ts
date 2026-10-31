@@ -99,13 +99,23 @@ export async function relayBudget(ctx: Ctx, signer?: Address) {
   return ipHash;
 }
 
-/** Network budget first (cheap), then the signature check, then the per-wallet budget on the address it proved. */
-async function relayBudgetVerified(ctx: Ctx, verify: () => Promise<Address | undefined>, failure: string) {
+/**
+ * Network budget first (cheap), then the signature check, then the per-wallet budget on the address it proved.
+ * Audit M-1: when `wouldSucceed` is given it runs BEFORE the per-wallet charge, so a replayed (already used or
+ * expired) authorization that anyone can copy from public calldata never spends the signer's budget.
+ */
+async function relayBudgetVerified(ctx: Ctx, verify: () => Promise<Address | undefined>, failure: string, wouldSucceed?: () => Promise<void>) {
   const ipHash = await ipBudget(ctx);
   const signer = await verify();
   if (!signer) throw BAD_SIG(failure);
+  if (wouldSucceed) await wouldSucceed();
   await signerBudget(ctx, signer);
   return ipHash;
+}
+
+/** An EIP-3009 authorization past its validBefore can never be used: refuse it without any chain call. */
+function refuseExpiredAuthorization(validBefore: bigint) {
+  if (validBefore <= BigInt(Math.floor(Date.now() / 1000))) throw BAD_SIG("this payment authorization has expired");
 }
 
 /**
@@ -355,6 +365,7 @@ export const appRouter = t.router({
       const p = paramsFromJson(input.params);
       if (p.condition.kind === Kind.PRICE) gateDraft(ctx, { kind: "PRICE", ticker: SEED_FEEDS.find((f) => f.feed.toLowerCase() === p.condition.target.toLowerCase())?.ticker ?? "", op: "GTE", priceUsd: "0", mode: "AT_DEADLINE", deadline: 0 });
       let fee = 0n;
+      const call = { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "createWithAuthorization" as const, args: [p as never, input.from, input.validAfter, input.validBefore, input.signature] as const };
       const ipHash = await relayBudgetVerified(
         ctx,
         async () => {
@@ -362,14 +373,15 @@ export const appRouter = t.router({
           return verifiedCreateSigner(ctx.deps, { p, from: input.from, validAfter: input.validAfter, validBefore: input.validBefore, signature: input.signature, fee });
         },
         "the signature was not made by the sending wallet for these exact details",
+        async () => {
+          // audit M-1: a used or expired authorization fails here, before the sender's wallet budget is charged
+          refuseExpiredAuthorization(input.validBefore);
+          if (p.condition.kind === Kind.OUTCOME) await registerForFundedSender(ctx, p.condition.key as Hex, input.from, p.amount + fee);
+          const sim = await simulate(ctx.deps, ctx.deps.clients.relayer, call as never);
+          if (!sim.ok) throw new TRPCError({ code: "BAD_REQUEST", message: sim.error ?? "create would not go through" });
+        },
       );
-      if (p.condition.kind === Kind.OUTCOME) await registerForFundedSender(ctx, p.condition.key as Hex, input.from, p.amount + fee);
-      const r = await sendCall(
-        ctx.deps,
-        ctx.deps.clients.relayer,
-        { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "createWithAuthorization", args: [p as never, input.from, input.validAfter, input.validBefore, input.signature] },
-        { kind: "create", escrowId: escrowId(input.from, p.salt).toString(), ipHash },
-      );
+      const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, call as never, { kind: "create", escrowId: escrowId(input.from, p.salt).toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "create failed" });
       if (input.intentId) {
         await ctx.deps.db.update(intents).set({ state: "submitted", txHash: r.hash }).where(eq(intents.id, input.intentId));
@@ -433,6 +445,13 @@ export const appRouter = t.router({
           return verifiedAcceptSigner(ctx.deps, { id: input.id, acceptor: input.acceptor, counterRefundTo: input.counterRefundTo, counterAmount: e.counterAmount, validAfter: input.validAfter, validBefore: input.validBefore, signature: input.authSig });
         },
         "the payment authorization was not signed by the accepting wallet",
+        async () => {
+          // audit M-1: a used or expired authorization fails here, before the acceptor's wallet budget is charged
+          refuseExpiredAuthorization(input.validBefore);
+          const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
+          const sim = await simulate(ctx.deps, ctx.deps.clients.relayer, { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "acceptWithAuthorization", args: [input.id, input.acceptor, input.linkSig, input.counterRefundTo, input.validAfter, input.validBefore, input.authSig] } as never);
+          if (!sim.ok) throw new TRPCError({ code: "BAD_REQUEST", message: sim.error ?? "accept would not go through" });
+        },
       );
       try {
         return await relayAccept(ctx.deps, input);
