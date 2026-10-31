@@ -2,12 +2,15 @@
 # Hardening cases for the two root-run wrappers (audit findings M-4 and L-5). Local, no root, no network beyond 127.0.0.1.
 #   M-4  the release user owns the clone root verifies commits in: a planted gpg.ssh.program (and a forged signed-looking commit
 #        reachable from the clone's origin) must NOT decide the result of `ifso-deploy-release --validate`.
+#   L-5  ifso-release-ghrelease publishes only the runner's own notes file and posters/<tag>.png: no arbitrary path, no symlink,
+#        no non-PNG poster.
 # Usage: bash hardening-cases.sh        Needs: git, python3, ssh-keygen, curl. Prints PASS/FAIL lines and a final count; exit 1 on FAIL.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SBIN="${HARDENING_SBIN:-$(cd "$HERE/../sbin" && pwd)}"   # HARDENING_SBIN: point at an older copy to watch the cases fail
 W="$(mktemp -d "${TMPDIR:-/tmp}/ifso-hardening.XXXXXX")"
-trap 'rm -rf "$W"' EXIT
+SRVPID=""
+trap '[[ -n "$SRVPID" ]] && { kill "$SRVPID" 2>/dev/null; wait "$SRVPID" 2>/dev/null; }; rm -rf "$W"' EXIT
 PASS=0; FAIL=0
 ok() { local what="$1"; shift; if "$@" >/dev/null 2>&1; then PASS=$((PASS + 1)); printf '  PASS  %s\n' "$what"; else FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$what"; fi; }
 no() { local what="$1"; shift; if "$@" >/dev/null 2>&1; then FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$what"; else PASS=$((PASS + 1)); printf '  PASS  %s\n' "$what"; fi; }
@@ -55,6 +58,53 @@ G -C "$W/repo" push -q -f origin "$GOOD:refs/heads/main"
 ok "genuine signed commit still validates with the same planted config" bash "$SBIN/ifso-deploy-release" --validate "$GOOD"
 ok "the planted program still never ran" test ! -e "$W/PWNED"
 ok "common.sh no longer exports safe.directory=*" bash -c "! grep -n \"GIT_CONFIG_VALUE_0='\\*'\" '$SBIN/common.sh'"
+
+echo "== L-5: ifso-release-ghrelease publishes only allow-listed files"
+cat >"$W/srv.py" <<'EOS'
+import http.server, json, sys
+LOG = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _send(self, code, obj):
+        b = json.dumps(obj).encode(); self.send_response(code); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+    def _body(self): return self.rfile.read(int(self.headers.get("Content-Length") or 0))
+    def do_GET(self): self._send(404, {})
+    def do_PATCH(self): open(LOG, "ab").write(b"PATCH\n" + self._body() + b"\n"); self._send(200, {})
+    def do_POST(self):
+        b = self._body(); open(LOG, "ab").write(self.command.encode() + b" " + self.path.encode() + b"\n" + b + b"\n")
+        if "/uploads/" in self.path: self._send(201, {"browser_download_url": "http://x/p.png"})
+        else: self._send(201, {"id": 1})
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+print(s.server_address[1], flush=True)
+s.serve_forever()
+EOS
+python3 -I "$W/srv.py" "$W/api.log" >"$W/port" &
+SRVPID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -s "$W/port" ]] && break; sleep 0.3; done
+PORT="$(cat "$W/port")"
+printf 'GITHUB_RELEASE_TOKEN=test-not-a-token\nPUBLIC_REPO=o/r\nGITHUB_API_BASE=http://127.0.0.1:%s\nGITHUB_UPLOAD_BASE=http://127.0.0.1:%s/uploads\n' "$PORT" "$PORT" >"$W/release.env"
+printf 'RELEASE_ENV=%s\n' "$W/release.env" >>"$W/paths.conf"
+SECRET="TOP-SECRET-DB-PASSWORD-$$"; printf '%s\n' "$SECRET" >"$W/db.env"
+GH() { bash "$SBIN/ifso-release-ghrelease" "$@"; }
+no "notes file outside the release home is refused" GH update-01 t "$W/db.env"
+no "notes file with the wrong name is refused" GH update-01 t "$W/home/other.md"
+ln -s "$W/db.env" "$W/home/.relnotes-U1.md"
+no "notes file that is a symlink to a secret is refused" GH update-01 t "$W/home/.relnotes-U1.md"
+ok "nothing was sent to the API for refused notes" test ! -s "$W/api.log"
+rm -f "$W/home/.relnotes-U1.md"; printf 'Plain public notes.\n' >"$W/home/.relnotes-U1.md"
+ln -s "$W/db.env" "$W/home/posters/update-01.png"
+ok "symlinked poster: release is created without the picture" GH update-01 t "$W/home/.relnotes-U1.md"
+ok "the API got the notes" grep -q 'Plain public notes' "$W/api.log"
+no "the secret was never published (symlink poster)" grep -q "$SECRET" "$W/api.log"
+ok "no asset upload happened" bash -c "! grep -q '/uploads/' '$W/api.log'"
+: >"$W/api.log"; rm -f "$W/home/posters/update-01.png"
+printf '%s\n' "$SECRET" >"$W/home/posters/update-02.png"
+ok "regular file that is not a PNG: release created without the picture" GH update-02 t "$W/home/.relnotes-U1.md"
+no "the secret was never published (non-PNG poster)" grep -q "$SECRET" "$W/api.log"
+: >"$W/api.log"
+python3 -c 'import sys; open(sys.argv[1],"wb").write(b"\x89PNG\r\n\x1a\n"+b"0"*64)' "$W/home/posters/update-03.png"
+ok "a real PNG poster is uploaded" GH update-03 t "$W/home/.relnotes-U1.md"
+ok "the upload happened" grep -q '/uploads/' "$W/api.log"
 
 echo "hardening cases: $PASS passed, $FAIL failed"
 [[ $FAIL == 0 ]]
