@@ -47,7 +47,7 @@ involved on launch day. It is inert until armed.
 ## Tests
 
 ```bash
-bash app/scripts/release/test-local.sh      # shellcheck, py_compile, 16 unit tests, then the whole-runner sandbox in local mode
+bash app/scripts/release/test-local.sh      # shellcheck, py_compile, 16 unit tests, then the root-wrapper hardening cases (`sandbox/hardening-cases.sh`: a planted `gpg.ssh.program` must not decide the signature gate, and the GitHub Release wrapper publishes only the runner's own notes and `posters/<tag>.png`), then the whole-runner sandbox in local mode
 ```
 
 `sandbox/run-sandbox.sh` runs the real runner, preflight, wrappers, `install.sh` and `arm.sh` against local bare repos with a fake API, Telegram, GitHub and deploy. A queue of 3 updates goes through: deploy blip, install blip, broken public copy, a crash between push and state write, pause/abort/resume, unarmed and half-armed passes, a stale schedule, a failing test (held), a failing deploy (rollback and held), preflight while the release lock is held, a fix and retry, GitHub Releases with posters, signed commits, one public author, no early code leak, and a rollback that cannot finish (pause).

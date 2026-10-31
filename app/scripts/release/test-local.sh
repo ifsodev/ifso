@@ -13,6 +13,8 @@ python3 -m py_compile lib/*.py sandbox/fake_world.py sandbox/fakes/flock && echo
 find . -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
 unit="$(python3 -B -m unittest discover -s lib -p 'test_*.py' 2>&1)"
 if echo "$unit" | grep -q '^OK'; then echo "unit tests: $(echo "$unit" | grep '^Ran')"; else echo "unit tests: FAILED"; echo "$unit"; bad=1; fi
+hard="$(bash sandbox/hardening-cases.sh 2>&1)"; echo "$hard" | grep FAIL; echo "$hard" | grep 'hardening cases'
+echo "$hard" | grep -q ' 0 failed' || bad=1
 box="$(bash sandbox/run-sandbox.sh 2>&1)"; echo "$box" | grep FAIL; echo "$box" | tail -n 3 | grep 'sandbox (local)'
 echo "$box" | grep -q ' 0 failed' || bad=1
 [[ $bad == 0 ]] && echo "ALL GREEN" || echo "NOT GREEN"

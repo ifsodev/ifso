@@ -37,16 +37,15 @@ for i in 1 2 3; do
   [[ $i == 3 ]] || { say "git fetch origin main failed (attempt $i of 3); retrying in $((i * ${FETCH_WAIT:-20})) s"; sleep $((i * ${FETCH_WAIT:-20})); }
 done
 [[ "$ok" == 1 ]] || { echo "$(basename "$0"): git fetch origin main failed 3 times (nothing touched)" >&2; exit 75; }
-tip="$(git -C "$REPO_DIR" rev-parse --verify refs/remotes/origin/main)"
-git -C "$REPO_DIR" cat-file -e "$sha^{commit}" 2>/dev/null || die "commit $sha is not in the release clone"
-git -C "$REPO_DIR" merge-base --is-ancestor "$sha" "$tip" || die "$sha is not on the private main"
-git -C "$REPO_DIR" merge-base --is-ancestor "$cur" "$sha" || die "$sha is not a descendant of the running revision ${cur:0:12}"
-n="$(git -C "$REPO_DIR" rev-list --first-parent --count "$cur..$sha")"
+tip="$(rgit -C "$REPO_DIR" rev-parse --verify refs/remotes/origin/main)"
+rgit -C "$REPO_DIR" cat-file -e "$sha^{commit}" 2>/dev/null || die "commit $sha is not in the release clone"
+rgit -C "$REPO_DIR" merge-base --is-ancestor "$sha" "$tip" || die "$sha is not on the private main"
+rgit -C "$REPO_DIR" merge-base --is-ancestor "$cur" "$sha" || die "$sha is not a descendant of the running revision ${cur:0:12}"
+n="$(rgit -C "$REPO_DIR" rev-list --first-parent --count "$cur..$sha")"
 (( n >= 1 && n <= 60 )) || die "$n commits between the running revision and $sha (1..60 allowed)"
 while read -r c; do
-  out="$(git -C "$REPO_DIR" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$ALLOWED_SIGNERS" verify-commit "$c" 2>&1)" \
-    || die "commit ${c:0:12} has no good signature from an allowed key: $(printf '%s' "$out" | tail -1)"
-done < <(git -C "$REPO_DIR" rev-list --first-parent "$cur..$sha")
+  out="$(verify_signed "$c")" || die "commit ${c:0:12} has no good signature from an allowed key: $out"
+done < <(rgit -C "$REPO_DIR" rev-list --first-parent "$cur..$sha")
 say "ok: ${sha:0:12} is $n commit(s) ahead of ${cur:0:12} on private main, all signed"
 [[ "$mode" == validate ]] && exit 0
 # two locks: the service sets IFSO_ALLOW_REAL_DEPLOY=1 (kept through sudo by env_keep), the root-owned file arms the server

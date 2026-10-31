@@ -36,5 +36,28 @@ release_py() {
 real_deploy_guard() { [[ -e "$ALLOW_FILE" ]] || die "real deploys are NOT armed ($ALLOW_FILE does not exist): refusing"; }
 # the revision running now: the release directory /opt/ifso/current points at (named by the full sha)
 current_rev() { basename "$(readlink "$OPT_DIR/current" 2>/dev/null)" 2>/dev/null || true; }
-# run a command with the release user's repos readable by root (git "dubious ownership")
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*'
+# rgit: git as root on the release user's clone ($REPO_DIR). The release user owns that clone, so its .git/config is
+# attacker-controlled and must never decide what root runs: only that one directory is trusted for ownership (a command-line
+# setting; there is NO global safe.directory=*), the global and system configs are ignored, and the config keys that can launch a
+# program are overridden. Use it for read-only plumbing (rev-parse, cat-file, rev-list, merge-base), never to verify signatures.
+rgit() {
+  GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -c "safe.directory=$REPO_DIR" -c core.fsmonitor= \
+    -c core.hooksPath=/dev/null -c core.sshCommand= -c core.pager=cat "$@"
+}
+# verify_signed <40-hex sha>: is that commit of $REPO_DIR signed by a key in $ALLOWED_SIGNERS? The commit object is copied out of
+# the release user's clone into a fresh root-owned scratch repository and verified there with ssh-keygen pinned on the command
+# line, so nothing the release user planted in its own clone (gpg.ssh.program, includes, hooks, replace refs) takes part.
+# Prints git's last line on failure; returns non-zero.
+verify_signed() {
+  local c="$1" scratch id out rc=0 keygen
+  keygen="$(command -v ssh-keygen)" || { echo "ssh-keygen not found"; return 1; }
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/ifso-verify.XXXXXX")" || return 1
+  if ! GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git init -q --bare "$scratch"; then rm -rf "$scratch"; return 1; fi
+  id="$(rgit -C "$REPO_DIR" cat-file commit "$c" | GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -C "$scratch" hash-object -t commit -w --stdin)" || id=""
+  if [[ "$id" != "$c" ]]; then rm -rf "$scratch"; echo "could not copy commit $c"; return 1; fi
+  out="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -C "$scratch" -c gpg.format=ssh -c "gpg.ssh.program=$keygen" \
+    -c "gpg.ssh.allowedSignersFile=$ALLOWED_SIGNERS" -c gpg.ssh.revocationFile= verify-commit "$c" 2>&1)" || rc=$?
+  rm -rf "$scratch"
+  [[ $rc == 0 ]] || printf '%s' "$out" | tail -1
+  return $rc
+}
