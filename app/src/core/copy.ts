@@ -52,7 +52,7 @@ export const copy = {
   },
 
   describe: {
-    time: (when: string) => `it unlocks on ${when}`,
+    time: (when: string) => `${when} has arrived`, // read after "It unlocks if" in the preview, so it must not say "unlocks" itself
     price: (t: string, op: "GTE" | "LTE", px: string, mode: "AT_DEADLINE" | "TOUCH", when: string) =>
       mode === "TOUCH"
         ? `${t} reaches ${opWord(op)} $${px} at any point before ${when}`

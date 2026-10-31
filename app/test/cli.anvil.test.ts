@@ -1,5 +1,5 @@
 // Item 17: the withdrawal path that needs no website, bot or Ifso server. Each CLI command is run against a private
-// anvil (port 8946, contracts deployed by the shared harness) and the calldata it PRINTS is sent from a plain wallet,
+// anvil (port IFSO_TEST_ANVIL_PORT_CLI, default 8946, contracts deployed by the shared harness) and the calldata it PRINTS is sent from a plain wallet,
 // exactly as a user would with cast. No database, no Redis, no app server is started.
 // Skips when anvil or the forge artifacts are missing.
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
@@ -12,12 +12,14 @@ import { buildClaimUrl, linkKeyAddress } from "../src/core/link";
 import { Status } from "../src/core/types";
 import { runCli } from "../scripts/ifso-cli";
 
-process.env.IFSO_TEST_ANVIL_PORT = "8946"; // private port for this suite; the harness reads it at import time
+// private port for this suite (override with IFSO_TEST_ANVIL_PORT_CLI so parallel runs do not collide); the harness reads it at import time
+const CLI_PORT = process.env.IFSO_TEST_ANVIL_PORT_CLI ?? "8946";
+process.env.IFSO_TEST_ANVIL_PORT = CLI_PORT;
 const h = await import("./helpers/chain");
 
 setDefaultTimeout(120_000);
 
-describe.skipIf(!h.haveAnvil())("ifso-cli on anvil (port 8946)", () => {
+describe.skipIf(!h.haveAnvil())(`ifso-cli on anvil (port ${CLI_PORT})`, () => {
   let chain: Awaited<ReturnType<typeof h.bootChain>>;
 
   beforeAll(async () => {
@@ -70,8 +72,11 @@ describe.skipIf(!h.haveAnvil())("ifso-cli on anvil (port 8946)", () => {
 
   test("refund --alt-sender pays the alternate address", async () => {
     const t = await chain.now();
-    const id = await chain.create(chain.sender, { condition: h.approveCondition(chain.bob.address), expiry: t + 3600n, altRefundTo: chain.bob.address });
-    await chain.warpTo(t + 3700n);
+    // The contract needs expiry >= block time + MIN_EXPIRY_DELAY (1 h). Anvil's block time follows the wall clock, so an expiry of
+    // exactly t + 3600 is rejected (InvalidParams) whenever a second ticks between reading t and mining the create block.
+    const expiry = t + 3600n + 600n;
+    const id = await chain.create(chain.sender, { condition: h.approveCondition(chain.bob.address), expiry, altRefundTo: chain.bob.address });
+    await chain.warpTo(expiry + 100n);
     const before = await chain.balance(chain.bob.address);
     await send(chain.alice, await call(["refund", id.toString(), "--alt-sender"]));
     expect((await chain.balance(chain.bob.address)) - before).toBe(20_000_000n);

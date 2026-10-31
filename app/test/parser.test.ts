@@ -46,6 +46,14 @@ describe("parser: TIME", () => {
     expect(iso((r.condition as { at: number }).at)).toBe("2026-11-01T05:00:00.000Z"); // 09:00 Dubai
   });
 
+  test("the preview of a date condition reads once: 'It unlocks if <date> has arrived', never 'unlocks if it unlocks on'", () => {
+    const r = parseCommand("/ifso @mia 5 in 3 days", ctx);
+    const preview = r.preview ?? "";
+    expect(preview).toMatch(/It unlocks if .+ has arrived\./);
+    expect(preview).not.toMatch(/unlocks if it unlocks/i);
+    expect(preview.match(/unlocks/gi)).toHaveLength(1);
+  });
+
   test("in 3 days", () => {
     const r = parseCommand("/ifso @mia 5 in 3 days", ctx);
     expect((r.condition as { at: number }).at).toBe(NOW / 1000 + 3 * 86400);
