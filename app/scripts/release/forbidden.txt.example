@@ -1,0 +1,11 @@
+# One regex per line (case-insensitive). `release.py scan-queue` greps EVERY queue tree and commit message for these before
+# arming, and the app's own bannedWords test runs in every gate. Add the owner's names and handles on the server only (this file
+# is the example; /etc/ifso-release/forbidden.txt is the real one and is never committed).
+co-authored-by
+generated with
+noreply@anthropic\.com
+\bwin money\b
+\bcan't lose\b
+\blicensed escrow\b
+\bsportsbook\b
+\bgamble\b
