@@ -265,14 +265,25 @@ async function settleOutcome(deps: Deps, now: Date) {
     .limit(500 + skippedIds("outcome", Date.now()));
   const byQ = new Map<string, typeof open>();
   for (const e of open) {
-    if (!e.questionId || (e.twoSided && !e.accepted)) continue;
+    if (e.twoSided && !e.accepted) continue;
+    if (!e.questionId) {
+      noteWait("outcome", e.id, Date.now()); // never settles through this pass: never let it hold a scan slot
+      continue;
+    }
     byQ.set(e.questionId, [...(byQ.get(e.questionId) ?? []), e]);
   }
   for (const [qid, list] of byQ) {
+    // Audit M-3: rows on a question that is not final yet step aside (like PRICE rows since R2-M3) and the scan page
+    // grows by the rows stepping aside, so 500 rows on an open question can no longer hide the payable rows behind them.
+    const ready = list.filter((x) => !skipping("outcome", x.id, Date.now()));
+    if (ready.length === 0) continue;
     const resolver = conditionFromJson(list[0]!.condition as Record<string, unknown>).target;
     const [state] = await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "outcomeOf", args: [qid as Hex] });
-    if (state !== RESOLVER_FINAL && state !== RESOLVER_VOID) continue;
-    for (const e of list.filter((x) => !skipping("outcome", x.id, Date.now())).slice(0, BATCH)) {
+    if (state !== RESOLVER_FINAL && state !== RESOLVER_VOID) {
+      for (const e of ready) noteWait("outcome", e.id, Date.now());
+      continue;
+    }
+    for (const e of ready.slice(0, BATCH)) {
       await guarded(deps, "outcome", e.id, () => execute(deps, { meta: { kind: "settle", escrowId: e.id }, call: settleCall(deps, e.id, "0x"), send: true, reason: "resolver final" }));
     }
   }
