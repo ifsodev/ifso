@@ -94,3 +94,82 @@ rules:
       - pattern-not: Bun.file("...", ...)
       - pattern-not: Bun.write("...", ...)
     paths: { include: ["/app/src/"], exclude: ["/app/src/**/*.test.ts"] }
+  # ---- Python (the release runner: app/scripts/release/lib, root-adjacent code) ----
+  - id: ifso-py-dynamic-code
+    languages: [python]
+    severity: ERROR
+    message: eval / exec / compile of a string, or unpickling, runs attacker-influenced data as code
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: marshal.loads(...)
+      - pattern: yaml.load(...)
+    paths: { include: ["/app/scripts/"], exclude: ["**/test_*.py"] }
+  - id: ifso-py-shell-true
+    languages: [python]
+    severity: ERROR
+    message: a shell parses the command string (shell=True, os.system, os.popen); pass an argument list instead
+    pattern-either:
+      - pattern: subprocess.$F(..., shell=True, ...)
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+    paths: { include: ["/app/scripts/"], exclude: ["**/test_*.py"] }
+  - id: ifso-py-subprocess-call
+    languages: [python]
+    severity: WARNING
+    message: every subprocess call is a place where a runner input could reach a command line; each one is listed with the reason its arguments are safe
+    pattern-either:
+      - pattern: subprocess.run(...)
+      - pattern: subprocess.Popen(...)
+      - pattern: subprocess.check_output(...)
+      - pattern: subprocess.check_call(...)
+      - pattern: subprocess.call(...)
+    paths: { include: ["/app/scripts/"], exclude: ["**/test_*.py"] }
+  - id: ifso-py-tls-verification-off
+    languages: [python]
+    severity: ERROR
+    message: TLS certificate verification is switched off
+    pattern-either:
+      - pattern: ssl._create_unverified_context(...)
+      - pattern: $X.check_hostname = False
+      - pattern: $X.verify_mode = ssl.CERT_NONE
+      - pattern: requests.$F(..., verify=False, ...)
+    paths: { include: ["/app/scripts/"], exclude: ["**/test_*.py"] }
+  - id: ifso-py-insecure-temp
+    languages: [python]
+    severity: ERROR
+    message: tempfile.mktemp / os.tempnam return a name that another user can claim before the file is created; use mkstemp or mkdtemp
+    pattern-either:
+      - pattern: tempfile.mktemp(...)
+      - pattern: os.tempnam(...)
+      - pattern: os.tmpnam(...)
+    paths: { include: ["/app/scripts/"], exclude: ["**/test_*.py"] }
+  - id: ifso-py-urlopen
+    languages: [python]
+    severity: WARNING
+    message: urllib opens file:// and custom schemes as well as http(s); every call is listed with the reason its URL comes from configuration
+    pattern-either:
+      - pattern: urllib.request.urlopen(...)
+      - pattern: urlopen(...)
+    paths: { include: ["/app/scripts/"], exclude: ["**/test_*.py"] }
+  - id: ifso-py-bare-except-pass
+    languages: [python]
+    severity: WARNING
+    message: an exception swallowed with pass hides a failure that a release run should surface
+    pattern: |
+      try:
+          ...
+      except:
+          pass
+    paths: { include: ["/app/scripts/"], exclude: ["**/test_*.py"] }
+  - id: ifso-py-hardcoded-secret
+    languages: [python]
+    severity: ERROR
+    message: a credential-looking name assigned a string literal
+    patterns:
+      - pattern: $N = "..."
+      - metavariable-regex: { metavariable: $N, regex: "(?i).*(password|passwd|secret|api_?key|private_?key|token).*" }
+      - pattern-not: $N = ""
+    paths: { include: ["/app/scripts/"], exclude: ["**/test_*.py", "**/fake_world.py"] }

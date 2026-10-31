@@ -87,7 +87,7 @@ jobs:
         run: python3 tools/slither-gate.py slither-report.json slither.allow
 
   semgrep:
-    # static analysis of app/ with our own offline rules (.github/semgrep/rules.yml); exact-match allowlist like Slither's
+    # static analysis of app/ (TypeScript and the Python release runner) with our own offline rules (.github/semgrep/rules.yml); exact-match allowlist like Slither's
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
