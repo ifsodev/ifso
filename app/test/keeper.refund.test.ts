@@ -49,6 +49,18 @@ describe.skipIf(!haveAnvil() || !havePostgres())("keeper refund fallback", () =>
     expect(alerts.length).toBe(0);
   });
 
+  test("someone else refunded first (the keeper's database view was stale): no stuck alert", async () => {
+    const t = await chain.now();
+    const id = await chain.create(chain.sender, { condition: approveCondition(chain.deployer.address), expiry: t + 7200n });
+    await indexerTick(deps, async () => {}); // the keeper's rows say OPEN
+    await chain.warpTo(t + 7300n);
+    await chain.write(chain.bob, chain.escrow, ifsoEscrowAbi as Abi, "refund", [id, false, false]); // a stranger refunds before the sweep
+    const before = alerts.length;
+    await keeperTick(deps);
+    expect(await statusOf(id)).toBe(Status.RETURNED);
+    expect(alerts.slice(before).some(([cause]) => cause.startsWith("refund-stuck"))).toBe(false);
+  });
+
   test("primary blocked and no alternate: an alert is raised and the keeper does not send a failing transaction", async () => {
     const t = await chain.now();
     const id = await chain.create(chain.sender, { condition: approveCondition(chain.deployer.address), refundTo: chain.alice.address, expiry: t + 7200n });

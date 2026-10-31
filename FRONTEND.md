@@ -238,7 +238,7 @@ await api.describe.query({ text: "/ifso @jake 20 on nov 1" }); // "it unlocks on
 ```
 
 ### `build`
-Mutation. Input `{ text? , intentId? (uuid, from a bot draft), sender, recipient?, linkKey?, referee?, altRefundTo?, cancellable?, tzOffsetMin? }` (give `text` or `intentId`). Output: `{ id, params, conditionHash, fee, feeText, total, preview, notes, expiryText, authorization: { validAfter, validBefore, nonce, typedData } }`. `typedData` is the USDG `ReceiveWithAuthorization` the sender signs. Stores nothing on chain; plans outcome questions off-chain.
+Mutation. Input `{ text? , intentId? (uuid, from a bot draft), sender, recipient?, linkKey?, referee?, altRefundTo?, cancellable?, tzOffsetMin? }` (give `text` or `intentId`). A referee typed as `0x...` in the text is used as is; `referee` (an address) is for a referee the caller resolved from a handle, and wins over the text. Output: `{ id, params, conditionHash, fee, feeText, total, preview, notes, expiryText, authorization: { validAfter, validBefore, nonce, typedData } }`. `typedData` is the USDG `ReceiveWithAuthorization` the sender signs. Stores nothing on chain; plans outcome questions off-chain.
 ```ts
 const b = await api.build.mutate({ text: "/ifso link 20 on nov 1", sender, linkKey });
 ```

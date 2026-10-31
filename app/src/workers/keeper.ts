@@ -294,6 +294,9 @@ async function refundExpired(deps: Deps, now: Date) {
     if (await guarded(deps, "refund", e.id, async () => {
       const r = await execute(deps, { meta: { kind: "refund", escrowId: e.id }, call: refundCall(e.id, false), send: true, reason: "expired" });
       if (isShadow(deps) || !r || r.ok) return r;
+      // refund is permissionless: someone else may have refunded since the last indexer pass. Not stuck, nothing to alert.
+      const live = await deps.clients.publicClient.readContract({ address: escrow, abi: ifsoEscrowAbi, functionName: "getEscrow", args: [BigInt(e.id)] }).catch(() => undefined);
+      if (live && live.status !== Status.OPEN && live.status !== Status.MET) return { ...r, ok: true };
       // primary destination frozen / screened: use the sender's preset alternate (anyone may choose it)
       if (e.alt && e.alt !== ZERO_ADDRESS) {
         const alt = await execute(deps, { meta: { kind: "refund-alt", escrowId: e.id }, call: refundCall(e.id, true), send: true, reason: "expired, primary refused" });

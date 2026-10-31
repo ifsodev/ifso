@@ -140,7 +140,8 @@ async function mockFeed(feed: Address) {
   const tmp = r.contractAddress!;
   const code = await pc.getCode({ address: tmp });
   await rpc("anvil_setCode", [feed, code]);
-  for (let s = 0; s < 6; s++) await rpc("anvil_setStorageAt", [feed, toHex(s, { size: 32 }), toHex(s === 1 ? 1n : 0n, { size: 32 })]);
+  // round numbers start far above the real feed's history (the keeper caches rounds by id: real rounds never change, a swapped feed's would collide)
+  for (let s = 0; s < 6; s++) await rpc("anvil_setStorageAt", [feed, toHex(s, { size: 32 }), toHex(s === 1 ? 1n | (5_000_000n << 16n) : 0n, { size: 32 })]);
   return { abi: art.abi as any, push: async (answer: bigint, at?: number) => confirm(await wc("heidi").writeContract({ address: feed, abi: art.abi, functionName: "push", args: [answer, BigInt(at ?? (await now()))] } as never)) };
 }
 
