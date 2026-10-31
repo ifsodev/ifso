@@ -1,0 +1,3 @@
+# Supply chain: refuse package versions published less than 3 days ago (audit E install controls).
+[install]
+minimumReleaseAge = 259200
