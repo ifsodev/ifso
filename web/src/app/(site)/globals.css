@@ -1,8 +1,8 @@
-/* `source("../")` limits class detection to `src/` (this file lives in src/app).
+/* `source("../../")` limits class detection to `src/` (this file lives in src/app/(site)).
    Without it Tailwind v4 scans the whole repo — including obsidian/ and .claude/,
    where documented class *patterns* like duration-[var(--duration-*)] parse as
    real candidates and emit CSS warnings. Docs are not a source of utilities. */
-@import "tailwindcss" source("../");
+@import "tailwindcss" source("../../");
 
 /* ---------------------------------------------------------------------------
    TIER 1 — PRIMITIVES  (`--raw-*`)
