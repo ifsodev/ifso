@@ -12,3 +12,4 @@ contracts/deployments/31337.json
 contracts/deployments/*-fork.json
 contracts/docs/
 contracts/slither-report.json
+app/.fork/

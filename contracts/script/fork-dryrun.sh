@@ -57,8 +57,9 @@ make_safe() {
 OWNER_MULTISIG="$(make_safe "$RANDOM$RANDOM")"
 PANEL_MULTISIG="$(make_safe "$RANDOM$RANDOM")"
 export OWNER_MULTISIG PANEL_MULTISIG
-export RESOLVER_CREATOR="$(new_addr)" FEE_WORK="$(new_addr)" FEE_TREASURY="$(new_addr)" FEE_PERKS="$(new_addr)" \
-  FEE_BURN="$(new_addr)"
+# A caller (app/scripts/fork-up.sh) may preset these so it holds the resolver service key; otherwise fresh throwaways.
+export RESOLVER_CREATOR="${RESOLVER_CREATOR:-$(new_addr)}" FEE_WORK="${FEE_WORK:-$(new_addr)}" \
+  FEE_TREASURY="${FEE_TREASURY:-$(new_addr)}" FEE_PERKS="${FEE_PERKS:-$(new_addr)}" FEE_BURN="${FEE_BURN:-$(new_addr)}"
 export GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 export IFSO_FORK_DRYRUN=1 IFSO_ARMED=0
 
