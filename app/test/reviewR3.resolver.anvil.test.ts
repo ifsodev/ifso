@@ -48,7 +48,7 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R3-H1: honest early proposals 
     expect(await env.chain.balance(env.resolverAddress)).toBe(before); // SAFE: no bond paid to an honest proposer
   });
 
-  test("float down to two bonds: the wrong last-call proposal is disputed, the next one pages a human, and the spare bond still disputes a contradicted WRONG proposal", async () => {
+  test("float down to two bonds: a wrong proposal the final source contradicts is disputed at once, the unconfirmed one pages a human at last call, and the spare bond still disputes a contradicted WRONG proposal", async () => {
     const [q1, q2, q3] = [await env.question(1), await env.question(2), await env.question(3)];
     await createOutcomeEscrow(env, q2.id, BigInt(q2.earliestResolve + 30 * 86400)); // more USDG on q2: it goes first
     await indexerTick(env.deps, async () => {});
@@ -60,17 +60,18 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R3-H1: honest early proposals 
     await env.chain.write(me, env.chain.usdg, erc20Abi as Abi, "transfer", [env.chain.deployer.address, extra]);
     await env.chain.warpTo(BigInt(Math.max(Number(await env.chain.now()), q1.earliestResolve + 1, q2.earliestResolve + 1, q3.earliestResolve + 1)));
 
-    env.setSources(pendingTsdb(1, 2, 3)); // q1 and q2 stay unconfirmed to the end (e.g. a disputed result upstream); q3 for now
+    env.setSources(pendingTsdb(1, 2, 3)); // q1 and q2 keep only one final source to the end (e.g. a disputed result upstream); q3 for now
     await proposeAs(env, env.chain.bob, q1.id, truth(1)); // honest
     await proposeAs(env, env.chain.bob, q2.id, wrongOf(truth(2))); // wrong
     await indexerTick(env.deps, async () => {});
     await resolverTick(env.deps);
-    expect([Number((await questionOnchain(env, q1.id)).state), Number((await questionOnchain(env, q2.id)).state)]).toEqual([2, 2]);
+    // audit M-2: the one final source contradicts q2's proposal, so it is disputed at once (not left to the last call);
+    // q1's proposal is backed by that source and waits for the second one
+    expect([Number((await questionOnchain(env, q1.id)).state), Number((await questionOnchain(env, q2.id)).state)]).toEqual([2, 3]);
 
     await warpToLastCall(env, q1.id);
     await resolverTick(env.deps);
-    expect(Number((await questionOnchain(env, q2.id)).state)).toBe(3); // most USDG first, from the budget
-    expect(Number((await questionOnchain(env, q1.id)).state)).toBe(2); // over budget
+    expect(Number((await questionOnchain(env, q1.id)).state)).toBe(2); // only the reserved bond is left
     expect(env.alerts.some(([c]) => c.startsWith(`resolver-dispute-budget:${q1.id}`))).toBe(true); // a human is paged
     expect(await env.chain.balance(me.address)).toBe(bond); // SAFE: last-call disputes never touch the last bond
 

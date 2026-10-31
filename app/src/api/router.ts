@@ -18,7 +18,7 @@ import { escrows, intents, questions } from "../db/schema";
 import { required } from "../chain";
 import { sendCall, simulate } from "../workers/tx";
 import type { Deps } from "../workers/deps";
-import { PolymarketRefused, planFootballQuestion, planPolymarketQuestion, polymarketLooksDecided, registerPlanned } from "../workers/resolver";
+import { FootballRefused, PolymarketRefused, planFootballQuestion, planPolymarketQuestion, polymarketLooksDecided, registerPlanned } from "../workers/resolver";
 import { ClaimError, readEscrow, relayAccept, relayClaim } from "./claim";
 import { RateLimiter } from "./rateLimit";
 import { findFixture } from "./fixtures";
@@ -311,7 +311,13 @@ export const appRouter = t.router({
       if (fx.ambiguous) throw new TRPCError({ code: "BAD_REQUEST", message: `Which team: ${fx.ambiguous.join(" or ")}?` });
       if (!fx.fixture) throw new TRPCError({ code: "NOT_FOUND", message: copy.parse.unknownCondition(`${d.team} ${d.result.toLowerCase()}`) });
       // the fixture comes from our own league listing (the allow-list); the question is only PLANNED here
-      const q = await planFootballQuestion(deps, fx.fixture, questionBudget(ctx, input.sender));
+      let q;
+      try {
+        q = await planFootballQuestion(deps, fx.fixture, questionBudget(ctx, input.sender));
+      } catch (e) {
+        if (e instanceof FootballRefused) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+        throw e;
+      }
       bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, teamIsHome: fx.teamIsHome, closeTime: q.closeTime, challengeMargin: DEFAULTS.sportsChallengeMargin, minSpan: await outcomeMinSpan(deps, required(deps.clients.resolverContract, "RESOLVER_ADDRESS")) };
     } else if (d.kind === "MARKET") {
       if (d.venue !== "polymarket") throw new TRPCError({ code: "BAD_REQUEST", message: "Hyperliquid questions arrive in phase 2." });

@@ -76,6 +76,7 @@ export async function registerPlanned(deps: Deps, id: Hex): Promise<void> {
   const [row] = await deps.db.select().from(questions).where(eq(questions.id, id));
   if (!row) throw new Error("unknown question");
   if (row.state !== Q_PLANNED) return;
+  if (row.source === "football") needsTwoSources(deps, (row.providerRefs as Record<string, string | null> | null)?.thesportsdb); // a row planned before audit M-2
   const resolver = required(deps.clients.resolverContract, "RESOLVER_ADDRESS");
   const onchain = await readQuestion(deps, resolver, id);
   if (Number(onchain.state) === 0) {
@@ -132,7 +133,17 @@ export function footballRow(f: FootballFixture): { row: QuestionRow; closeTime: 
 }
 
 /** Plans (no chain write) a league fixture question. */
+/** Audit M-2: a football question is only planned when BOTH result sources can be read for it. */
+export class FootballRefused extends Error {}
+export const FOOTBALL_ONE_SOURCE = "This match can't be checked against two result sources right now, so it can't be used yet. Try again later.";
+function needsTwoSources(deps: Deps, sportsDbEventId: string | null | undefined) {
+  if (deps.env.SECOND_SPORTS_SOURCE !== "thesportsdb" || !sportsDbEventId) throw new FootballRefused(FOOTBALL_ONE_SOURCE);
+}
+
 export async function planFootballQuestion(deps: Deps, f: FootballFixture, beforeInsert?: () => Promise<void>): Promise<PlannedQuestion> {
+  // with one source the service can never confirm a result: it never proposes, and every foreign proposal would be
+  // "unconfirmed" (disputed only from the bond float at last call). Refuse instead of planning a one-source question.
+  needsTwoSources(deps, f.sportsDbEventId);
   const { row, closeTime, earliest } = footballRow(f);
   const [existing] = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.id, row.id));
   if (existing) return { id: row.id as Hex, earliestResolve: earliest, closeTime, isNew: false };
@@ -495,8 +506,9 @@ async function resolveOne(deps: Deps, resolver: Address, me: string | undefined,
       // `planForeignDisputes` (contradicted: dispute now; unconfirmed: re-check every tick, dispute only in the
       // last-call slot within the bond budget; confirmed: leave it).
       await raiseOnce(deps, `resolver-foreign:${q.id}:${proposedAt}`, `another address (${onchain.proposer}) proposed outcome ${onchain.proposed} on question ${q.id}; the window closes ${new Date(closesAt * 1000).toISOString()}`);
-      const a = agree(await gatherReports(deps, q));
-      return { id: q.id, verdict: classifyForeign(a, onchain.proposed), closesAt, atRisk: 0n, proposed: onchain.proposed, proposer: onchain.proposer, proposedAt, bond: onchain.bond, agreement: a };
+      const reports = await gatherReports(deps, q);
+      const a = agree(reports);
+      return { id: q.id, verdict: classifyForeign(a, onchain.proposed, reports), closesAt, atRisk: 0n, proposed: onchain.proposed, proposer: onchain.proposer, proposedAt, bond: onchain.bond, agreement: a };
     } else if (now >= closesAt) {
       if (foreign) {
         // Never finalize a proposal we did not confirm (anyone else still can: that is why the dispute above matters).

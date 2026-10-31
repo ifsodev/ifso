@@ -2,19 +2,33 @@
 // resolver worker and the property test run exactly the same rules.
 //
 //  - confirmed     (two final sources agree with the proposal): never disputed.
-//  - contradicted  (two final sources agree on a DIFFERENT outcome): disputed at once. We expect the panel to rule
+//  - contradicted  (two final sources agree on a DIFFERENT outcome, or, audit M-2, at least one source is final and
+//                  NO final source reports the proposed outcome): disputed at once. We expect the panel to rule
 //                  for us, so this does not put the float at risk; it may use the last bond.
 //  - unconfirmed   (pending, unavailable or conflicting sources): NOT disputed yet. Re-checked every tick; disputed
 //                  only in the last-call slot (closesAt - lastCall .. closesAt) if still unconfirmed, and only while
 //                  (a) fewer than `budgetCap` last-call disputes are open and (b) one bond stays in the float after it
 //                  (automatic budget = floor(float / bond) - 1). Largest USDG amount first. Over budget: page a human.
-import type { Agreement } from "./outcome";
+import type { Agreement, SourceReport } from "./outcome";
 
 export type SourceVerdict = "confirmed" | "contradicted" | "unconfirmed";
 
-export function classifyForeign(a: Pick<Agreement, "decision">, proposed: number): SourceVerdict {
-  if (a.decision === null || a.decision === undefined) return "unconfirmed";
-  return a.decision === proposed ? "confirmed" : "contradicted";
+/**
+ * `reports` are the source reads behind `a`. Audit M-2: a proposal that a FINAL source contradicts, with no final
+ * source backing it, is "contradicted" even when only one source is final yet (the other pending or unavailable),
+ * so it is disputed at once instead of waiting for the last-call slot and its bond budget. A proposal that any final
+ * source backs stays "unconfirmed" (sources disagree: the panel decides; we never stake on a split).
+ */
+export function classifyForeign(a: Pick<Agreement, "decision">, proposed: number, reports: Pick<SourceReport, "provider" | "fetchedAt" | "status" | "outcome">[] = []): SourceVerdict {
+  if (a.decision !== null && a.decision !== undefined) return a.decision === proposed ? "confirmed" : "contradicted";
+  const latest = new Map<string, (typeof reports)[number]>();
+  for (const r of reports) {
+    const prev = latest.get(r.provider);
+    if (!prev || r.fetchedAt > prev.fetchedAt) latest.set(r.provider, r);
+  }
+  const finals = [...latest.values()].filter((r) => r.status === "final" && r.outcome !== undefined && r.outcome !== null);
+  if (finals.length > 0 && finals.every((r) => r.outcome !== proposed)) return "contradicted";
+  return "unconfirmed";
 }
 
 export interface ForeignCandidate {
