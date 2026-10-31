@@ -5,8 +5,8 @@ condition is met: a date, a price, a match result or market resolution, both sid
 If the condition is not met by the expiry time, anyone can send the money back to the sender. Claim links, a Telegram
 bot and a web API sit on top of the contracts. The contracts do not depend on any of them.
 
-This repository holds the Solidity contracts (`contracts/`) and the Bun services (`app/`). The website is a separate
-codebase that talks to the API.
+This repository holds the Solidity contracts (`contracts/`), the Bun services (`app/`) and the website (`web/`), which
+talks to the API from the visitor's browser.
 
 ## Repository map
 
@@ -14,6 +14,7 @@ codebase that talks to the API.
 |---|---|
 | `contracts/` | Foundry project: Solidity 0.8.28, no external dependencies, not upgradeable. Sources, tests (unit, fuzz, invariant, fork), deploy scripts, CI tools, threat model, invariants |
 | `app/` | Bun, Hono, tRPC, Drizzle, BullMQ, viem and grammY: API, Telegram bot, keeper, price watcher, outcome resolver, indexer, notifier |
+| `web/` | Next.js 16 website: landing pages, dashboard (create, history, approvals, refunds), claim page and wallet-link page, wired to the API through `@ifso/client` |
 | `app/src/client/` | `@ifso/client`, a browser package for the website (typed API calls, signing helpers, claim page) |
 | `app/scripts/ifso-cli.ts` | Command line tool to read, refund, settle and claim with only an RPC (see the last section) |
 | `app/scripts/server/` | Scripts for one Ubuntu server: provision, deploy with rollback, systemd units, Caddy, backups |

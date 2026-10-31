@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
+import { FRAGMENT_STASH_SCRIPT } from "@/lib/ifso/csp";
 import "./secret.css";
 
 /*
@@ -15,9 +16,12 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f4ece0" };
 
 export default async function SecretLayout({ children }: { children: React.ReactNode }) {
-  await headers();
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en">
+      <head>
+        <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: FRAGMENT_STASH_SCRIPT }} />
+      </head>
       <body className="sx">
         <main className="sx-main">{children}</main>
       </body>

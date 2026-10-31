@@ -32,3 +32,12 @@ export const SECRET_STATIC_HEADERS: Record<string, string> = {
   // baseline without script/style/connect sources: combined with the nonce policy it can only make it stricter
   "Content-Security-Policy": "default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'",
 };
+
+/**
+ * Runs first in <head> of the secret pages, before Next's own scripts. Next's router records the address it booted with
+ * (fragment included) and writes it back into the address bar, so the fragment has to be gone BEFORE it starts. The
+ * script moves the fragment into one window variable and clears the address bar and the history entry; the page's
+ * code takes it from there once and deletes the variable (see lib/ifso/claimLink.ts and views/secret/link-page.tsx).
+ */
+export const FRAGMENT_STASH_VAR = "__ifsoFragment";
+export const FRAGMENT_STASH_SCRIPT = `(function(){try{var h=location.hash;if(h){window.${FRAGMENT_STASH_VAR}=h;history.replaceState(null,"",location.pathname+location.search)}}catch(e){}})()`;

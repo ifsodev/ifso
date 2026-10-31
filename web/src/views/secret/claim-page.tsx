@@ -20,6 +20,11 @@ const RISK =
 
 type Recipient = { address: Address; via: "wallet" | "passkey"; label: string };
 
+/** Belt and braces: if anything put the fragment back into the address bar after hydration, remove it again. */
+function wipeStrayFragment() {
+  if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+}
+
 export function ClaimPage() {
   const [link, setLink] = useState<ClaimLink>();
   const [info, setInfo] = useState<ChainInfo>();
@@ -29,6 +34,7 @@ export function ClaimPage() {
 
   useEffect(() => {
     const l = initial ?? takeClaimLink();
+    wipeStrayFragment();
     setLink(l);
     if (!l.ok) return setLoading(false);
     (async () => {

@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "installCommand": "npx -y bun@1.4.4 install --frozen-lockfile",
+  "buildCommand": "npx -y bun@1.4.4 run build",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ."
+}

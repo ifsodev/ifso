@@ -1,28 +1,68 @@
-# IFSO website handoff
+# IFSO website
 
-This is the IFSO adaptation of the supplied Kumo Next.js template. The homepage retains the template's intro, pinned frame sequences, cloud wipes, ticker and rotating ring. The former schoolgirl sequence retains the original moving city footage, cropped above the person for every frame. The uncropped original frames are excluded. IFSO colours, seal and product copy replace the template branding.
+Next.js 16 (App Router, Turbopack), React 19 and Tailwind 4. The landing pages, the editorial pages and the motion are the
+website team's design; the dashboard, the claim page and the wallet-link page are wired to the IFSO API.
 
 ## Run
 
-Use Node 20.19 or newer. Run `npm install`, then `npm run dev`, and open the local URL printed by Next.js. Use `npm run build` for a production build and `npm start` to serve it. Set `NEXT_PUBLIC_SITE_URL` to the final canonical origin when it is known.
+```bash
+cd web
+bun install            # Node 20.19 or newer
+cp .env.example .env   # set NEXT_PUBLIC_API_URL to a running API
+bun run dev            # http://localhost:3000
+bun run build && bun run test
+```
+
+`bun run sync:client` copies `app/src/client` and the core modules it imports into `src/vendor/ifso`, so `web/` builds on
+its own (Vercel uses `web/` as the project root). CI fails if the copy is behind.
 
 ## Routes
 
-`/` (template-based landing page), `/how-it-works`, `/conditions`, `/technology`, `/pricing`, `/dashboard`, `/privacy-policy`, `/terms`, and `/risks`. Content and motion for the homepage are in `src/data/home` and `src/views/home`; additional pages are in `src/views/ifso/editorial.tsx` and `editorial.css`. The new pages use React Spring and the shared CRT finishing from the template.
+| Route | What it is |
+|---|---|
+| `/`, `/how-it-works`, `/conditions`, `/technology`, `/pricing`, `/privacy-policy`, `/terms`, `/risks` | Content pages |
+| `/dashboard` | Create a payment, drafts (browser only), sent and received, approvals and referee decisions, refunds and refund redirects, settings |
+| `/c/<id>#1.<secret>` | Claim page. Strict CSP, no third-party code, the secret never leaves the browser |
+| `/link#<token>` | Links a wallet to a Telegram account (the bot's `/link` button). Same rules as the claim page |
+| `/create` | Redirects to the dashboard composer |
 
-## Integration status
+## How it is wired
 
-The website is a frontend handoff. The supplied IFSO backend archive contains contracts and a Bun/Hono/tRPC service, but no deployed addresses, production API origin, credentials or configured infrastructure. The dashboard contains payment input, review, browser-local draft storage and browser-wallet connection; it can search, reopen and remove local drafts. It does not build, sign or submit an escrow. Do not treat it as a live payment flow. The claim page, payment history, challenge acceptance, decisions and refunds are not wired.
+- One API client (`src/lib/ifso/api.ts`) over the tRPC HTTP protocol, called from the visitor's browser (the country comes from
+  the request's edge headers). Shapes are in `FRONTEND.md` at the repository root.
+- Create: the secret is made in the browser, `build` returns the exact terms and typed data, `verifyBuildAnswer` checks them,
+  the wallet signs what `build` returned (one signature), `submit` relays it, then the share sheet shows the claim link.
+  Questions the parser asks (direction, weekend close, team, deadline) are answered with buttons; nothing is built while one is open.
+- Claim: the link fragment is moved out of the address bar by a script in `<head>` before the app starts, and the page reads
+  amount, status and condition from the chain through the API. The recipient is a wallet the visitor picks or a passkey
+  smart account (ZeroDev Kernel v3.1 with the passkey validator 0.0.3) made on the device without any hosted passkey server.
+  Challenge invites are joined from the same page.
+- Gas: every transaction the site sends sets gas = estimate x 1.3 (`src/lib/ifso/gas.ts`).
+- Region: `/geo` decides whether stock price conditions are offered; the API enforces the same rule.
+- Wallet picker: Reown AppKit when `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is set, otherwise one button per wallet the browser
+  announces (EIP-6963). It is not loaded on `/c/*` or `/link`.
 
-The backend team should connect the exact tRPC `parse`, `build`, `submit`, `escrow`, `claim`, `accept`, `decide`, `redirectRefund` and `mine` operations from `services/src/api/router.ts`. Replace free-text fields with service-backed validation and unambiguous canonical previews. Read the fee and typed data returned by `build`, verify chain and contracts, then sign and submit. Never sign the locally calculated review. Enforce the specified stock-token region gate and expiry rules.
+## Configuration
 
-For claim links, use `services/src/client/claimPage.ts` and the link utilities in the supplied backend. Keep the secret in the URL fragment/client only, wipe the fragment immediately with history.replaceState, use no third-party scripts on the claim route, read the amount and condition from chain, and bind the recipient in the claim signature. Configure the passkey provider, chain ID, USDG and escrow addresses, relayer and CSP. Run the backend's testnet, fork, security and audit gates before launch.
+Only environment variables and the deployments file of the chosen chain (`src/config/deployments/<chain id>.json`, the file the
+deploy script writes). See `.env.example`. The escrow address is also read from the API's `/healthz`; if it differs from the
+deployments file, the site refuses to sign.
 
-The privacy policy and terms are clearly marked as drafts because the operator, support contact, jurisdiction, retention periods and actual deployment practices were not supplied. Legal counsel must complete and review them. Product claims and fees should be checked against final contract configuration. No support email, claims of licensing, or completed audit have been invented.
+## Security headers
+
+`src/proxy.ts` gives `/c/*` and `/link` a per-request Content-Security-Policy (scripts only from this site, `connect-src`
+limited to the API and the RPC, no framing), `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; `next.config.ts`
+repeats the fixed headers. Tests check the headers and that the JavaScript of both routes carries no AppKit, WalletConnect,
+analytics or remote font code.
+
+## Deploying on Vercel
+
+Project root `web`, framework Next.js. Set the variables from `.env.example` for Production. Pin Bun in `vercel.json` if the
+platform's Bun is older than the lockfile. Use an ignored-build-step so commits outside `web/` do not redeploy.
 
 ## Image credits
 
-- IFSO seal and banner: supplied by the user.
+- IFSO seal and banner: supplied by the project.
 - Shoji scene: Paolo Sanchez, [Pexels](https://www.pexels.com/photo/sunlight-on-traditional-japanese-interior-scene-32911574/).
 - Shoji room: Kaiya Inouye, [Pexels](https://www.pexels.com/photo/serene-japanese-room-with-shoji-screens-and-light-35449989/).
 - Calligraphy: Liuuu _61, [Pexels](https://www.pexels.com/photo/artistic-japanese-calligraphy-creation-close-up-31144525/).
@@ -31,30 +71,11 @@ The privacy policy and terms are clearly marked as drafts because the operator, 
 - Brushes: Feng Zou, [Pexels](https://www.pexels.com/photo/ink-brushes-on-a-tabletop-6315614/).
 - Red calligraphy: Kevin Malik, [Pexels](https://www.pexels.com/photo/a-person-writing-on-a-piece-of-paper-using-a-brush-and-black-ink-9016471/).
 - Garden: Leongsan Tung, [Pexels](https://www.pexels.com/photo/tranquil-zen-garden-with-stone-arrangements-35145768/).
-- The photographs above are offered under the Pexels License. Original Kumo source and remaining sequence artwork: provided template, with an Unlicense dedication in `LICENSE.md`. The Allura font is provided in the Brewns reference template.
 
-Confirm final commercial usage, applicable releases and license terms before publication.
+The photographs are offered under the Pexels License. The template's remaining artwork and code are released under the
+Unlicense (`LICENSE.md`). The Allura font is provided in the Brewns reference template.
 
-## Loading and performance
+## Pages still marked as drafts
 
-The homepage preloader fetches every frame of the current viewport's three sequences and its cloud artwork before opening. This avoids late scene downloads but increases first-load time and data usage. Frames are kept compressed during preload to avoid decoding hundreds of full-size images at once. The editorial pages preload and decode their own unique imagery and font before revealing content. The loading screen offers a retry on a failed asset. Test on real target devices and network conditions before deployment, and tune asset resolution or use a versioned CDN cache as needed.
-
-## Recording-inspired revision
-
-The general content pages use the notebook and stamped-ink treatment; `/conditions` uses an interactive folder index; `/dashboard` provides an activity workspace with local drafts and separate empty states for unavailable live history. The how-it-works page contains the looping samurai scene, while the technology page contains the oscilloscope-inspired IFSO sequence; both are drawn in JavaScript canvas. The animations pause when offscreen and respect reduced-motion preferences. The three social buttons display a coming-soon pop-up until real destinations are supplied. No user account, live payment or balance is inferred from the interface.
-
-The former `/create` URL redirects to the dashboard composer, including old draft links. Expiry inputs and displays use fixed Eastern Standard Time (UTC−05:00), not seasonal Eastern Daylight Time. New drafts store expiry as an ISO UTC instant.
-
-## Responsive and page transitions
-
-The dashboard and content layouts reflow for narrow screens, with larger mobile touch targets and phone-friendly artwork placement. Links between interior pages use the calligraphic logo transition; reduced-motion visitors navigate without it. The animation canvases only run when visible and limit pixel density; the samurai uses fewer particles on smaller canvases. Test on actual iOS and Android devices, including rotation and slow networks, before release. The recording-inspired designs are adaptations from video references, not verified frame-for-frame reproductions.
-
-## Visual interaction updates
-
-The condition folders expand within the stack, and the legal page index follows scrolling. The transparent seal is at `public/ifso-seal-transparent.png`; `public/ifso-logo-original.png` retains the supplied original. The seal's transparent version was generated from the supplied image, so its texture is not a pixel-identical extraction. The samurai is a procedural JavaScript interpretation, not a frame-for-frame copy of the supplied recording.
-
-Condition files animate their measured height in both directions. The landing sequence only repaints when the visible frame is decoded, avoiding redundant work while the background frames load. The samurai loop includes revised stances and cuts while remaining JavaScript-drawn; it is not frame-identical to the supplied recording.
-
-Between interior pages the transition draws a calligraphic IFSO mark before resolving into the supplied seal; it waits for destination loaders and visible images before fading away. Home links bypass this transition and open the original landing-page loader directly. A timeout and the page's retry control prevent a failed asset from trapping navigation. The responsive layouts have been inspected at selected viewport sizes; production device and network testing is still needed.
-
-The frame canvas caches its measured size with ResizeObserver, avoiding a layout read on each scroll frame. Portrait frame decoding, the original scene timing, and the image preload remain in place. Validate actual scrolling performance on representative devices before release.
+The privacy policy and the terms are drafts for legal review: the operator, contact details, jurisdiction and retention
+periods are not filled in, and no support address or audit claim has been invented.

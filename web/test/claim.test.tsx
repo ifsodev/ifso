@@ -61,6 +61,18 @@ describe("claim page", () => {
     expect(URL_WITH_SECRET).not.toContain("25.0");
   });
 
+  test("the head script moves the fragment out of the address bar before the app starts, and the page still gets the secret", async () => {
+    const { FRAGMENT_STASH_SCRIPT, FRAGMENT_STASH_VAR } = await import("@/lib/ifso/csp");
+    new Function(FRAGMENT_STASH_SCRIPT)(); // what the browser runs first, in <head>
+    expect(window.location.hash).toBe("");
+    expect((window as unknown as Record<string, string>)[FRAGMENT_STASH_VAR]).toContain("#1.");
+    const { ClaimPage } = await import("@/views/secret/claim-page");
+    expect((window as unknown as Record<string, string>)[FRAGMENT_STASH_VAR]).toBeUndefined(); // taken once, gone
+    render(<ClaimPage />);
+    await waitFor(() => expect(screen.getByText(/25\.0 USDG/)).toBeTruthy());
+    for (const s of seenAtFetch) expect(s.href).not.toContain(b64(secret));
+  });
+
   test("a broken link shows a plain message and still wipes the fragment", async () => {
     window.history.replaceState(null, "", "/c/" + "A".repeat(43) + "#1.broken");
     const { ClaimPage } = await import("@/views/secret/claim-page");

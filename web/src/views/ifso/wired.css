@@ -1,5 +1,5 @@
 /* Styles for the wired-up parts of the dashboard (wallet picker, previews, payment details, share sheet). */
-.wp-backdrop{position:fixed;inset:0;z-index:80;background:#0d0a09cc;display:grid;place-items:center;padding:16px}
+.wp-backdrop{position:fixed;inset:0;z-index:9999;background:#0d0a09cc;display:grid;place-items:center;padding:16px}
 .wp-sheet{width:min(440px,100%);max-height:90svh;overflow:auto;background:#e9ddcd;color:#2d211d;border:1px solid #c15b4c;box-shadow:8px 8px 0 #733027;padding:24px}
 .wp-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .wp-head h2{font:28px Georgia,serif;margin:0}
