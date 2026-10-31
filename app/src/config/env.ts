@@ -66,7 +66,14 @@ const schema = z.object({
   // relayed (gas paid by us) actions besides claim: budgets per client network, per signing wallet, per escrow
   RELAY_PER_IP_PER_HOUR: z.coerce.number().default(60),
   RELAY_PER_SIGNER_PER_HOUR: z.coerce.number().default(20),
-  RELAY_PER_ESCROW_PER_DAY: z.coerce.number().default(10),
+  RELAY_PER_ESCROW_PER_DAY: z.coerce.number().default(10), // per escrow AND signer (review R3-M1)
+  // unauthenticated reads that touch Postgres or the RPC (stats, perks, planBatch, planPayroll), per client network (R3-L1)
+  READS_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(300),
+  // Resolver service, review R3-H1: a foreign proposal our sources cannot confirm yet is disputed only in the last-call
+  // slot (this many seconds before its dispute window closes), and only while the bond float keeps one bond spare.
+  RESOLVER_LAST_CALL_SECONDS: z.coerce.number().int().positive().default(20 * 60),
+  // concurrent open last-call disputes allowed; 0 = automatic: floor(float / bond) - 1
+  RESOLVER_UNCONFIRMED_DISPUTE_BUDGET: z.coerce.number().int().min(0).default(0),
   // new outcome questions a stranger may plan through `build`
   BUILD_QUESTIONS_PER_IP_PER_HOUR: z.coerce.number().default(10),
   BUILD_QUESTIONS_PER_SENDER_PER_HOUR: z.coerce.number().default(5),

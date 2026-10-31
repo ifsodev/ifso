@@ -176,10 +176,10 @@ A visitor with no wallet gets a smart account protected by a passkey:
 
 ## 8. Linking a wallet to Telegram (`/link`)
 
-The bot's `/link` command (private chat only) sends a button to `https://<site>/link#<token>`. The token is one-time, valid 15 minutes, and only its hash is stored.
+The bot's `/link` command (private chat only) sends a button to `https://<site>/link#<token>.<expiresAt>` (read it with `parseLinkFragment`). The token is one-time, valid 15 minutes, and only its hash is stored.
 
 1. The page reads the token from the fragment and wipes it (same helper pattern as the claim page; no third-party scripts).
-2. The user connects a wallet or passkey account; show the exact text to be signed: `linkWalletMessage(token)`.
+2. The user connects a wallet or passkey account; show the exact text to be signed: `linkWalletMessage(token, { domain: linkDomain(PUBLIC_APP_URL), expiresAt })` (it names the site and the expiry).
 3. `personal_sign` it (EIP-191), then `api.linkWallet.mutate({ token, address, signature })`.
 4. Success: "Wallet linked". Errors: "expired or already used" (ask for `/link` again) or "signature does not match".
 

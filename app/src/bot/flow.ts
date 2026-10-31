@@ -1,6 +1,7 @@
 // The bot's command flow, free of Telegram types: text in, a reply (text + buttons) out. Never guesses:
 // anything unclear becomes a question with buttons. Buttons are only URL buttons (to the web app) or callback
 // buttons (answers to our own questions); there is no Mini App and no wallet inside Telegram.
+import { linkFragment } from "../core/linkWallet";
 import { copy } from "../core/copy";
 import { formatUsdg } from "../core/money";
 import { parseCommand, replaceCI, type ParseResult, type Question } from "../core/parser";
@@ -155,6 +156,6 @@ export async function handleMine(e: FlowEnv, a: { tgId: bigint; chatId: bigint }
 export async function handleLink(e: FlowEnv, a: { tgId: bigint; username?: string | null; isPrivate: boolean }): Promise<Reply> {
   if (!a.isPrivate) return { text: copy.bot.linkPrivateOnly };
   await e.store.upsertUser(a.tgId, { username: a.username ?? null });
-  const { token } = await e.store.createLinkRequest(a.tgId, nowOf(e));
-  return { text: copy.bot.linkIntro, buttons: [[{ text: copy.bot.linkButton, url: `${e.publicAppUrl}/link#${token}` }]] };
+  const { token, expiresAt } = await e.store.createLinkRequest(a.tgId, nowOf(e));
+  return { text: copy.bot.linkIntro, buttons: [[{ text: copy.bot.linkButton, url: `${e.publicAppUrl}/link#${linkFragment(token, expiresAt)}` }]] };
 }

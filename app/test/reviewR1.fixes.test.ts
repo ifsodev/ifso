@@ -142,10 +142,13 @@ describe("R1-M5: relayed calls refuse no-ops and are budgeted", () => {
   test("per-escrow daily cap on decisions and redirects", async () => {
     const { deps, sent } = stubDeps({ RELAY_PER_ESCROW_PER_DAY: "3", RELAY_PER_SIGNER_PER_HOUR: "1000", RELAY_PER_IP_PER_HOUR: "1000" });
     const c = caller(deps);
-    for (let i = 0; i < 10; i++) await dec(c, OTHER_ACC, "9", 2).catch(() => {});
+    for (let i = 0; i < 10; i++) await dec(c, OTHER_ACC, "9", 1).catch(() => {}); // OKs are charged (per escrow and signer, R3-M1)
     expect(sent.length).toBe(3);
-    await dec(caller(deps, "198.51.100.1"), OTHER_ACC, "10", 2); // another escrow is unaffected
+    await dec(caller(deps, "198.51.100.1"), OTHER_ACC, "10", 1); // another escrow is unaffected
     expect(sent.length).toBe(4);
+    // R3-M1: a closing decision that simulates OK is never capped (on chain it can succeed at most once per escrow)
+    await dec(caller(deps, "198.51.100.2"), OTHER_ACC, "9", 2);
+    expect(sent.length).toBe(5);
   });
   test("per-signer budget holds across escrows and across client networks", async () => {
     const { deps, sent } = stubDeps({ RELAY_PER_SIGNER_PER_HOUR: "4", RELAY_PER_ESCROW_PER_DAY: "1000", RELAY_PER_IP_PER_HOUR: "1000" });

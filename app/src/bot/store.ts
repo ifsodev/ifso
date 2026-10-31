@@ -39,7 +39,7 @@ export interface BotStore {
   updateIntent(id: string, patch: IntentPatch): Promise<void>;
   mine(tgId: bigint, chatId: bigint): Promise<MineRow[]>;
   /** a one-time token for the /link flow; only its hash is stored */
-  createLinkRequest(tgId: bigint, nowMs: number): Promise<{ token: string }>;
+  createLinkRequest(tgId: bigint, nowMs: number): Promise<{ token: string; expiresAt: number }>;
 }
 
 export function drizzleBotStore(db: Db): BotStore {
@@ -71,8 +71,9 @@ export function drizzleBotStore(db: Db): BotStore {
     },
     async createLinkRequest(tgId, nowMs) {
       const token = newLinkToken();
-      await db.insert(linkRequests).values({ tokenHash: tokenHash(token), tgId, expiresAt: new Date(nowMs + LINK_TOKEN_TTL_SEC * 1000) });
-      return { token };
+      const expiresAt = Math.floor(nowMs / 1000) + LINK_TOKEN_TTL_SEC; // whole seconds: the signed message shows it
+      await db.insert(linkRequests).values({ tokenHash: tokenHash(token), tgId, expiresAt: new Date(expiresAt * 1000) });
+      return { token, expiresAt };
     },
     async mine(tgId, chatId) {
       const ws = await db.select({ id: watchers.escrowId }).from(watchers).where(eq(watchers.tgChatId, chatId));

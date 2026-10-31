@@ -42,7 +42,7 @@ export class MemoryStore implements BotStore {
   async createLinkRequest(tgId: bigint) {
     const token = `t${this.linkTokens.length}`.padEnd(43, "x");
     this.linkTokens.push({ token, tgId });
-    return { token };
+    return { token, expiresAt: 1_900_000_000 };
   }
 }
 

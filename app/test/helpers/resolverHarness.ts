@@ -103,3 +103,11 @@ export async function proposeAs(env: ResolverEnv, who: import("viem/accounts").P
 }
 export const questionOnchain = (env: ResolverEnv, id: Hex) =>
   env.chain.pc.readContract({ address: env.chain.resolver, abi: ifsoOutcomeResolverAbi, functionName: "getQuestion", args: [id] });
+
+/** Warps into the last-call slot of the open proposal on `id` (10 min before its dispute window closes). */
+export async function warpToLastCall(env: ResolverEnv, id: Hex, beforeCloseSec = 600) {
+  const o = await questionOnchain(env, id);
+  const win = (await env.chain.pc.readContract({ address: env.chain.resolver, abi: ifsoOutcomeResolverAbi, functionName: "disputeWindow" })) as bigint;
+  const target = o.proposedAt + win - BigInt(beforeCloseSec);
+  if (target > (await env.chain.now())) await env.chain.warpTo(target);
+}

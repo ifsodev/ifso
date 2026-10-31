@@ -2,13 +2,15 @@
 // own sources confirm it (two final, agreeing sources). Contradicted, pending, unavailable or conflicting sources mean
 // a bonded dispute inside the window; a short bond float raises an alert; every foreign proposal raises an ops alert.
 // The first test is the round-2 PoC (it failed on 42567c1: FINAL with the wrong outcome, no alert).
+// Round 3 (R3-H1, DECISIONS #32): an UNCONFIRMED proposal is no longer disputed at once; it is re-checked every tick and
+// disputed in the last-call slot (RESOLVER_LAST_CALL_SECONDS before the window closes) if still unconfirmed.
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { erc20Abi, type Abi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { resolverTick } from "../src/workers/resolver";
 import { indexerTick } from "../src/workers/indexer";
 import { haveAnvil, havePostgres } from "./helpers/chain";
-import { bootResolverEnv, onchainState, proposeAs, questionOnchain, type ResolverEnv } from "./helpers/resolverHarness";
+import { bootResolverEnv, onchainState, proposeAs, questionOnchain, warpToLastCall, type ResolverEnv } from "./helpers/resolverHarness";
 import { eplEvents, expectedFootball } from "./helpers/resolverFixtures";
 
 setDefaultTimeout(120_000);
@@ -28,6 +30,9 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R2-H1: unverifiable stranger p
     env.setSources({ down: ["tsdb"] }); // the second source has not published the result yet (lag, outage, rate limit)
     await proposeAs(env, env.chain.bob, q.id, wrong); // the losing party proposes its own answer at earliestResolve
     await resolverTick(env.deps);
+    expect(Number((await questionOnchain(env, q.id)).state)).toBe(2); // R3-H1: not yet, re-checked every tick
+    await warpToLastCall(env, q.id); // still unconfirmed in the last-call slot: disputed now
+    await resolverTick(env.deps);
     await env.chain.warpTo((await env.chain.now()) + 7300n); // dispute window (2 h) passes
     env.setSources(); // the lagging source is back, too late
     await resolverTick(env.deps);
@@ -43,6 +48,9 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R2-H1: unverifiable stranger p
     env.setSources({ down: ["tsdb", "odds"] });
     await proposeAs(env, env.chain.bob, q.id, expectedFootball(eplEvents[1]!));
     await indexerTick(env.deps, async () => {}); // the indexer marks it state 2: the foreign pass sees it first
+    await resolverTick(env.deps);
+    expect(Number((await questionOnchain(env, q.id)).state)).toBe(2);
+    await warpToLastCall(env, q.id);
     await resolverTick(env.deps);
     const o = await questionOnchain(env, q.id);
     expect(Number(o.state)).toBe(3);
@@ -64,7 +72,7 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R2-H1: unverifiable stranger p
     expect(await onchainState(env, q.id)).toEqual([4, truth]);
   });
 
-  test("bond float too small: no dispute is possible, so a bond-short alert is raised (and the proposal is never finalized by us)", async () => {
+  test("bond float too small: no dispute is possible, so a human is paged in the last-call slot (and the proposal is never finalized by us)", async () => {
     const q = await env.question(3);
     const truth = expectedFootball(eplEvents[3]!);
     const wrong = truth === 1 ? 2 : 1;
@@ -75,8 +83,10 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R2-H1: unverifiable stranger p
     await env.chain.write(me, env.chain.usdg, erc20Abi as Abi, "transfer", [env.chain.bob.address, bal]);
     await proposeAs(env, env.chain.bob, q.id, wrong);
     await resolverTick(env.deps);
+    await warpToLastCall(env, q.id);
+    await resolverTick(env.deps);
     expect(Number((await questionOnchain(env, q.id)).state)).toBe(2);
-    expect(env.alerts.some(([c]) => c === "resolver-bond-short")).toBe(true);
+    expect(env.alerts.some(([c]) => c.startsWith(`resolver-dispute-budget:${q.id}`))).toBe(true); // a human is paged in the slot
     await env.chain.warpTo((await env.chain.now()) + 7300n);
     await resolverTick(env.deps);
     expect(Number((await questionOnchain(env, q.id)).state)).toBe(2); // the service does not finalize it

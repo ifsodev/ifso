@@ -120,6 +120,11 @@ export const questions = pgTable(
     finalOutcome: smallint("final_outcome"),
     /** When the proposal was disputed (panel clock starts here). */
     disputedAt: timestamp("disputed_at", { withTimezone: true }),
+    /**
+     * Review R3-H1: why the service disputed: "contradicted" (sources say otherwise) or "last-call" (sources could not
+     * confirm before the slot); "last-call-done" once the panel or a timeout settled it. Null = not disputed by us.
+     */
+    disputeKind: text("dispute_kind"),
     createdTx: text("created_tx"),
   },
   (t) => [index("questions_state_idx").on(t.state, t.earliestResolve), index("questions_close_idx").on(t.closeTime)],

@@ -34,6 +34,18 @@ is under Unreleased and is grouped by area. Dates are the commit dates (UTC).
 - 2026-10-30: Applied `forge fmt` across the contracts.
 
 ### Fixed
+- 2026-10-31: The resolver service no longer disputes another address's proposal just because its sources cannot
+  confirm it yet: contradicted proposals are disputed at once, unconfirmed ones are re-checked every tick and disputed
+  only in a last-call slot within a bond budget that keeps one bond spare, largest payments first, with a page to a
+  human over budget and an alert when a last-call dispute is lost (round 3, H1).
+- 2026-10-31: Polymarket questions resolve no earlier than the market's end date plus 24 hours.
+- 2026-10-31: The relayed-change cap per payment counts each signer separately, and closing decisions are never capped,
+  so one party cannot use up the other party's gasless decision (round 3, M1).
+- 2026-10-31: `/stats` is computed once a minute, and unauthenticated reads that touch the database or RPC share one
+  budget per client network; `feeFor` is cached (round 3, L1).
+- 2026-10-31: Payments on a stock token with an announced multiplier change that cannot be settled yet step aside on a
+  short back-off, and at most 50 of them are looked at per pass, so they cannot hide other payments (round 3, L2).
+- 2026-10-31: The wallet-link message names the site and the time the code expires (round 3, I1).
 - 2026-10-30: Challenges on a price at a deadline can no longer be accepted once the deciding price may already be
   published (`acceptBy + maxStale` must be before the deadline), and two-sided TOUCH challenges are refused (review
   round 1, findings M1 and M2).

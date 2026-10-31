@@ -9,7 +9,7 @@ import { appRouter, jsonSafe } from "../src/api/router";
 import { loadEnv } from "../src/config/env";
 import { buildParams } from "../src/core/builder";
 import { createAuthNonce } from "../src/core/condition";
-import { linkWalletMessage } from "../src/core/linkWallet";
+import { linkDomain, linkWalletMessage, parseLinkFragment } from "../src/core/linkWallet";
 import { createAuthorizationTypedData } from "../src/core/typedData";
 import { intents, linkRequests, relayTxs, tgUsers } from "../src/db/schema";
 import type { Deps } from "../src/workers/deps";
@@ -25,7 +25,8 @@ describe("/link in the bot (no database)", () => {
     const h = makeHarness();
     const out = await h.say("/link");
     const url = buttonsOf(out)[0].url as string;
-    expect(url).toMatch(/\/link#[A-Za-z0-9_-]{20,}$/);
+    expect(url).toMatch(/\/link#[A-Za-z0-9_-]{43}\.\d{10}$/);
+    expect(parseLinkFragment(new URL(url).hash)).toEqual({ token: h.store.linkTokens[0]!.token, expiresAt: 1_900_000_000 });
     expect(url).not.toContain("?");
     expect(h.store.linkTokens.length).toBe(1);
     expect(textOf(out)).toContain("moves no money");
@@ -45,10 +46,14 @@ describe.skipIf(!havePostgres())("wallet link and remembered sender", () => {
   const caller = () => appRouter.createCaller({ deps, limiter: new RateLimiter(), ip: "203.0.113.7", country: "DE" });
   const TG = 4242n;
   const token = (c = "a") => c.repeat(43);
+  let EXP = 0;
   const issue = async (tok: string, o: { tgId?: bigint; expiresInMs?: number } = {}) => {
     const { tokenHash } = await import("../src/api/linkToken");
-    await pg.db.insert(linkRequests).values({ tokenHash: tokenHash(tok), tgId: o.tgId ?? TG, expiresAt: new Date(Date.now() + (o.expiresInMs ?? 600_000)) });
+    EXP = Math.floor((Date.now() + (o.expiresInMs ?? 600_000)) / 1000);
+    await pg.db.insert(linkRequests).values({ tokenHash: tokenHash(tok), tgId: o.tgId ?? TG, expiresAt: new Date(EXP * 1000) });
   };
+  // R3-I1: the signed text names the site and the code's expiry
+  const msg = (tok: string, o: { domain?: string; expiresAt?: number } = {}) => linkWalletMessage(tok, { domain: o.domain ?? linkDomain(deps.env.PUBLIC_APP_URL), expiresAt: o.expiresAt ?? EXP });
   const userAddr = async (id = TG) => (await pg.db.select().from(tgUsers).where(eq(tgUsers.tgId, id)))[0]?.address ?? null;
 
   beforeAll(async () => {
@@ -84,27 +89,38 @@ describe.skipIf(!havePostgres())("wallet link and remembered sender", () => {
   test("a wallet that signs the message links to the Telegram user; the token works once", async () => {
     const acct = privateKeyToAccount(generatePrivateKey());
     await issue(token());
-    const signature = await acct.signMessage({ message: linkWalletMessage(token()) });
+    const signature = await acct.signMessage({ message: msg(token()) });
     await caller().linkWallet({ token: token(), address: acct.address, signature });
     expect(await userAddr()).toBe(acct.address.toLowerCase());
     const other = privateKeyToAccount(generatePrivateKey());
-    await expect(caller().linkWallet({ token: token(), address: other.address, signature: await other.signMessage({ message: linkWalletMessage(token()) }) })).rejects.toThrow("expired or was already used");
+    await expect(caller().linkWallet({ token: token(), address: other.address, signature: await other.signMessage({ message: msg(token()) }) })).rejects.toThrow("expired or was already used");
     expect(await userAddr()).toBe(acct.address.toLowerCase());
   });
   test("a signature from another wallet, or over another token, is refused and does not burn the token", async () => {
     const acct = privateKeyToAccount(generatePrivateKey());
     const thief = privateKeyToAccount(generatePrivateKey());
     await issue(token());
-    await expect(caller().linkWallet({ token: token(), address: acct.address, signature: await thief.signMessage({ message: linkWalletMessage(token()) }) })).rejects.toThrow("does not match");
-    await expect(caller().linkWallet({ token: token(), address: acct.address, signature: await acct.signMessage({ message: linkWalletMessage(token("b")) }) })).rejects.toThrow("does not match");
+    await expect(caller().linkWallet({ token: token(), address: acct.address, signature: await thief.signMessage({ message: msg(token()) }) })).rejects.toThrow("does not match");
+    await expect(caller().linkWallet({ token: token(), address: acct.address, signature: await acct.signMessage({ message: msg(token("b")) }) })).rejects.toThrow("does not match");
     expect(await userAddr()).toBeNull();
-    await caller().linkWallet({ token: token(), address: acct.address, signature: await acct.signMessage({ message: linkWalletMessage(token()) }) }); // still usable
+    await caller().linkWallet({ token: token(), address: acct.address, signature: await acct.signMessage({ message: msg(token()) }) }); // still usable
+    expect(await userAddr()).toBe(acct.address.toLowerCase());
+  });
+  test("R3-I1: the message names the site and the expiry; a signature over another site or another expiry is refused", async () => {
+    const acct = privateKeyToAccount(generatePrivateKey());
+    await issue(token());
+    const m = msg(token());
+    expect(m).toContain(linkDomain(deps.env.PUBLIC_APP_URL));
+    expect(m).toContain(`Expires: ${new Date(EXP * 1000).toISOString().replace(/\.000Z$/, "Z")}`);
+    await expect(caller().linkWallet({ token: token(), address: acct.address, signature: await acct.signMessage({ message: msg(token(), { domain: "evil.example" }) }) })).rejects.toThrow("does not match");
+    await expect(caller().linkWallet({ token: token(), address: acct.address, signature: await acct.signMessage({ message: msg(token(), { expiresAt: EXP + 3600 }) }) })).rejects.toThrow("does not match");
+    await caller().linkWallet({ token: token(), address: acct.address, signature: await acct.signMessage({ message: m }) });
     expect(await userAddr()).toBe(acct.address.toLowerCase());
   });
   test("an unknown or expired token is refused", async () => {
     const acct = privateKeyToAccount(generatePrivateKey());
     await issue(token("e"), { expiresInMs: -1000 });
-    for (const t of [token("e"), token("z")]) await expect(caller().linkWallet({ token: t, address: acct.address, signature: await acct.signMessage({ message: linkWalletMessage(t) }) })).rejects.toThrow("expired or was already used");
+    for (const t of [token("e"), token("z")]) await expect(caller().linkWallet({ token: t, address: acct.address, signature: await acct.signMessage({ message: msg(t) }) })).rejects.toThrow("expired or was already used");
   });
 
   describe("submit remembers the sender for a bot intent", () => {

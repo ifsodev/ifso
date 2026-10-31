@@ -44,6 +44,11 @@ export const DEFAULTS = {
    * knowable before endDate, so the margin keeps the acceptance window well clear of the likely answer.
    */
   polymarketChallengeMargin: 24 * 3600,
+  /**
+   * DECISIONS #33 (review R3-H1): a Polymarket question can be resolved no earlier than endDate + 24 h, after the
+   * expected UMA settlement (2 h liveness plus margin), so an honest proposal normally meets final sources.
+   */
+  polymarketResolveDelay: 24 * 3600,
 };
 
 /** Thrown for a request the contract would reject; the API turns it into a plain 400. */

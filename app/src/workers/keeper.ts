@@ -78,10 +78,17 @@ const noteSuccess = (pass: string, id: string) => backoff.delete(bkey(pass, id))
 // Review R2-M3: a row with nothing to send yet (no proof round, hold window, Pyth update missing) never fails, so it
 // used to sit at the head of every scan forever. It now steps aside too, on a shorter schedule (2 min doubling to 30 min).
 const WAIT_MAX_MS = 30 * 60_000;
-function noteWait(pass: string, id: string, nowMs: number) {
+// Review R3-L2: rows on a token with a pending multiplier change are looked at first, but one that cannot be sent yet
+// steps aside too, on a short schedule (1 min doubling to 5 min) so it is retried well before the change, and at most
+// URGENT_PER_PASS of them are planned per pass: never-sendable rows there can no longer fill the scan page.
+const URGENT_WAIT_BASE_MS = 60_000;
+const URGENT_WAIT_MAX_MS = 5 * 60_000;
+export const URGENT_PER_PASS = 50;
+function noteWait(pass: string, id: string, nowMs: number, urgent = false) {
   const prev = backoff.get(bkey(pass, id));
   const fails = (prev?.fails ?? 0) + 1;
-  backoff.set(bkey(pass, id), { fails, until: nowMs + Math.min(BACKOFF_BASE_MS * 2 ** (fails - 1), WAIT_MAX_MS) });
+  const [base, max] = urgent ? [URGENT_WAIT_BASE_MS, URGENT_WAIT_MAX_MS] : [BACKOFF_BASE_MS, WAIT_MAX_MS];
+  backoff.set(bkey(pass, id), { fails, until: nowMs + Math.min(base * 2 ** (fails - 1), max) });
 }
 /** SQL: rows a keeper can act on at all (an unaccepted challenge never settles; it only refunds at expiry). */
 const actionable = () => or(eq(escrows.twoSided, false), eq(escrows.accepted, true));
@@ -228,14 +235,16 @@ async function settlePrice(deps: Deps, now: Date, nowTs: bigint) {
   }
   const due = prioritiseBySchedule(rows, tokenOf, pending);
   let sends = 0;
+  let urgentLooked = 0;
   for (const e of due) {
     if (e.twoSided && !e.accepted) continue;
     const urgent = pending.has(tokenOf(e) ?? "");
-    if (sends >= BATCH || (!urgent && skipping("price", e.id, Date.now()))) continue;
+    if (sends >= BATCH || skipping("price", e.id, Date.now())) continue;
+    if (urgent && ++urgentLooked > URGENT_PER_PASS) continue; // the rest of the page is always reached
     if (await guarded(deps, "price", e.id, async () => {
       const plan = await planPrice(deps, e, nowTs);
       if (!plan || (!plan.send && !isShadow(deps))) {
-        if (!urgent) noteWait("price", e.id, Date.now()); // nothing to send yet: step aside for a while (never before a pending change)
+        noteWait("price", e.id, Date.now(), urgent); // nothing to send yet: step aside for a while (short before a pending change)
         return;
       }
       if (plan.send) {

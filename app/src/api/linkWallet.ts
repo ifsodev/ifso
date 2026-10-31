@@ -4,7 +4,7 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { recoverMessageAddress, type Address, type Hex } from "viem";
 import { intents, linkRequests, tgUsers } from "../db/schema";
-import { linkWalletMessage } from "../core/linkWallet";
+import { linkDomain, linkWalletMessage } from "../core/linkWallet";
 import type { Deps } from "../workers/deps";
 import { tokenHash } from "./linkToken";
 
@@ -28,7 +28,8 @@ export async function linkWallet(deps: Deps, a: { token: string; address: Addres
   const [req] = await deps.db.select().from(linkRequests).where(and(eq(linkRequests.tokenHash, hash), isNull(linkRequests.usedAt), gt(linkRequests.expiresAt, now)));
   if (!req) throw new LinkError("this link has expired or was already used: send /link in the bot again");
   // signature first: a wrong signature must not burn the token
-  if (!(await proves(deps, a.address, linkWalletMessage(a.token), a.signature))) throw new LinkError("the signature does not match this wallet");
+  const message = linkWalletMessage(a.token, { domain: linkDomain(deps.env.PUBLIC_APP_URL), expiresAt: Math.floor(req.expiresAt.getTime() / 1000) });
+  if (!(await proves(deps, a.address, message, a.signature))) throw new LinkError("the signature does not match this wallet");
   const used = await deps.db.update(linkRequests).set({ usedAt: now }).where(and(eq(linkRequests.tokenHash, hash), isNull(linkRequests.usedAt), gt(linkRequests.expiresAt, now))).returning({ tgId: linkRequests.tgId });
   if (!used[0]) throw new LinkError("this link has expired or was already used: send /link in the bot again");
   const address = a.address.toLowerCase();

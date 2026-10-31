@@ -6,7 +6,9 @@
 import { and, asc, eq, exists, gt, inArray, lt, lte, notInArray, or, sql } from "drizzle-orm";
 import { encodeAbiParameters, keccak256, maxUint256, type Address, type Hex } from "viem";
 import { ifsoOutcomeResolverAbi, usdgAbi } from "../abi";
-import { agree, questionSpecHash, type SourceReport } from "../core/outcome";
+import { agree, questionSpecHash, type Agreement, type SourceReport } from "../core/outcome";
+import { DEFAULTS } from "../core/builder";
+import { classifyForeign, planForeignDisputes, type ForeignCandidate } from "../core/disputePolicy";
 import { cursors, escrows, questions, sourceReports } from "../db/schema";
 import { required } from "../chain";
 import { liveSources } from "../sources";
@@ -204,9 +206,10 @@ export async function planPolymarketQuestion(deps: Deps, slug: string, beforeIns
     outcomes: ["VOID", "YES", "NO"],
   };
   const specHash = questionSpecHash(spec);
-  const id = questionIdFor(specHash, end, end, 2);
+  const earliest = end + DEFAULTS.polymarketResolveDelay; // DECISIONS #33: after the expected UMA settlement
+  const id = questionIdFor(specHash, end, earliest, 2);
   const [existing] = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.id, id));
-  if (existing) return { id, earliestResolve: end, closeTime: end, isNew: false, market };
+  if (existing) return { id, earliestResolve: earliest, closeTime: end, isNew: false, market };
   await planRow(deps, {
     id,
     source: "polymarket",
@@ -216,10 +219,10 @@ export async function planPolymarketQuestion(deps: Deps, slug: string, beforeIns
     title: market.question,
     providerRefs: { polymarket: slug, conditionId: market.conditionId },
     closeTime: new Date(end * 1000),
-    earliestResolve: new Date(end * 1000),
+    earliestResolve: new Date(earliest * 1000),
     numOutcomes: 2,
   }, beforeInsert);
-  return { id, earliestResolve: end, closeTime: end, isNew: true, market };
+  return { id, earliestResolve: earliest, closeTime: end, isNew: true, market };
 }
 
 export class PolymarketRefused extends Error {}
@@ -330,12 +333,84 @@ async function writeCursor(deps: Deps, last: { earliestResolve: Date; id: string
   await deps.db.insert(cursors).values(v).onConflictDoUpdate({ target: cursors.name, set: { block: v.block, hash: v.hash } });
 }
 
+/** Minimum ticks inside the last-call slot (one tick a minute in main.ts) plus inclusion time. */
+const RESOLVER_TICK_SEC = 60;
+export function assertLastCall(lastCall: number, disputeWindow: number): number {
+  if (!(lastCall >= 4 * RESOLVER_TICK_SEC)) throw new Error(`RESOLVER_LAST_CALL_SECONDS=${lastCall} leaves fewer than 4 resolver ticks to dispute in`);
+  if (!(lastCall < disputeWindow / 2)) throw new Error(`RESOLVER_LAST_CALL_SECONDS=${lastCall} must be under half the ${disputeWindow} s dispute window`);
+  return lastCall;
+}
+
+/**
+ * Review R3-H1: one decision per tick over every open foreign proposal (see core/disputePolicy.ts), then the calls.
+ * Never finalizes anything: an unconfirmed proposal that reaches the end of its window raises an alert in resolveOne.
+ */
+async function actOnForeign(deps: Deps, resolver: Address, candidates: Foreign[], now: number, lastCall: number) {
+  const open = candidates.filter((c) => c.verdict !== "confirmed");
+  for (const c of candidates.filter((c) => c.verdict === "confirmed")) deps.log("foreign proposal confirmed by our sources", { q: c.id, proposed: c.proposed });
+  if (!open.length) return;
+  const wallet = deps.clients.resolver;
+  if (!wallet?.account) {
+    await raiseOnce(deps, "resolver-no-key", `resolver key not configured: cannot dispute ${open.length} unconfirmed proposal(s)`);
+    return;
+  }
+  const amounts = await deps.db
+    .select({ id: escrows.questionId, total: sql<string>`sum(${escrows.amount} + ${escrows.counterAmount})` })
+    .from(escrows)
+    .where(and(inArray(escrows.questionId, open.map((c) => c.id)), inArray(escrows.status, [1, 2])))
+    .groupBy(escrows.questionId);
+  const atRisk = new Map(amounts.map((r) => [String(r.id), BigInt(String(r.total ?? "0").split(".")[0] || "0")]));
+  for (const c of candidates) c.atRisk = atRisk.get(c.id) ?? 0n;
+  const bondNow = await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "bondAmount" });
+  const bond = open.reduce((m, c) => (c.bond > m ? c.bond : m), bondNow);
+  const balance = await deps.clients.publicClient.readContract({ address: deps.clients.usdg, abi: usdgAbi, functionName: "balanceOf", args: [wallet.account.address] });
+  const [{ n: openLastCall } = { n: 0 }] = await deps.db.select({ n: sql<number>`count(*)::int` }).from(questions).where(and(eq(questions.disputeKind, "last-call"), eq(questions.state, 3)));
+  const actions = planForeignDisputes({ now, lastCall, bond, balance, budgetCap: deps.env.RESOLVER_UNCONFIRMED_DISPUTE_BUDGET, openLastCall: Number(openLastCall), candidates: open });
+  const byId = new Map(open.map((c) => [c.id, c]));
+  let approved = false;
+  for (const act of actions) {
+    const c = byId.get(act.id)!;
+    const closes = new Date(c.closesAt * 1000).toISOString();
+    const why = c.agreement.decision !== null ? `our sources say ${c.agreement.decision}` : c.agreement.conflict ? "our sources contradict each other" : `our sources cannot confirm it yet (${c.agreement.reason})`;
+    if (act.do === "wait") deps.log("foreign proposal not confirmed yet, re-checking", { q: c.id, proposed: c.proposed, why, lastCallFrom: new Date((c.closesAt - lastCall) * 1000).toISOString() });
+    else if (act.do === "short") await raise(deps, "resolver-bond-short", `resolver USDG bond float ${balance} is below the ${bond} bond needed to dispute the contradicted proposal (outcome ${c.proposed}) on question ${c.id} before ${closes}; ${why}. Top up the resolver address ${wallet.account.address} or dispute from the panel runbook`);
+    else if (act.do === "page") {
+      const reason = act.reason === "budget" ? `the open last-call dispute budget (${deps.env.RESOLVER_UNCONFIRMED_DISPUTE_BUDGET}) is used up` : `the float (${balance}) must keep one ${bond} bond for a contradicted proposal`;
+      await raiseOnce(deps, `resolver-dispute-budget:${c.id}:${c.proposedAt}`, `unconfirmed proposal (outcome ${c.proposed}) by ${c.proposer} on question ${c.id}, ${c.atRisk} USDG units in payments, window closes ${closes}: not disputed because ${reason}; ${why}. A human must dispute it from the panel runbook before the window closes`);
+    } else if (act.do === "dispute") {
+      if (!approved) await ensureBondAllowance(deps, resolver);
+      approved = true;
+      deps.log("disputing foreign proposal", { q: c.id, proposed: c.proposed, kind: act.kind, why });
+      const r = await sendCall(deps, wallet, { address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "dispute", args: [c.id as Hex, c.agreement.sourcesHash] } as never, { kind: "dispute", questionId: c.id });
+      if (r.ok) {
+        await syncRow(deps, resolver, c.id as Hex);
+        await deps.db.update(questions).set({ disputeKind: act.kind }).where(eq(questions.id, c.id));
+      } else await raiseOnce(deps, `resolver-dispute-failed:${c.id}:${c.proposedAt}`, `dispute (${act.kind}) of the proposal on question ${c.id} failed (${r.error ?? "reverted"}); ${why}; the window closes ${closes}`);
+    }
+  }
+}
+
+/** Last-call disputes the panel settled: one the panel upheld cost the float a bond, so say so. */
+async function lastCallResults(deps: Deps, resolver: Address) {
+  const rows = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.disputeKind, "last-call")).limit(200);
+  for (const { id } of rows) {
+    const o = await syncRow(deps, resolver, id as Hex);
+    const state = Number(o.state);
+    if (state < 4) continue;
+    if (state === 4 && o.finalOutcome === o.proposed) {
+      await raiseOnce(deps, `resolver-last-call-lost:${id}`, `the panel upheld the proposal (outcome ${o.proposed}) on question ${id} that the service disputed at last call; the bond went to the proposer and the float shrank by one bond`);
+    }
+    await deps.db.update(questions).set({ disputeKind: "last-call-done" }).where(and(eq(questions.id, id), eq(questions.disputeKind, "last-call")));
+  }
+}
+
 export async function resolverTick(deps: Deps, pageSize = 100) {
   const resolver = required(deps.clients.resolverContract, "RESOLVER_ADDRESS");
   const me = deps.clients.resolver?.account?.address?.toLowerCase();
   const now = Number(await chainNow(deps)); // the contract judges windows by block time, so do we
   const disputeWindow = Number(await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "disputeWindow" }));
   const panelWindow = Number(await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "panelWindow" }));
+  const lastCall = assertLastCall(deps.env.RESOLVER_LAST_CALL_SECONDS, disputeWindow);
 
   // Only questions that have at least one funded (OPEN or MET) escrow are worth a bond. Oldest earliestResolve first,
   // walking a cursor so questions that stay undecided for days cannot starve the ones behind them.
@@ -365,13 +440,22 @@ export async function resolverTick(deps: Deps, pageSize = 100) {
     .orderBy(asc(questions.earliestResolve), asc(questions.id))
     .limit(FOREIGN_PAGE);
   const seen = new Set(foreign.map((q) => q.id));
+  const candidates: Foreign[] = [];
   for (const q of [...foreign, ...live.filter((q) => !seen.has(q.id))]) {
     try {
-      await resolveOne(deps, resolver, me, q, now, disputeWindow, panelWindow);
+      const c = await resolveOne(deps, resolver, me, q, now, disputeWindow, panelWindow);
+      if (c) candidates.push(c);
     } catch (e) {
       deps.log("resolver error", { q: q.id, error: String((e as Error)?.message ?? e).slice(0, 300) });
     }
   }
+  try {
+    await actOnForeign(deps, resolver, candidates, now, lastCall);
+  } catch (e) {
+    deps.log("resolver error", { step: "foreign disputes", error: String((e as Error)?.message ?? e).slice(0, 300) });
+    for (const c of candidates) if (c.verdict !== "confirmed") await raiseOnce(deps, `resolver-foreign-error:${c.id}:${c.proposedAt}`, `the dispute check for the proposal on question ${c.id} failed (${String((e as Error)?.message ?? e).slice(0, 120)}); the window closes ${new Date(c.closesAt * 1000).toISOString()}, needs a human look`);
+  }
+  await lastCallResults(deps, resolver).catch((e) => deps.log("resolver error", { step: "last-call results", error: String((e as Error)?.message ?? e).slice(0, 300) }));
 
   // pull back any credited bonds
   if (me) {
@@ -380,7 +464,9 @@ export async function resolverTick(deps: Deps, pageSize = 100) {
   }
 }
 
-async function resolveOne(deps: Deps, resolver: Address, me: string | undefined, q: typeof questions.$inferSelect, now: number, disputeWindow: number, panelWindow: number) {
+type Foreign = ForeignCandidate & { proposed: number; proposer: string; proposedAt: number; bond: bigint; agreement: Agreement };
+
+async function resolveOne(deps: Deps, resolver: Address, me: string | undefined, q: typeof questions.$inferSelect, now: number, disputeWindow: number, panelWindow: number): Promise<Foreign | undefined> {
   const id = q.id as Hex;
   const onchain = await syncRow(deps, resolver, id);
   const state = Number(onchain.state);
@@ -405,22 +491,12 @@ async function resolveOne(deps: Deps, resolver: Address, me: string | undefined,
     const closesAt = proposedAt + disputeWindow;
     const foreign = onchain.proposer.toLowerCase() !== me;
     if (foreign && now < closesAt) {
-      // Review R2-H1: fail closed. A proposal by any other address stands only if our own sources confirm it (two final
-      // sources agreeing on the same outcome). Contradicted, pending, unavailable or conflicting sources all mean we
-      // dispute inside the window: the panel decides, and panel silence voids the question (payments refund).
+      // Review R3-H1 (DECISIONS #32): the proposal is classified here and acted on for the whole tick at once by
+      // `planForeignDisputes` (contradicted: dispute now; unconfirmed: re-check every tick, dispute only in the
+      // last-call slot within the bond budget; confirmed: leave it).
       await raiseOnce(deps, `resolver-foreign:${q.id}:${proposedAt}`, `another address (${onchain.proposer}) proposed outcome ${onchain.proposed} on question ${q.id}; the window closes ${new Date(closesAt * 1000).toISOString()}`);
       const a = agree(await gatherReports(deps, q));
-      if (a.decision !== null && a.decision === onchain.proposed) {
-        deps.log("foreign proposal confirmed by our sources", { q: q.id, proposed: onchain.proposed });
-        return;
-      }
-      const why = a.decision !== null ? `our sources say ${a.decision}` : a.conflict ? "our sources contradict each other" : `our sources cannot confirm it yet (${a.reason})`;
-      deps.log("disputing unconfirmed proposal", { q: q.id, proposed: onchain.proposed, why });
-      if (await bondShort(deps, onchain.bond, `cannot dispute the unconfirmed proposal on question ${q.id} before ${new Date(closesAt * 1000).toISOString()}`)) return;
-      await ensureBondAllowance(deps, resolver);
-      const r = await call("dispute", [id, a.sourcesHash]);
-      if (r.ok) await syncRow(deps, resolver, id);
-      else await raiseOnce(deps, `resolver-dispute-failed:${q.id}:${proposedAt}`, `dispute of the unconfirmed proposal on question ${q.id} failed (${r.error ?? "reverted"}); ${why}; the window closes ${new Date(closesAt * 1000).toISOString()}`);
+      return { id: q.id, verdict: classifyForeign(a, onchain.proposed), closesAt, atRisk: 0n, proposed: onchain.proposed, proposer: onchain.proposer, proposedAt, bond: onchain.bond, agreement: a };
     } else if (now >= closesAt) {
       if (foreign) {
         // Never finalize a proposal we did not confirm (anyone else still can: that is why the dispute above matters).

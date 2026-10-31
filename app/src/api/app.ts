@@ -41,6 +41,9 @@ export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: R
   app.get("/stats/users", async (c) => {
     const since = c.req.query("since");
     if (since !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(since)) return c.json({ error: "since must be YYYY-MM-DD" }, 400);
+    // review R3-L1: same per-network read budget as the tRPC reads; the result itself is cached for 60 s
+    const ip = clientIp(c.req.raw.headers, deps.env.TRUST_PROXY, (c.env as { socketIp?: string } | undefined)?.socketIp);
+    if (!(await limiter.hit(`read:ip:${RateLimiter.ipHash(ip, deps.env.IP_HASH_SALT)}`, deps.env.READS_PER_IP_PER_HOUR, 3600))) return c.json({ error: "too many requests from this network, try again later" }, 429);
     return c.json(await userStats(deps, since ? Math.floor(Date.parse(`${since}T00:00:00Z`) / 1000) : undefined));
   });
 

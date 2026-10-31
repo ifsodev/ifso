@@ -27,7 +27,7 @@ export { paramsFromJson } from "../core/paramsJson";
 export { verifyBuildAnswer, type BuildAnswer } from "./verifyBuild";
 
 // wallet linking and the region rule
-export { linkWalletMessage, LINK_TOKEN_TTL_SEC } from "../core/linkWallet";
+export { linkWalletMessage, linkDomain, linkFragment, parseLinkFragment, LINK_TOKEN_TTL_SEC, type LinkMessageContext } from "../core/linkWallet";
 export { stockPriceConditionAllowed, PRICE_GATED_COUNTRIES } from "../core/geo";
 
 // banned-word check for any copy the site writes itself

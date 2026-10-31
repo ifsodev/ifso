@@ -11,7 +11,7 @@ import { copy } from "../core/copy";
 import { stockPriceConditionAllowed } from "../core/geo";
 import { formatUsdg } from "../core/money";
 import { describeCondition, parseCommand, type ConditionDraft } from "../core/parser";
-import { createAuthorizationTypedData } from "../core/typedData";
+import { createAuthorizationTypedData, DecisionAction } from "../core/typedData";
 import { Kind, type CreateParams } from "../core/types";
 import { SEED_FEEDS } from "../config/chain";
 import { escrows, intents, questions } from "../db/schema";
@@ -108,9 +108,32 @@ async function relayBudgetVerified(ctx: Ctx, verify: () => Promise<Address | und
   return ipHash;
 }
 
-/** Decisions and refund redirects per escrow per day: a real escrow needs a handful, never hundreds. */
-async function escrowDailyCap(ctx: Ctx, id: bigint) {
-  if (!(await ctx.limiter.hit(`relay:escrow:${id}`, ctx.deps.env.RELAY_PER_ESCROW_PER_DAY, 86400))) throw tooMany("too many changes to this payment today, try again tomorrow");
+/**
+ * Decisions and refund redirects per escrow AND signer per day: a real escrow needs a handful, never hundreds.
+ * Review R3-M1: keyed on the signer too, so one party (the sender toggling refund addresses) can never use up the
+ * other party's budget on the same payment. Terminal decisions are not charged at all (see `decide`).
+ */
+async function escrowDailyCap(ctx: Ctx, id: bigint, signer: Address) {
+  if (!(await ctx.limiter.hit(`relay:escrow:${id}:${signer.toLowerCase()}`, ctx.deps.env.RELAY_PER_ESCROW_PER_DAY, 86400))) throw tooMany("too many changes to this payment today, try again tomorrow");
+}
+
+/** Review R3-L1: unauthenticated reads that cost a DB scan or an RPC call share one budget per client network (/64). */
+async function readBudget(ctx: Ctx) {
+  const ipHash = RateLimiter.ipHash(ctx.ip, ctx.deps.env.IP_HASH_SALT);
+  if (!(await ctx.limiter.hit(`read:ip:${ipHash}`, ctx.deps.env.READS_PER_IP_PER_HOUR, 3600))) throw tooMany("too many requests from this network, try again later");
+}
+
+/** `feeFor(kind)` changes only by a timelocked owner call: one read per kind per minute is plenty. */
+const FEE_TTL_MS = 60_000;
+const feeCache = new WeakMap<object, Map<number, { fee: bigint; at: number }>>();
+async function cachedFee(deps: Deps, kind: number): Promise<bigint> {
+  let m = feeCache.get(deps);
+  if (!m) feeCache.set(deps, (m = new Map()));
+  const hit = m.get(kind);
+  if (hit && Date.now() - hit.at < FEE_TTL_MS) return hit.fee;
+  const fee = await deps.clients.publicClient.readContract({ address: required(deps.clients.escrow, "ESCROW_ADDRESS"), abi: ifsoEscrowAbi, functionName: "feeFor", args: [kind] });
+  m.set(kind, { fee, at: Date.now() });
+  return fee;
 }
 
 const F_SENDER_OK = 8;
@@ -177,6 +200,7 @@ export const appRouter = t.router({
    * any tier a client sends is ignored. No token address configured = everything locked, no chain call.
    */
   perks: t.procedure.input(z.object({ address: addr })).query(async ({ input, ctx }) => {
+    await readBudget(ctx);
     const tier = await holderTier(ctx.deps, input.address);
     const s = perksFor(tier, tierConfig(ctx.deps));
     return { tier: s.tier, unlocked: s.unlocked, locked: s.locked, wording: s.wording, limits: s.limits, tokenLive: s.tokenLive, note: s.note };
@@ -184,19 +208,21 @@ export const appRouter = t.router({
 
   /** Real-user counter from indexed chain events (our own wallets excluded). `since` = YYYY-MM-DD, optional. */
   stats: t.procedure.input(z.object({ since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional()).query(async ({ input, ctx }) => {
+    await readBudget(ctx);
     const sinceSec = input?.since ? Math.floor(Date.parse(`${input.since}T00:00:00Z`) / 1000) : undefined;
     return userStats(ctx.deps, sinceSec);
   }),
 
   /** Premium: plan a bulk / CSV createBatch run (validation, totals, per-tier size limit). Sends nothing. */
   planBatch: t.procedure.input(planRowsInput).mutation(async ({ input, ctx }) => {
+    await readBudget(ctx);
     const g = await perkGate(ctx, input.sender, "holder");
     if (!g.allowed) return lockedAnswer(g);
     const parsed = input.csv !== undefined ? parseCsv(input.csv) : { rows: (input.items ?? []).map((x, i) => ({ line: i + 1, ...x })), problems: [] };
     const max = g.state.limits.batchSize;
     if (parsed.rows.length > max) return { ok: false as const, locked: false as const, tier: g.tier, limit: max, reason: copy.perks.batchTooBig(String(max)) };
     const { valid, problems } = validateRows(parsed.rows);
-    const fee = await ctx.deps.clients.publicClient.readContract({ address: required(ctx.deps.clients.escrow, "ESCROW_ADDRESS"), abi: ifsoEscrowAbi, functionName: "feeFor", args: [Kind.TIME] });
+    const fee = await cachedFee(ctx.deps, Kind.TIME);
     return { ok: problems.length === 0, locked: false as const, tier: g.tier, limit: max, problems, totals: totals(valid, fee), rows: valid.map((v) => ({ recipient: v.recipient, amount: v.amount.toString() })) };
   }),
 
@@ -204,6 +230,7 @@ export const appRouter = t.router({
   planPayroll: t.procedure
     .input(planRowsInput.extend({ runs: z.number().int().min(1).max(60), every: z.enum(["week", "month"]) }))
     .mutation(async ({ input, ctx }) => {
+      await readBudget(ctx);
       const g = await perkGate(ctx, input.sender, "holder");
       if (!g.allowed) return lockedAnswer(g);
       const parsed = input.csv !== undefined ? parseCsv(input.csv) : { rows: (input.items ?? []).map((x, i) => ({ line: i + 1, ...x })), problems: [] };
@@ -211,7 +238,7 @@ export const appRouter = t.router({
       const max = g.state.limits.scheduledPayments;
       if (scheduled > max) return { ok: false as const, locked: false as const, tier: g.tier, limit: max, reason: copy.perks.scheduleTooBig(String(max)) };
       const { valid, problems } = validateRows(parsed.rows);
-      const fee = await ctx.deps.clients.publicClient.readContract({ address: required(ctx.deps.clients.escrow, "ESCROW_ADDRESS"), abi: ifsoEscrowAbi, functionName: "feeFor", args: [Kind.TIME] });
+      const fee = await cachedFee(ctx.deps, Kind.TIME);
       const per = totals(valid, fee);
       return { ok: problems.length === 0, locked: false as const, tier: g.tier, limit: max, scheduled, every: input.every, runs: input.runs, problems, perRun: per, rows: valid.map((v) => ({ recipient: v.recipient, amount: v.amount.toString() })) };
     }),
@@ -430,7 +457,9 @@ export const appRouter = t.router({
       const call = { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "decideBySig" as const, args: [input.id, input.signer, input.action, input.deadline, input.signature] as const };
       const sim = await simulate(ctx.deps, ctx.deps.clients.relayer, call as never);
       if (!sim.ok) throw new TRPCError({ code: "BAD_REQUEST", message: sim.error ?? "decision would not go through" });
-      await escrowDailyCap(ctx, input.id);
+      // Review R3-M1: decline and referee decisions close the escrow, so one that simulates OK can succeed at most once
+      // and is never capped; an OK is one-shot per party on chain (NoChange) but is still charged to its own signer.
+      if (input.action === DecisionAction.OK) await escrowDailyCap(ctx, input.id, input.signer);
       const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, call as never, { kind: "decision", escrowId: input.id.toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "decision failed" });
       return { txHash: r.hash };
@@ -455,7 +484,7 @@ export const appRouter = t.router({
       const call = { address: escrowAddr, abi: ifsoEscrowAbi, functionName: "setRefundAddressesBySig" as const, args: [input.id, input.refundTo, input.altRefundTo, input.deadline, input.signature] as const };
       const sim = await simulate(ctx.deps, ctx.deps.clients.relayer, call as never);
       if (!sim.ok) throw new TRPCError({ code: "BAD_REQUEST", message: sim.error ?? "redirect would not go through" });
-      await escrowDailyCap(ctx, input.id);
+      await escrowDailyCap(ctx, input.id, e!.sender as Address);
       const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, call as never, { kind: "redirect", escrowId: input.id.toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "redirect failed" });
       return { txHash: r.hash };
