@@ -1,6 +1,6 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { eq, or, desc } from "drizzle-orm";
+import { and, eq, or, desc, inArray, isNull } from "drizzle-orm";
 import { getAddress, type Address, type Hex } from "viem";
 import { erc8056Abi, ifsoConditionEvaluatorAbi, ifsoEscrowAbi, ifsoOutcomeResolverAbi, usdgAbi } from "../abi";
 import { BuildError, DEFAULTS, buildParams, type BuildInput } from "../core/builder";
@@ -14,7 +14,7 @@ import { describeCondition, parseCommand, type ConditionDraft } from "../core/pa
 import { createAuthorizationTypedData, DecisionAction } from "../core/typedData";
 import { Kind, type CreateParams } from "../core/types";
 import { SEED_FEEDS } from "../config/chain";
-import { escrows, intents, questions } from "../db/schema";
+import { escrows, intents, questions, tgUsers } from "../db/schema";
 import { required } from "../chain";
 import { sendCall, simulate } from "../workers/tx";
 import type { Deps } from "../workers/deps";
@@ -177,6 +177,23 @@ async function registerForFundedSender(ctx: Ctx, questionId: Hex, sender: Addres
   }
 }
 
+/**
+ * Audit L-1: an intent id is visible in group-chat buttons, so it proves nothing. An intent may be built only while it
+ * is a draft or built and not expired, and only by its owner: the bot user's linked wallet when there is one, else the
+ * wallet that built it first. A submitted intent never changes again.
+ */
+async function intentForBuild(ctx: Ctx, intentId: string, sender: Address) {
+  const [it] = await ctx.deps.db.select().from(intents).where(eq(intents.id, intentId));
+  if (!it) throw new TRPCError({ code: "NOT_FOUND" });
+  if (it.expiresAt.getTime() <= Date.now()) throw new TRPCError({ code: "BAD_REQUEST", message: "this payment request has expired: start a new one in the bot" });
+  if (it.state !== "draft" && it.state !== "built") throw new TRPCError({ code: "BAD_REQUEST", message: "this payment request was already sent" });
+  const me = sender.toLowerCase();
+  const [user] = it.tgId == null ? [] : await ctx.deps.db.select({ address: tgUsers.address }).from(tgUsers).where(eq(tgUsers.tgId, it.tgId));
+  const owner = user?.address ?? it.sender;
+  if (owner && owner.toLowerCase() !== me) throw new TRPCError({ code: "FORBIDDEN", message: "this payment request belongs to another wallet" });
+  return it;
+}
+
 const buildInput = z.object({
   text: z.string().min(3).max(300).optional(),
   intentId: z.string().uuid().optional(),
@@ -272,8 +289,7 @@ export const appRouter = t.router({
     let text = input.text;
     let tzOffsetMin = input.tzOffsetMin;
     if (input.intentId) {
-      const [it] = await deps.db.select().from(intents).where(eq(intents.id, input.intentId));
-      if (!it) throw new TRPCError({ code: "NOT_FOUND" });
+      const it = await intentForBuild(ctx, input.intentId, input.sender);
       text = it.text ?? undefined;
       tzOffsetMin = it.tzOffsetMin ?? tzOffsetMin; // the offset the bot used, so the deadline is the same instant
     }
@@ -347,7 +363,9 @@ export const appRouter = t.router({
     const nonce = createAuthNonce(input.sender, params);
     const id = escrowId(input.sender, params.salt);
     if (input.intentId) {
-      await deps.db.update(intents).set({ params: jsonSafe(params), sender: input.sender.toLowerCase(), escrowId: id.toString(), state: "built" }).where(eq(intents.id, input.intentId));
+      const me = input.sender.toLowerCase();
+      const owned = and(eq(intents.id, input.intentId), inArray(intents.state, ["draft", "built"]), or(isNull(intents.sender), eq(intents.sender, me)));
+      await deps.db.update(intents).set({ params: jsonSafe(params), sender: me, escrowId: id.toString(), state: "built" }).where(owned);
     }
     return jsonSafe({
       id,
@@ -390,8 +408,10 @@ export const appRouter = t.router({
       const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, call as never, { kind: "create", escrowId: escrowId(input.from, p.salt).toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "create failed" });
       if (input.intentId) {
-        await ctx.deps.db.update(intents).set({ state: "submitted", txHash: r.hash }).where(eq(intents.id, input.intentId));
-        await rememberSender(ctx.deps, input.intentId, input.from).catch(() => {}); // notifications are a convenience: never fail a create over them
+        // audit L-1: only the intent this sender built for exactly this escrow moves to submitted (and binds notifications)
+        const mine = and(eq(intents.id, input.intentId), eq(intents.state, "built"), eq(intents.sender, input.from.toLowerCase()), eq(intents.escrowId, escrowId(input.from, p.salt).toString()));
+        const moved = await ctx.deps.db.update(intents).set({ state: "submitted", txHash: r.hash }).where(mine).returning({ id: intents.id });
+        if (moved.length) await rememberSender(ctx.deps, input.intentId, input.from).catch(() => {}); // notifications are a convenience: never fail a create over them
       }
       return { txHash: r.hash, id: escrowId(input.from, p.salt).toString() };
     }),

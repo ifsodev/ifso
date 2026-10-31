@@ -8,7 +8,7 @@ import { RateLimiter } from "../src/api/rateLimit";
 import { appRouter, jsonSafe } from "../src/api/router";
 import { loadEnv } from "../src/config/env";
 import { buildParams } from "../src/core/builder";
-import { createAuthNonce } from "../src/core/condition";
+import { createAuthNonce, escrowId } from "../src/core/condition";
 import { linkDomain, linkWalletMessage, parseLinkFragment } from "../src/core/linkWallet";
 import { createAuthorizationTypedData } from "../src/core/typedData";
 import { intents, linkRequests, relayTxs, tgUsers } from "../src/db/schema";
@@ -127,7 +127,8 @@ describe.skipIf(!havePostgres())("wallet link and remembered sender", () => {
     const sender = privateKeyToAccount(generatePrivateKey());
     const prep = async (tgId: bigint | null) => {
       const params = buildParams({ draft: { kind: "TIME", at: Math.floor(Date.now() / 1000) + 86400 }, nowSec: Math.floor(Date.now() / 1000), amountUsdg: "10", twoSided: false, recipient: "0x00000000000000000000000000000000000b0b0b" as Address });
-      const [row] = await pg.db.insert(intents).values({ tgId, draft: {}, text: "t" }).returning({ id: intents.id });
+      // audit L-1: submit only moves an intent this sender built for exactly this escrow
+      const [row] = await pg.db.insert(intents).values({ tgId, draft: {}, text: "t", state: "built", sender: sender.address.toLowerCase(), escrowId: escrowId(sender.address, params.salt).toString() }).returning({ id: intents.id });
       const signature = await sender.signTypedData(createAuthorizationTypedData({ chainId: 4663, usdg: USDG, escrow: ESCROW, from: sender.address, value: params.amount + 250_000n, validAfter: 0n, validBefore: 9999999999n, nonce: createAuthNonce(sender.address, params) }));
       return { input: { params: jsonSafe(params) as Record<string, unknown>, from: sender.address, validAfter: "0", validBefore: "9999999999", signature, intentId: row!.id } };
     };
