@@ -17,6 +17,7 @@ codebase that talks to the API.
 | `app/src/client/` | `@ifso/client`, a browser package for the website (typed API calls, signing helpers, claim page) |
 | `app/scripts/ifso-cli.ts` | Command line tool to read, refund, settle and claim with only an RPC (see the last section) |
 | `app/scripts/server/` | Scripts for one Ubuntu server: provision, deploy with rollback, systemd units, Caddy, backups |
+| `app/scripts/release/` | The release runner for the 72 hourly tech updates: install, arming, pipeline with rollback, preflight, sandbox proof; see its `README.md` |
 | `FRONTEND.md` | Integration guide for the website: every API call, the signing steps and the copy rules |
 | `SECURITY.md` | Reporting, scope, trust assumptions, owner powers, accepted risks, review history |
 | `CHANGELOG.md` | What changed, newest first |
