@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hardening cases for the two root-run wrappers (audit findings M-4 and L-5). Local, no root, no network beyond 127.0.0.1.
+# Hardening cases for the two root-run wrappers (audit findings M-4, L-5 and L-6). Local, no root, no network beyond 127.0.0.1.
 #   M-4  the release user owns the clone root verifies commits in: a planted gpg.ssh.program (and a forged signed-looking commit
 #        reachable from the clone's origin) must NOT decide the result of `ifso-deploy-release --validate`.
 #   L-5  ifso-release-ghrelease publishes only the runner's own notes file and posters/<tag>.png: no arbitrary path, no symlink,
@@ -58,6 +58,19 @@ G -C "$W/repo" push -q -f origin "$GOOD:refs/heads/main"
 ok "genuine signed commit still validates with the same planted config" bash "$SBIN/ifso-deploy-release" --validate "$GOOD"
 ok "the planted program still never ran" test ! -e "$W/PWNED"
 ok "common.sh no longer exports safe.directory=*" bash -c "! grep -n \"GIT_CONFIG_VALUE_0='\\*'\" '$SBIN/common.sh'"
+
+echo "== L-6: ancestry checks ignore grafts, replace refs and the commit graph planted in the release clone"
+# an unrelated signed root commit X (not a descendant of the running revision BASE), served as origin/main by an origin the
+# release user controls; the planted graft says "X's parent is BASE", which would make X look like a clean 1-commit update
+X="$(G -C "$W/repo" -c gpg.format=ssh -c "user.signingkey=$W/key" -c gpg.ssh.program=ssh-keygen commit-tree -S -m "old signed root" "$(G -C "$W/repo" rev-parse "$BASE^{tree}")")"
+G clone -q --bare "$W/origin.git" "$W/evil.git" && G -C "$W/repo" push -q -f "$W/evil.git" "$X:refs/heads/main"
+G -C "$W/repo" remote set-url origin "$W/evil.git"
+no "control: a signed commit unrelated to the running revision is refused" bash "$SBIN/ifso-deploy-release" --validate "$X"
+printf '%s %s\n' "$X" "$BASE" >"$W/repo/.git/info/grafts"
+no "planted .git/info/grafts: the unrelated signed commit is still refused" bash "$SBIN/ifso-deploy-release" --validate "$X"
+rm -f "$W/repo/.git/info/grafts"
+ok "rgit pins GIT_GRAFT_FILE=/dev/null and core.commitGraph=false" bash -c "grep -q 'GIT_GRAFT_FILE=/dev/null' '$SBIN/common.sh' && grep -q 'core.commitGraph=false' '$SBIN/common.sh'"
+G -C "$W/repo" remote set-url origin "$W/origin.git"
 
 echo "== L-5: ifso-release-ghrelease publishes only allow-listed files"
 cat >"$W/srv.py" <<'EOS'

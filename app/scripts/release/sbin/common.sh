@@ -41,7 +41,7 @@ current_rev() { basename "$(readlink "$OPT_DIR/current" 2>/dev/null)" 2>/dev/nul
 # setting; there is NO global safe.directory=*), the global and system configs are ignored, and the config keys that can launch a
 # program are overridden. Use it for read-only plumbing (rev-parse, cat-file, rev-list, merge-base), never to verify signatures.
 rgit() {
-  GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -c "safe.directory=$REPO_DIR" -c core.fsmonitor= \
+  GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -c "safe.directory=$REPO_DIR" -c core.fsmonitor= -c core.commitGraph=false \
     -c core.hooksPath=/dev/null -c core.sshCommand= -c core.pager=cat "$@"
 }
 # verify_signed <40-hex sha>: is that commit of $REPO_DIR signed by a key in $ALLOWED_SIGNERS? The commit object is copied out of
