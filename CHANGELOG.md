@@ -34,6 +34,22 @@ is under Unreleased and is grouped by area. Dates are the commit dates (UTC).
 - 2026-10-30: Applied `forge fmt` across the contracts.
 
 ### Fixed
+- 2026-10-31: Replaying an already used gasless create or accept authorization no longer uses up the signer's relay
+  budget: an expired authorization is refused at once and the call is simulated before the per-wallet charge (audit
+  M-1).
+- 2026-10-31: Football questions are planned only when both result sources have the match, and another address's
+  proposal that a final source contradicts (with no final source backing it) is disputed at once (audit M-2).
+- 2026-10-31: Outcome payments on a question that is not final yet step aside in the keeper, so they cannot hide the
+  payments behind them (audit M-3).
+- 2026-10-31: A payment request from the bot can only be built and sent by its owner, never after it was sent or
+  expired (audit L-1).
+- 2026-10-31: The remaining public reads (build, escrow, mine, question, question specs, readiness) share the
+  per-network read budget; readiness answers from a 5 s cache with short reasons; the user counter runs one scan a
+  minute whatever date is asked (audit L-2).
+- 2026-10-31: The browser package can check a build answer against what the user asked for (amount, recipient or
+  claim link, referee, condition, deadline) before anything is signed (audit L-3).
+- 2026-10-31: Keeper back-off counts waits and failures separately, so a payment that waited through a hold window is
+  retried 2 minutes after its first failed send, not 6 hours (audit L-4).
 - 2026-10-31: The resolver service no longer disputes another address's proposal just because its sources cannot
   confirm it yet: contradicted proposals are disputed at once, unconfirmed ones are re-checked every tick and disputed
   only in a last-call slot within a bond budget that keeps one bond spare, largest payments first, with a page to a
