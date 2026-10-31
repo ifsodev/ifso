@@ -24,7 +24,7 @@ export {
 // hashes and ids (to double-check what the server returns)
 export { conditionHash, createAuthNonce, acceptAuthNonce, escrowId } from "../core/condition";
 export { paramsFromJson } from "../core/paramsJson";
-export { verifyBuildAnswer, type BuildAnswer } from "./verifyBuild";
+export { verifyBuildAnswer, type AskedFor, type BuildAnswer } from "./verifyBuild";
 
 // wallet linking and the region rule
 export { linkWalletMessage, linkDomain, linkFragment, parseLinkFragment, LINK_TOKEN_TTL_SEC, type LinkMessageContext } from "../core/linkWallet";
