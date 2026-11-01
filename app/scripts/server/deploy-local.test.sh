@@ -302,6 +302,8 @@ cat >"$SHIM/caddy" <<FAKE
 echo "caddy \$*" >>"$C/state/calls"
 cfg=""; while [[ \$# -gt 0 ]]; do [[ "\$1" == --config ]] && cfg="\$2"; shift; done
 [[ -e "$C/state/caddy-invalid" ]] && exit 1
+# the real validate runs as the caddy user: a config only root can read fails there (server, 2026-11-01)
+[[ -z "\$cfg" ]] || [[ "\$(stat -f %Lp "\$cfg" 2>/dev/null || stat -c %a "\$cfg")" =~ [4-7]\$ ]] || { echo "caddy: permission denied: \$cfg" >&2; exit 1; }
 ! grep -q BROKEN "\$cfg"
 FAKE
 cat >"$SHIM/df" <<'FAKE'

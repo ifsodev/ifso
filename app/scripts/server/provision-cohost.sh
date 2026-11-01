@@ -269,6 +269,7 @@ caddy_apply() {
     backup="$CADDYFILE.bak.$stamp"
     { cat "$CADDYFILE"; [[ -z "$(tail -c1 "$CADDYFILE")" ]] || echo; printf '\n# Added for a co-hosted project (provision.sh --cohost): one import line, nothing else.\n%s\n' "$IMPORT_LINE"; } >"$cand"
   fi
+  chmod 0644 "$cand" # mktemp makes it 0600 root; validate runs as the caddy user (same content as the 0644 Caddyfile)
   if ! caddy_validate "$cand"; then
     [[ "$changed" == 1 ]] && mv -f "$site" "$site.rejected.$stamp"
     die "caddy validate rejected the configuration with the Ifso site: $CADDYFILE is unchanged, the site file was moved to $site.rejected.$stamp (try: caddy validate --adapter caddyfile --config $cand)"
