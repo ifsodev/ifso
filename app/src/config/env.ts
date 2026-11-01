@@ -49,6 +49,13 @@ const schema = z.object({
   MIN_KEEPER_ETH: z.coerce.number().default(0.002),
   MIN_RESOLVER_ETH: z.coerce.number().default(0.002),
   MIN_RESOLVER_USDG: z.coerce.number().default(50),
+  // oracle staleness: alert when a feed's last update is older than its heartbeat plus this margin (stock feeds count
+  // market hours only), or when it reports zero or below
+  ORACLE_STALE_MARGIN_SECONDS: z.coerce.number().int().min(0).default(3600),
+  // large outflow from the escrow contract (launch cap is 1,000 USDG per side, so one challenge pot can reach 2,000)
+  OUTFLOW_WINDOW_MINUTES: z.coerce.number().int().positive().default(60),
+  OUTFLOW_WINDOW_USDG: z.coerce.number().positive().default(5000), // total leaving in the window
+  LARGE_RELEASE_USDG: z.coerce.number().positive().default(1000), //  any single transfer above this
   IP_HASH_SALT: z.string().optional(), // secret salt for stored IP hashes (required in production)
 
   ODDS_API_KEY: z.string().optional(), // the-odds-api.com (scores endpoint)

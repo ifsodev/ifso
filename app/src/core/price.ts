@@ -110,3 +110,32 @@ export function isRegularSession(unix: number): boolean {
   const mins = local.getUTCHours() * 60 + local.getUTCMinutes();
   return mins >= 9 * 60 + 30 && mins < 16 * 60;
 }
+
+/** True while the RHC Stock Token feeds trade: 24/5, Sunday 20:00 ET to Friday 20:00 ET (Chainlink directory category
+ *  "us_equities_24/5"). Holidays not modelled (U). */
+export function isStockFeedSession(unix: number): boolean {
+  const ms = unix * 1000;
+  const local = new Date(ms + nyOffsetHours(ms) * 3600_000);
+  const dow = local.getUTCDay();
+  const h = local.getUTCHours();
+  if (dow === 6) return false;
+  if (dow === 0) return h >= 20;
+  if (dow === 5) return h < 20;
+  return true;
+}
+
+const STOCK_OPEN_SCAN_MAX = 14 * 86400;
+
+/** Seconds of stock-feed session between two instants. Session edges fall on whole hours (the ET offset is whole
+ *  hours too), so each UTC hour slice is all open or all closed. Spans past 14 days count the first 14 days' worth. */
+export function stockFeedOpenSeconds(fromUnix: number, toUnix: number): number {
+  let t = fromUnix;
+  const end = Math.min(toUnix, fromUnix + STOCK_OPEN_SCAN_MAX);
+  let open = 0;
+  while (t < end) {
+    const next = Math.min(end, (Math.floor(t / 3600) + 1) * 3600);
+    if (isStockFeedSession(t)) open += next - t;
+    t = next;
+  }
+  return open;
+}

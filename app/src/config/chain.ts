@@ -35,15 +35,16 @@ export interface FeedInfo {
   feed: Address; // Chainlink PROXY (8 decimals, multiplier already embedded for Stock Tokens); never the aggregator behind it
   stockToken?: Address; // ERC-8056 token; undefined for crypto feeds
   isStock: boolean;
+  heartbeat: number; // seconds between forced updates (Chainlink directory, checked 2026-11-01: 86400 for all five)
 }
 
 /** Seed registry; the Safe registers the same pairs in IfsoConditionEvaluator.setFeed (contracts/script/Deploy.s.sol).
  *  Proxies from https://reference-data-directory.vercel.app/feeds-robinhood-mainnet.json, Stock Tokens from the chain;
  *  all proven on a 4663 fork on 2026-10-30 (contracts/test/fork). Others come from that directory at boot. */
 export const SEED_FEEDS: FeedInfo[] = [
-  { ticker: "ETH", feed: "0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9", isStock: false },
-  { ticker: "SPY", feed: "0x319724394D3A0e3669269846abE664Cd621f9f6A", stockToken: "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C", isStock: true },
-  { ticker: "NVDA", feed: "0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15", stockToken: "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC", isStock: true },
-  { ticker: "TSLA", feed: "0x4A1166a659A55625345e9515b32adECea5547C38", stockToken: "0x322F0929c4625eD5bAd873c95208D54E1c003b2d", isStock: true },
-  { ticker: "AAPL", feed: "0x6B22A786bAa607d76728168703a39Ea9C99f2cD0", stockToken: "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9", isStock: true },
+  { ticker: "ETH", feed: "0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9", isStock: false, heartbeat: 86400 },
+  { ticker: "SPY", feed: "0x319724394D3A0e3669269846abE664Cd621f9f6A", stockToken: "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C", isStock: true, heartbeat: 86400 },
+  { ticker: "NVDA", feed: "0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15", stockToken: "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC", isStock: true, heartbeat: 86400 },
+  { ticker: "TSLA", feed: "0x4A1166a659A55625345e9515b32adECea5547C38", stockToken: "0x322F0929c4625eD5bAd873c95208D54E1c003b2d", isStock: true, heartbeat: 86400 },
+  { ticker: "AAPL", feed: "0x6B22A786bAa607d76728168703a39Ea9C99f2cD0", stockToken: "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9", isStock: true, heartbeat: 86400 },
 ];
