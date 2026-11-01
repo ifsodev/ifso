@@ -38,3 +38,9 @@ uninitialized-local src/IfsoEscrow.sol:total  # batch accumulator, intentionally
 unused-return src/IfsoConditionEvaluator.sol:_checkSequencer  # only status and startedAt matter for the uptime feed
 unused-return src/IfsoConditionEvaluator.sol:_next  # only the latest round id is needed to tell "no next round yet" from a phase change
 unused-return src/IfsoConditionEvaluator.sol:_round  # startedAt is unused; roundId, answer, updatedAt and answeredInRound are all checked
+reentrancy-no-eth src/IfsoEscrow.sol:_apply  # VOID pays each side through _tryPay on the immutable USDG (no transfer hooks); status is VOIDED before any call, every state-changing entry point is nonReentrant, and the flag written after the first call only records that side's own owed amount (reviewed 2026-11-01, same basis as settle above)
+timestamp src/IfsoConditionEvaluator.sol:_deadlinePrice  # picks the round at the payment's deadline from Chainlink round timestamps; comparing times is the condition itself (reviewed 2026-11-01)
+uninitialized-local src/IfsoConditionEvaluator.sol:eff  # zero is the intended start value in _multiplierChanged (reviewed 2026-11-01)
+uninitialized-local src/IfsoConditionEvaluator.sol:m  # zero is the intended start value in _multiplierChanged (reviewed 2026-11-01)
+uninitialized-local src/IfsoConditionEvaluator.sol:nm  # zero is the intended start value in _multiplierChanged (reviewed 2026-11-01)
+uninitialized-local src/IfsoEscrow.sol:bit  # zero means "no role" in _ok; every role branch sets it (reviewed 2026-11-01)

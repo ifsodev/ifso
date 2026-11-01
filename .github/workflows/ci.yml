@@ -40,7 +40,7 @@ jobs:
         working-directory: .
         run: bash .github/scripts/pins-check.sh
       - name: gas snapshot unchanged
-        run: forge snapshot --check
+        run: bash tools/gas-snapshot.sh --check   # fuzz and file-reading tests excluded: their gas follows the machine
       - name: local deploy on anvil + post-deploy assertions
         run: |
           anvil -p 8645 --silent & A=$!
@@ -69,19 +69,16 @@ jobs:
         with: { persist-credentials: false }
       - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with: { version: v1.8.4 }
-      - name: build for slither (deployable sources only)
+      # Slither runs on the runner itself, not in the slither-action container: that container has no forge, and
+      # crytic-compile 0.3.x cannot read Foundry 1.8 build-info written ahead of time, so Slither compiles here.
+      - name: slither 0.11.6 (own Foundry compile; mocks, tests and scripts filtered out)
         working-directory: contracts
-        run: FOUNDRY_DYNAMIC_TEST_LINKING=false forge build --build-info --skip test --skip script
-      - uses: crytic/slither-action@b52cc1cbfee9ca3e8722dd5224299d16c9a6b80f # v0.4.2
-        with:
-          target: contracts
-          ignore-compile: true
-          slither-version: 0.11.6
-          fail-on: none
-          slither-args: >-
-            --filter-paths "test/|script/|src/mocks/"
-            --exclude-informational --exclude-optimization
-            --json /github/workspace/contracts/slither-report.json
+        run: |
+          python3 -m venv "$RUNNER_TEMP/slither"
+          "$RUNNER_TEMP/slither/bin/pip" install --quiet --require-hashes -r ../.github/slither-requirements.txt
+          FOUNDRY_DYNAMIC_TEST_LINKING=false "$RUNNER_TEMP/slither/bin/slither" . --compile-force-framework foundry --foundry-compile-all \
+            --filter-paths "test/|script/|src/mocks/" --exclude-informational --exclude-optimization --fail-none \
+            --json slither-report.json
       - name: exact-match allowlist gate
         working-directory: contracts
         run: python3 tools/slither-gate.py slither-report.json slither.allow

@@ -14,7 +14,7 @@ done < <(grep -nH -E '^[[:space:]-]*uses:' .github/workflows/*.yml | sed -E 's/^
 while IFS= read -r line; do
   if ! grep -Eq '@sha256:[0-9a-f]{64}' <<<"$line"; then echo "pins-check: container image not pinned by digest: $line"; fail=1; fi
 done < <(grep -n -E '^[[:space:]-]*(image|container):|docker://' .github/workflows/*.yml || true)
-if grep -n -E 'pip3? install' .github/workflows/*.yml | grep -v -- '--require-hashes' | grep -q .; then
+if grep -n -E 'pip3?"? install' .github/workflows/*.yml | grep -v -- '--require-hashes' | grep -q .; then
   echo "pins-check: a workflow runs pip install without --require-hashes"; fail=1
 fi
 if [ "$fail" = 0 ]; then echo "pins-check: all actions pinned by sha, no unpinned images, pip hash-locked"; fi

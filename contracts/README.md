@@ -77,5 +77,5 @@ run by the owner only (armed flag and file required).
 ## Checks run in CI
 
 `forge fmt --check`, `tools/size-gate.sh` (24,576-byte runtime limit), `tools/natspec-check.py`, `forge doc`,
-`forge test`, `forge snapshot --check`, the local deploy above, the invariant profile (10,000 x 50), and Slither
+`forge test`, `tools/gas-snapshot.sh --check`, the local deploy above, the invariant profile (10,000 x 50), and Slither
 gated by the exact-match allowlist `slither.allow` (`tools/slither-gate.py`).
