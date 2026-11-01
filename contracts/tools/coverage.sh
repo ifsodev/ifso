@@ -7,10 +7,13 @@ cd "$(dirname "$0")/.."
 out="../.audit-grade/coverage.md"; min=0
 while [ $# -gt 0 ]; do case "$1" in --out) out="$2"; shift 2;; --min-lines) min="$2"; shift 2;; *) echo "unknown arg $1"; exit 2;; esac; done
 raw="$(mktemp)"; trap 'rm -f "$raw"' EXIT
+# Coverage instruments the bytecode, so the test that compares runtime code with the build cannot pass under it; it
+# runs in the normal `forge test` job.
+skip="test_PostDeploy_RuntimeCodeMatchesBuild"
 mode="default"
-if ! forge coverage --report summary --code-size-limit 500000 --no-match-coverage '(^test/|^script/|^src/mocks/)' >"$raw" 2>&1; then
+if ! forge coverage --report summary --code-size-limit 500000 --no-match-coverage '(^test/|^script/|^src/mocks/)' --no-match-test "$skip" >"$raw" 2>&1; then
   mode="--ir-minimum"
-  forge coverage --report summary --ir-minimum --code-size-limit 500000 --no-match-coverage '(^test/|^script/|^src/mocks/)' >"$raw" 2>&1
+  forge coverage --report summary --ir-minimum --code-size-limit 500000 --no-match-coverage '(^test/|^script/|^src/mocks/)' --no-match-test "$skip" >"$raw" 2>&1
 fi
 python3 - "$raw" "$out" "$min" "$mode" <<'PY'
 import re, sys, datetime
