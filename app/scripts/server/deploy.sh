@@ -90,7 +90,10 @@ fi
 
 # ---- small helpers -------------------------------------------------------------------------------------------------
 as_ifso() { # run a command as the ifso user (as itself in --dry-run)
-  if [[ "$DRY_RUN" == 1 ]]; then "$@"; else runuser -u ifso -- env HOME="$STATE" GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-}" "$@"; fi
+  # GIT_SSH_COMMAND only when set: an empty one makes git try to run "" and every fetch fails (server, 2026-11-01)
+  local e=(HOME="$STATE")
+  [[ -n "${GIT_SSH_COMMAND:-}" ]] && e+=(GIT_SSH_COMMAND="$GIT_SSH_COMMAND")
+  if [[ "$DRY_RUN" == 1 ]]; then "$@"; else runuser -u ifso -- env "${e[@]}" "$@"; fi
 }
 sysctl_() { # systemctl, or just a log line in --dry-run unless a stand-in is named
   if [[ "$DRY_RUN" == 1 && -z "${IFSO_SYSTEMCTL:-}" ]]; then log "dry-run: systemctl $*"; return 0; fi

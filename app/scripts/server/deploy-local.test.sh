@@ -421,5 +421,11 @@ check "co-host Redis unit: own user, its own config file, limits, no 6379" bash 
 check "co-host Caddy site: domain placeholder -> 127.0.0.1:3201 only" bash -c 'grep -q "^@DOMAIN@ {" "$1/cohost/ifso.caddy" && grep -q "reverse_proxy 127.0.0.1:3201" "$1/cohost/ifso.caddy" && ! grep -qE "8080|:80 " "$1/cohost/ifso.caddy"' _ "$HERE"
 check "co-host files name the other project nowhere" bash -c 'w="lem""niscate"; ! grep -rIil "$w" "$1/cohost" "$1/provision-cohost.sh"' _ "$HERE"
 
+# deploy.sh as_ifso (the real, non-dry-run path) through the runuser shim: an unset GIT_SSH_COMMAND must not become an
+# empty one (git then runs "" and every fetch fails: server, 2026-11-01); a set one is passed through.
+AS_IFSO="$(sed -n '/^as_ifso() {/,/^}/p' "$HERE/deploy.sh")"
+check "deploy as_ifso: no empty GIT_SSH_COMMAND when unset" bash -c 'PATH="$1:$PATH"; eval "$2"; DRY_RUN=0 STATE=/x; unset GIT_SSH_COMMAND; ! as_ifso env | grep -q "^GIT_SSH_COMMAND="' _ "$SHIM" "$AS_IFSO"
+check "deploy as_ifso: a set GIT_SSH_COMMAND is passed through" bash -c 'PATH="$1:$PATH"; eval "$2"; DRY_RUN=0 STATE=/x; GIT_SSH_COMMAND="ssh -i k" as_ifso env | grep -qx "GIT_SSH_COMMAND=ssh -i k"' _ "$SHIM" "$AS_IFSO"
+
 if ((fail)); then printf '%s of %s failed\n' "$fail" "$n"; exit 1; fi
 printf 'all %s passed\n' "$n"
