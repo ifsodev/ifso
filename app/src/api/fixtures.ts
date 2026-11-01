@@ -10,6 +10,11 @@ export const LEAGUES = ["soccer_epl", "soccer_spain_la_liga", "soccer_italy_seri
 
 let cache: { at: number; events: OddsApiEvent[] } | undefined;
 
+/** Tests only: the events cache is module state, so a test that relies on its own stubbed listing clears it first. */
+export function resetFixtureCache(): void {
+  cache = undefined;
+}
+
 export function normTeam(s: string): string {
   return s.toLowerCase().replace(/\./g, "").replace(/\b(fc|cf|afc|sc|ac)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 }

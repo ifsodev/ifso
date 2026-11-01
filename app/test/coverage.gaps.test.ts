@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Address, Hex } from "viem";
 import { ClaimError, relayAccept } from "../src/api/claim";
-import { listFixtureMatches } from "../src/api/fixtures";
+import { listFixtureMatches, resetFixtureCache } from "../src/api/fixtures";
 import { RateLimiter } from "../src/api/rateLimit";
 import { findBannedWords } from "../src/client/copyRules";
 import { loadEnv } from "../src/config/env";
@@ -243,6 +243,7 @@ describe("Pyth update fetch", () => {
 
 describe("fixture lookup", () => {
   test("lists upcoming league fixtures for a typed team, or undefined without an odds key", async () => {
+    resetFixtureCache(); // another file may have filled the 10-minute events cache with its own fixtures (public CI, 2026-11-01)
     const soon = new Date(Date.now() + 2 * 86400_000).toISOString();
     stubFetch((url) => ({ body: url.includes("soccer_epl") ? [{ id: "e1", sport_key: "soccer_epl", commence_time: soon, home_team: "Arsenal FC", away_team: "Chelsea FC" }] : [] }));
     const withKey = { env: { ODDS_API_KEY: "k" } } as unknown as Deps;
