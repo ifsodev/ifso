@@ -20,6 +20,7 @@ const schema = z.object({
 
   ESCROW_ADDRESS: addr.optional(),
   EVALUATOR_ADDRESS: addr.optional(),
+  TESTNET_FEEDS: z.string().optional(), // 46630 only: "ETH=0x...,..." mock feeds (config/chain.ts feedsFor)
   RESOLVER_ADDRESS: addr.optional(),
   FEE_ROUTER_ADDRESS: addr.optional(), //  only read by the admin-event monitor
   USDG_ADDRESS: addr.default("0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"),
