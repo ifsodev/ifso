@@ -1,17 +1,23 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { getAddress, isAddress, zeroAddress, type Address } from "viem";
 import { api, friendlyError, type EscrowView, type MineRow } from "@/lib/ifso/api";
-import { escrowNonce, sendWithMargin } from "@/lib/ifso/chain";
+import { escrowNonce, publicClient, sendWithMargin } from "@/lib/ifso/chain";
 import { resolveChainInfo, type ChainInfo } from "@/lib/ifso/chainInfo";
 import { config, explorerTx } from "@/lib/ifso/config";
 import { DecisionAction, decide, redirectRefund } from "@/lib/ifso/decisions";
 import { escrowAbi } from "@/lib/ifso/escrowAbi";
+import { patchFor, patchFromLogs, patchRow, recordPatch, rowsForMode, subscribe, withOverlay } from "@/lib/ifso/optimistic";
 import { FLAG, has, isOpen, KIND_TEXT, owedVoidSide, same, STATUS_TEXT, usdgText, when } from "@/lib/ifso/status";
 import { shortAddress, signTyped } from "@/lib/ifso/wallet";
 import { useWallet } from "./wallet-context";
 
 export type PaymentsMode = "Sent" | "Received" | "Approvals" | "Refunds" | "Activity";
+
+/** Re-renders when a confirmed transaction changes what this browser knows. */
+const overlayVersion = { n: 0 };
+subscribe(() => overlayVersion.n++);
+const useOverlay = () => useSyncExternalStore(subscribe, () => overlayVersion.n, () => 0);
 
 const unix = (v: string | null | undefined): number => {
   if (!v) return 0;
@@ -23,6 +29,7 @@ export function PaymentsView({ mode, refreshKey }: { mode: PaymentsMode; refresh
   const me = w.session?.address;
   const [now] = useState(() => Date.now());
   const [rows, setRows] = useState<MineRow[]>();
+  useOverlay();
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     if (!me) return;
@@ -52,13 +59,7 @@ export function PaymentsView({ mode, refreshKey }: { mode: PaymentsMode; refresh
       </section>
     );
 
-  const shown = (rows ?? []).filter((r) => {
-    if (mode === "Sent") return same(r.sender, me);
-    if (mode === "Received") return same(r.recipient, me);
-    if (mode === "Approvals") return isOpen(r.status) && r.kind === 3;
-    if (mode === "Refunds") return (same(r.sender, me) && isOpen(r.status)) || r.status === 5;
-    return true;
-  });
+  const shown = rowsForMode(withOverlay(rows) ?? [], mode, me);
   const empty: Record<PaymentsMode, string> = {
     Sent: "You have not sent a payment from this wallet yet.",
     Received: "Nothing has been sent to this wallet yet.",
@@ -173,7 +174,8 @@ function PaymentCard({ row, me, expired, onChanged }: { row: MineRow; me: Addres
 function Details({ id, view, me, onChanged }: { id: string; view: EscrowView; me?: Address; onChanged: () => void | Promise<void> }) {
   const w = useWallet();
   const chain = useChainInfo();
-  const e = view.escrow;
+  useOverlay();
+  const e = patchRow(view.escrow, patchFor(id, { status: view.escrow.status, voidOwed: has(view.escrow.flags, FLAG.senderOwed | FLAG.counterOwed) ? 1 : 0 }));
   const cond = view.condition as { kind?: number | string; mode?: number | string; target?: string };
   const [now] = useState(() => Date.now());
   const [msg, setMsg] = useState("");
@@ -197,6 +199,11 @@ function Details({ id, view, me, onChanged }: { id: string; view: EscrowView; me
       const i = await chain();
       const hash = await fn(w.session, i);
       setTx(hash);
+      // show the new state from the confirmed transaction right away; the service's index catches up after
+      const receipt = await publicClient().waitForTransactionReceipt({ hash: hash as `0x${string}` });
+      if (receipt.status !== "success") throw new Error(`${label}: the transaction did not go through.`);
+      const patch = patchFromLogs(receipt.logs, i.escrow, id);
+      if (patch) recordPatch(id, patch);
       setMsg(`${label}: sent.`);
       await onChanged();
     } catch (er) {
