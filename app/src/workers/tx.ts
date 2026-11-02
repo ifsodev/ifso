@@ -1,7 +1,7 @@
 // The single place a hot key signs and sends. Simulate first (an eth_call that would revert costs nothing),
 // size gas from an estimate with headroom, cap the fee at 1.5x the current gas price, and serialise sends per
 // account inside this process so the keeper sweep and the price watcher never race for one nonce.
-import type { Abi, Address, WalletClient } from "viem";
+import { BaseError, ContractFunctionRevertedError, type Abi, type Address, type WalletClient } from "viem";
 import { relayTxs } from "../db/schema";
 import type { Deps } from "./deps";
 
@@ -127,5 +127,25 @@ export function shortError(e: unknown): string {
   // the contract reverts NoChange for a relayed call that would change nothing (a repeat OK, the same refund addresses):
   // that is a refusal for the caller, said plainly, and it never costs gas (it fails in the simulation)
   if (/\bNoChange\b/.test(`${m.shortMessage ?? ""} ${m.message ?? ""}`)) return "this would not change anything, so it was not sent";
+  // testnet run 2026-11-01: viem's shortMessage is only 'The contract function "x" reverted.'; the decoded custom error
+  // (the RPC returns its data) is the reason the person needs, so it goes out in plain words or at least by name
+  const reverted = e instanceof BaseError ? (e.walk((x) => x instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null) : null;
+  const name = reverted?.data?.errorName;
+  if (name) return PLAIN_REVERTS[name] ?? `${(m.shortMessage ?? "the call would fail").replace(/\.$/, "")}: ${name}`.slice(0, 300);
   return (m.shortMessage ?? m.message ?? String(e)).slice(0, 300);
 }
+
+/** The escrow's refusals a person can act on, said plainly (copy rules: app/test/bannedWords.test.ts). */
+const PLAIN_REVERTS: Record<string, string> = {
+  CreationIsPaused: "new payments and challenge accepts are paused right now; claims, decisions and refunds keep working",
+  AmountAboveCap: "the amount is above the current limit for one payment",
+  AlreadyExists: "this payment already exists",
+  NotOpen: "this payment is already finished",
+  Expired: "this payment has expired",
+  NotExpired: "this payment has not reached its expiry yet",
+  AlreadyClaimed: "this link was already claimed",
+  AlreadyAccepted: "this challenge was already accepted",
+  AcceptWindowClosed: "the time to accept this challenge has passed",
+  NotCancellable: "this payment cannot be cancelled",
+  SignatureExpired: "the signature has expired, please sign again",
+};
