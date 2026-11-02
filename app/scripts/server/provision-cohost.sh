@@ -82,6 +82,8 @@ PROFILE="${PROFILE:-testnet}"
 [[ "$PROFILE" == testnet ]] || die "co-hosting is for the testnet phase only (PROFILE=testnet); mainnet gets its own server" 64
 DB_NAME="ifso_${PROFILE}"
 DOMAIN="${DOMAIN:-}"
+EDGE="${EDGE:-}"
+[[ -z "$EDGE" || "$EDGE" == cloudflare ]] || die "EDGE must be empty or cloudflare" 64
 domain_re='^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$'
 [[ -z "$DOMAIN" || "$DOMAIN" =~ $domain_re ]] || die "DOMAIN '$DOMAIN' is not a domain name" 64
 if [[ "$MODE" != check ]]; then
@@ -257,7 +259,10 @@ caddy_apply() {
   tmp="$(mktemp)"; cand="$(mktemp)"
   # shellcheck disable=SC2064
   trap "rm -f '$tmp' '$cand'" RETURN
-  sed "s/@DOMAIN@/$DOMAIN/g" "$HERE/cohost/ifso.caddy" >"$tmp"
+  local tpl="$HERE/cohost/ifso.caddy"
+  # EDGE=cloudflare: the API sits behind Cloudflare's proxy; the site answers Cloudflare only (cohost/ifso.cloudflare.caddy)
+  [[ "${EDGE:-}" == cloudflare ]] && tpl="$HERE/cohost/ifso.cloudflare.caddy"
+  sed "s/@DOMAIN@/$DOMAIN/g" "$tpl" >"$tmp"
   if ! cmp -s "$tmp" "$site"; then
     [[ -f "$site" ]] && cp -p "$site" "$site.bak.$stamp"
     install -m 0644 "$tmp" "$site"; changed=1

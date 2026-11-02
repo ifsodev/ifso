@@ -382,6 +382,14 @@ pcreset; printf 'import %s/*\n' "$C/caddy/sites" >>"$C/caddy/Caddyfile"; cp "$C/
 check "caddy step: an import of the sites folder that is already there is left alone (no append, no backup)" bash -c '[ "$1" = 0 ] && cmp -s "$2" "$3" && ! ls "$4"/Caddyfile.bak.* >/dev/null 2>&1' _ "$RC" "$T/orig" "$C/caddy/Caddyfile" "$C/caddy"
 pcreset; cp "$C/caddy/Caddyfile" "$T/orig"; touch "$C/state/caddy-invalid"; pc --caddy-only
 check "caddy step: a configuration that does not validate leaves the Caddyfile untouched, no reload, site file set aside" bash -c '[ "$1" != 0 ] && cmp -s "$2" "$3" && ! grep -q reload "$4" && [ ! -e "$5/ifso.caddy" ] && ls "$5"/ifso.caddy.rejected.* >/dev/null' _ "$RC" "$T/orig" "$C/caddy/Caddyfile" "$C/state/calls" "$C/caddy/sites"
+
+# EDGE=cloudflare: the API behind Cloudflare's proxy answers Cloudflare's ranges only and passes its headers through
+pcreset; EDGE=cloudflare pc --caddy-only
+check "EDGE=cloudflare: the site answers Cloudflare only (abort for any other address) and keeps cf headers" bash -c 'f="$1/caddy/sites/ifso.caddy"; [ "$2" = 0 ] && grep -q "^api.example.test {" "$f" && grep -q "@not_cloudflare not remote_ip 173.245.48.0/20" "$f" && grep -q "abort @not_cloudflare" "$f" && grep -q "2400:cb00::/32" "$f" && ! grep -q "header_up -CF" "$f"' _ "$C" "$RC"
+pcreset; pc --caddy-only
+check "default edge: the site strips the cf headers (no Cloudflare in front)" bash -c 'grep -q "header_up -CF-IPCountry" "$1/caddy/sites/ifso.caddy" && ! grep -q "not_cloudflare" "$1/caddy/sites/ifso.caddy"' _ "$C"
+pcreset; EDGE=fastly pc --caddy-only
+check "an unknown EDGE is refused (exit 64)" test "$RC" = 64
 pcreset; cp "$C/caddy/Caddyfile" "$T/orig"; touch "$C/state/fail-reload"; pc --caddy-only
 check "caddy step: a failed reload restores the Caddyfile from the backup" bash -c '[ "$1" != 0 ] && cmp -s "$2" "$3"' _ "$RC" "$T/orig" "$C/caddy/Caddyfile"
 pcreset; sed -i.bak 's/^example.test/BROKEN/' "$C/caddy/Caddyfile"; pc --caddy-only
