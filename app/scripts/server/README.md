@@ -47,9 +47,9 @@ runuser -u ifso -- git clone <repository-ssh-url> /opt/ifso/repo
 
 ### 4. Fill in the settings
 ```bash
-nano /etc/ifso/common.env     # chain id, contract addresses, Telegram bot token
+nano /etc/ifso/common.env     # chain id, contract addresses (incl. the resolver), sports source key, Telegram bot token
 nano /etc/ifso/api.env        # nothing to fill in unless you use the Telegram webhook
-nano /etc/ifso/worker.env     # resolver contract address, outcome-source keys
+nano /etc/ifso/worker.env     # hot key paths, other outcome-source settings
 ```
 Replace every `CHANGE_ME`. The deploy refuses to run while one is left. Leave a value empty to switch a feature off. `CHAIN_ID` must be 46630 for testnet and 4663 for mainnet. The database and Redis settings are already written for you in `/etc/ifso/db.env`; do not touch it.
 
