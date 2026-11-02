@@ -13,8 +13,8 @@ const geo = async (app: ReturnType<typeof mk>, headers: Record<string, string> =
 };
 
 describe("/geo", () => {
-  test("the block list is exactly US, GB, CA, CH, AE (DECISIONS #13)", () => expect([...PRICE_GATED_COUNTRIES].sort()).toEqual(["AE", "CA", "CH", "GB", "US"]));
-  for (const c of ["US", "GB", "CA", "CH", "AE"]) {
+  test("the block list is exactly GB and CH (DECISIONS #41)", () => expect([...PRICE_GATED_COUNTRIES].sort()).toEqual(["CH", "GB"]));
+  for (const c of ["GB", "CH"]) {
     test(`${c} is blocked (cloudflare header)`, async () => {
       const r = await geo(mk("cloudflare"), { "cf-ipcountry": c });
       expect(r.body).toEqual({ country: c, stockPriceConditionsAllowed: false });

@@ -117,7 +117,7 @@ describe("R1-M6: client address and country come from the one trusted hop", () =
       const r = await app.request(`/trpc/parse?input=${encodeURIComponent(JSON.stringify({ text }))}`, { headers });
       return ((await r.json()) as { result: { data: { errors: string[] } } }).result.data.errors.join(" ");
     };
-    expect(await ask({ "cf-ipcountry": "US", "x-country": "DE" })).toContain("aren't available in your region");
+    expect(await ask({ "cf-ipcountry": "GB", "x-country": "DE" })).toContain("aren't available in your region");
     expect(await ask({ "x-country": "DE" })).toContain("aren't available in your region"); // no edge header: unknown, blocked
     expect(await ask({ "cf-ipcountry": "DE" })).toBe("");
   });

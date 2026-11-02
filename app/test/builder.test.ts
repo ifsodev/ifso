@@ -75,8 +75,9 @@ describe("money, fees, geo", () => {
     expect(feeFor(Kind.TIME, 250_000n, 500_000n)).toBe(250_000n);
     expect(feeFor(Kind.OUTCOME, 250_000n, 500_000n)).toBe(750_000n);
   });
-  test("stock price conditions gated in US/UK/CA/CH/UAE; unknown fails closed", () => {
-    for (const c of ["US", "GB", "CA", "CH", "AE"]) expect(stockPriceConditionAllowed(c)).toBe(false);
+  test("stock price conditions gated in UK/CH only (US, CA, AE open: DECISIONS #41); unknown fails closed", () => {
+    for (const c of ["GB", "CH"]) expect(stockPriceConditionAllowed(c)).toBe(false);
+    for (const c of ["US", "CA", "AE"]) expect(stockPriceConditionAllowed(c)).toBe(true);
     expect(stockPriceConditionAllowed("DE")).toBe(true);
     expect(stockPriceConditionAllowed(undefined)).toBe(false);
     expect(countryFromHeaders(new Headers({ "cf-ipcountry": "ae" }))).toBe("AE");

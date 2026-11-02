@@ -29,16 +29,16 @@ describe("api smoke", () => {
     expect(body.result.data.preview).toContain("Send 20 USDG to @jake");
   });
 
-  test("stock price conditions are gated by region (AE), allowed elsewhere (DE)", async () => {
+  test("stock price conditions are gated by region (GB), allowed elsewhere (DE)", async () => {
     const text = "/ifso @mia 100 if nvda closes above 200 by 2030-01-04";
-    const blocked = (await (await app.request(q({ text }), { headers: { "cf-ipcountry": "AE" } })).json()) as { result: { data: { errors: string[] } } };
+    const blocked = (await (await app.request(q({ text }), { headers: { "cf-ipcountry": "GB" } })).json()) as { result: { data: { errors: string[] } } };
     expect(blocked.result.data.errors.join(" ")).toContain("aren't available in your region");
     const ok = (await (await app.request(q({ text }), { headers: { "cf-ipcountry": "DE" } })).json()) as { result: { data: { errors: string[] } } };
     expect(ok.result.data.errors).toEqual([]);
   });
 
   test("crypto price conditions (ETH) are not region-gated", async () => {
-    const r = (await (await app.request(q({ text: "/ifso @mia 100 if eth closes above 3000 by 2030-01-04" }), { headers: { "cf-ipcountry": "US" } })).json()) as { result: { data: { errors: string[] } } };
+    const r = (await (await app.request(q({ text: "/ifso @mia 100 if eth closes above 3000 by 2030-01-04" }), { headers: { "cf-ipcountry": "GB" } })).json()) as { result: { data: { errors: string[] } } };
     expect(r.result.data.errors).toEqual([]);
   });
 });
