@@ -110,7 +110,8 @@ function Claim({ link, info, view, reload }: { link: Extract<ClaimLink, { ok: tr
   const twoSided = has(e.flags, FLAG.twoSided);
   const [recipient, setRecipient] = useState<Recipient>();
   const [saved, setSaved] = useState<ReturnType<typeof loadSavedPasskey>>();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false); // claiming or joining: a signature and a relay are in flight
+  const [picking, setPicking] = useState(false); // a wallet or passkey prompt is open: nothing is being claimed yet
   const [msg, setMsg] = useState("");
   const [ok, setOk] = useState(false);
   const [done, setDone] = useState<{ status: "bound" | "paid"; txHash: Hex }>();
@@ -122,7 +123,7 @@ function Claim({ link, info, view, reload }: { link: Extract<ClaimLink, { ok: tr
   const expired = now >= Number(e.expiry);
 
   async function pickWallet(w: DiscoveredWallet) {
-    setBusy(true);
+    setPicking(true);
     setMsg("");
     try {
       const address = await pickAddress(w);
@@ -131,11 +132,11 @@ function Claim({ link, info, view, reload }: { link: Extract<ClaimLink, { ok: tr
     } catch (er) {
       setMsg(friendlyError(er));
     } finally {
-      setBusy(false);
+      setPicking(false);
     }
   }
   async function makePasskey() {
-    setBusy(true);
+    setPicking(true);
     setMsg("");
     try {
       const p = await createPasskeyAccount();
@@ -144,7 +145,7 @@ function Claim({ link, info, view, reload }: { link: Extract<ClaimLink, { ok: tr
     } catch (er) {
       setMsg(friendlyError(er));
     } finally {
-      setBusy(false);
+      setPicking(false);
     }
   }
 
@@ -258,12 +259,12 @@ function Claim({ link, info, view, reload }: { link: Extract<ClaimLink, { ok: tr
             <p className="sx-risk">{RISK}</p>
             <h2>Join with a wallet</h2>
             <p className="sx-soft">You sign two things in your wallet: your amount, and a note that you are the one joining. You need USDG, not ETH.</p>
-            {acceptor ? <div className="sx-addr">{acceptor.address}</div> : <WalletList busy={busy} onPick={(w) => void pickWallet(w)} />}
+            {acceptor ? <div className="sx-addr">{acceptor.address}</div> : <WalletList busy={busy || picking} onPick={(w) => void pickWallet(w)} />}
             <label className="sx-check">
               <input type="checkbox" checked={ok} onChange={(ev) => setOk(ev.target.checked)} />
               <span>I have read this and want to join.</span>
             </label>
-            <button className="sx-btn" disabled={busy || !acceptor || !ok} onClick={() => void accept()}>
+            <button className="sx-btn" disabled={busy || picking || !acceptor || !ok} onClick={() => void accept()}>
               {busy ? "Waiting for your wallet…" : "JOIN THE CHALLENGE"}
             </button>
           </>
@@ -290,13 +291,13 @@ function Claim({ link, info, view, reload }: { link: Extract<ClaimLink, { ok: tr
       ) : (
         <>
           <p className="sx-soft">Pick a wallet you already use, or make a passkey account on this device. The passkey account needs no app, no seed phrase and no fee.</p>
-          <WalletList busy={busy} onPick={(w) => void pickWallet(w)} />
+          <WalletList busy={busy || picking} onPick={(w) => void pickWallet(w)} />
           {saved && (
             <button type="button" className="sx-btn sx-ghost" onClick={() => setRecipient({ address: getAddress(saved.address), via: "passkey", label: "Passkey account saved on this device" })}>
               Use my passkey account {shortAddress(saved.address)}
             </button>
           )}
-          <button type="button" className="sx-btn sx-ghost" disabled={busy} onClick={() => void makePasskey()}>
+          <button type="button" className="sx-btn sx-ghost" disabled={busy || picking} onClick={() => void makePasskey()}>
             Make a passkey account
           </button>
         </>
@@ -305,7 +306,7 @@ function Claim({ link, info, view, reload }: { link: Extract<ClaimLink, { ok: tr
         <input type="checkbox" checked={ok} onChange={(ev) => setOk(ev.target.checked)} />
         <span>I have read this and want to claim it.</span>
       </label>
-      <button className="sx-btn" disabled={busy || !recipient || !ok} onClick={() => void claim()}>
+      <button className="sx-btn" disabled={busy || picking || !recipient || !ok} onClick={() => void claim()}>
         {busy ? "Claiming…" : recipient ? `CLAIM ${view.amountText} USDG TO ${shortAddress(recipient.address)}` : "CHOOSE WHERE IT GOES"}
       </button>
       {msg && (
