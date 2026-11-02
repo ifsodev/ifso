@@ -3,7 +3,7 @@
  * up. A cancel, refund, approval or referee decision shows its new state at once instead of "Waiting for its
  * condition" + CANCEL; each entry is dropped as soon as the service reports the same thing (or after a while).
  */
-import { decodeEventLog, parseAbi, type Address, type Hex, type Log } from "viem";
+import { decodeEventLog, parseAbi, zeroAddress, type Address, type Hex, type Log } from "viem";
 import type { MineRow } from "./api";
 import { FLAG, isOpen, same } from "./status";
 
@@ -69,7 +69,41 @@ export function recordPatch(id: string, patch: Patch, now = Date.now()) {
   changed();
 }
 
+/** Payments this browser just created (the relayer confirmed them), shown until the service's list has them. */
+const created = new Map<string, { row: MineRow; at: number }>();
+
+export function recordCreated(row: MineRow, now = Date.now()) {
+  created.set(row.id, { row, at: now });
+  changed();
+}
+
+/** A list row for a payment just created, from the `build` params this browser signed and the id `submit` returned. */
+export function rowFromBuild(id: string, txHash: string, sender: Address, params: Record<string, unknown>): MineRow {
+  const c = (params.condition ?? {}) as { kind?: unknown };
+  const recipient = String(params.recipient ?? zeroAddress);
+  const linkKey = String(params.linkKey ?? zeroAddress);
+  const acceptBy = String(params.acceptBy ?? "0");
+  return {
+    id,
+    sender: sender.toLowerCase(),
+    recipient: same(recipient, zeroAddress) ? null : recipient.toLowerCase(),
+    amount: String(params.amount),
+    counterAmount: String(params.counterAmount ?? "0"),
+    kind: Number(c.kind),
+    status: 1,
+    twoSided: Boolean(params.twoSided),
+    accepted: false,
+    voidOwed: 0,
+    expiry: String(params.expiry),
+    acceptBy: acceptBy === "0" ? null : acceptBy,
+    createdTx: txHash,
+    conditionHash: "",
+    linkKey: same(linkKey, zeroAddress) ? null : linkKey.toLowerCase(),
+  };
+}
+
 export function clearOverlay() {
+  created.clear();
   patches.clear();
   changed();
 }
@@ -107,9 +141,16 @@ export function patchFor(id: string, serviceRow?: Pick<MineRow, "status" | "void
 }
 
 /** The service's rows with every confirmed-but-not-yet-indexed change applied. */
-export function withOverlay(rows: MineRow[] | undefined, now = Date.now()): MineRow[] | undefined {
+export function withOverlay(rows: MineRow[] | undefined, me?: string, now = Date.now()): MineRow[] | undefined {
   if (!rows) return rows;
-  return rows.map((r) => patchRow(r, patchFor(r.id, r, now)));
+  const listed = new Set(rows.map((r) => r.id));
+  const fresh: MineRow[] = [];
+  for (const [id, c] of created) {
+    if (listed.has(id) || now - c.at > OVERLAY_TTL_MS) created.delete(id);
+    else if (!me || same(c.row.sender, me) || same(c.row.recipient, me)) fresh.push(c.row);
+  }
+  fresh.sort((a, b) => created.get(b.id)!.at - created.get(a.id)!.at); // newest first, like the service's list
+  return [...fresh, ...rows].map((r) => patchRow(r, patchFor(r.id, listed.has(r.id) ? r : undefined, now)));
 }
 
 /** Which rows a ledger tab lists. Refunds = the sender's own payments still open, and voided sides still owed. */

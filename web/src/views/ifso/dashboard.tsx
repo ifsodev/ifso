@@ -6,6 +6,7 @@ import "./dashboard.css";
 import "./wired.css";
 import { api, friendlyError, type MineRow, type PerksAnswer } from "@/lib/ifso/api";
 import { same, when } from "@/lib/ifso/status";
+import { subscribe, withOverlay } from "@/lib/ifso/optimistic";
 import { shortAddress } from "@/lib/ifso/wallet";
 import { PaymentComposer, type PaymentDraft } from "./composer";
 import { PaymentsView } from "./payments";
@@ -66,7 +67,7 @@ function Dashboard() {
   const [editing, setEditing] = useState<string | undefined>();
   const [currentTime, setCurrentTime] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [mine, setMine] = useState<MineRow[]>();
+  const [mineRows, setMine] = useState<MineRow[]>();
   const [perks, setPerks] = useState<PerksAnswer>();
   const [perksError, setPerksError] = useState("");
 
@@ -80,6 +81,8 @@ function Dashboard() {
     }
   }, []);
 
+  const [overlayTick, setOverlayTick] = useState(0);
+  useEffect(() => subscribe(() => setOverlayTick((n) => n + 1)), []);
   const loadMine = useCallback(async () => {
     if (!account) return setMine(undefined);
     try {
@@ -129,6 +132,8 @@ function Dashboard() {
       })
     : [];
   const filtered = useMemo(() => drafts.filter((d) => `${d.recipient} ${d.kind} ${d.detail}`.toLowerCase().includes(search.toLowerCase())), [drafts, search]);
+  // the service's list plus payments this browser just created and confirmed (until the index has them)
+  const mine = useMemo(() => withOverlay(mineRows, account), [mineRows, account, overlayTick]); // eslint-disable-line react-hooks/exhaustive-deps
   const sentCount = mine && account ? mine.filter((r) => same(r.sender, account)).length : undefined;
   const receivedCount = mine && account ? mine.filter((r) => same(r.recipient, account)).length : undefined;
   const live = ["Sent", "Received", "Approvals", "Refunds", "Activity"] as const;

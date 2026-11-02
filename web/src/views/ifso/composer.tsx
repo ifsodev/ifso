@@ -6,6 +6,7 @@ import { resolveChainInfo, type ChainInfo } from "@/lib/ifso/chainInfo";
 import { config, explorerTx } from "@/lib/ifso/config";
 import { buildAndVerify, signAndSubmit, type CreateResult } from "@/lib/ifso/create";
 import { applyOption } from "@/lib/ifso/questions";
+import { recordCreated, rowFromBuild } from "@/lib/ifso/optimistic";
 import { commandText, isAddressLike, KINDS } from "@/lib/ifso/text";
 import { signTyped } from "@/lib/ifso/wallet";
 import { useWallet } from "./wallet-context";
@@ -105,6 +106,8 @@ export function PaymentComposer({ draft, onSave, onCancel, onCreated }: { draft?
         { text, sender: s.address, recipient: isAddressLike(v.recipient) ? (v.recipient.trim() as Address) : undefined, referee, cancellable: v.cancel, tzOffsetMin: tz },
         built,
       );
+      // Sent lists it at once (the relayer confirmed it); the service's list takes over once it has indexed it
+      recordCreated(rowFromBuild(r.id, r.txHash, s.address, built.answer.params));
       setResult(r);
       built.secret?.fill(0);
       setBuilt(undefined);

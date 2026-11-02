@@ -59,7 +59,7 @@ export function PaymentsView({ mode, refreshKey }: { mode: PaymentsMode; refresh
       </section>
     );
 
-  const shown = rowsForMode(withOverlay(rows) ?? [], mode, me);
+  const shown = rowsForMode(withOverlay(rows, me) ?? [], mode, me);
   const empty: Record<PaymentsMode, string> = {
     Sent: "You have not sent a payment from this wallet yet.",
     Received: "Nothing has been sent to this wallet yet.",
