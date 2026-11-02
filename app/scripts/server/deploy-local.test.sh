@@ -190,10 +190,10 @@ check "the migrate unit runs bun run db:migrate" grep -q "^ExecStart=/usr/local/
 check "no unit puts a secret or a key on a command line" bash -c '! grep -E "^ExecStart=.*(PASSWORD|TOKEN|SECRET|KEY)" "$1"/systemd/*' _ "$HERE"
 check "the three roles are the ones main.ts accepts" bash -c 'for r in api bot worker; do grep -q "main.ts $r\$" "$1/systemd/ifso-$r.service" || exit 1; done' _ "$HERE"
 split() { awk -v want="$1" '/^# \[section: / { s = $3; sub(/\]$/, "", s); on = (s == want); next } on { print }' "$HERE/env.example"; }
-check "env.example sections: common holds the escrow, api the relayer, worker the keeper and resolver" bash -c '
+check "env.example sections: common holds the escrow and resolver (the API builds outcome payments), api the relayer, worker the keeper" bash -c '
   split() { awk -v want="$1" "/^# \[section: / { s = \$3; sub(/\]\$/, \"\", s); on = (s == want); next } on { print }" "$2/env.example"; }
-  split common "$1" | grep -q "^ESCROW_ADDRESS=" && split api "$1" | grep -q "^RELAYER_KEYSTORE=" &&
-  split worker "$1" | grep -q "^KEEPER_KEYSTORE=" && split worker "$1" | grep -q "^RESOLVER_ADDRESS="' _ "$HERE"
+  split common "$1" | grep -q "^ESCROW_ADDRESS=" && split common "$1" | grep -q "^RESOLVER_ADDRESS=" && split api "$1" | grep -q "^RELAYER_KEYSTORE=" &&
+  split worker "$1" | grep -q "^KEEPER_KEYSTORE=" && ! split worker "$1" | grep -q "^RESOLVER_ADDRESS="' _ "$HERE"
 check "env.example api section: TRUST_PROXY=caddy and HOST=127.0.0.1 (review R2-M1)" bash -c '
   split() { awk -v want="$1" "/^# \[section: / { s = \$3; sub(/\]\$/, \"\", s); on = (s == want); next } on { print }" "$2/env.example"; }
   split api "$1" | grep -qx "TRUST_PROXY=caddy" && split api "$1" | grep -qx "HOST=127.0.0.1" && ! split common "$1" | grep -q "^TRUST_PROXY="' _ "$HERE"
