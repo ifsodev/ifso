@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { createPublicClient, createWalletClient, decodeEventLog, encodeFunctionData, getAddress, hashTypedData, http, keccak256, parseAbi, toHex, type Address, type Hex } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { robinhoodTestnet } from "viem/chains";
-import { ifsoEscrowAbi } from "../../src/abi";
+import { ifsoEscrowAbi, ifsoOutcomeResolverAbi } from "../../src/abi";
 import {
   acceptAuthorizationTypedData, buildClaimUrl, createPermitTypedData, DecisionAction, decisionTypedData, findBannedWords,
   linkKeyAddress, parseClaimUrl, randomSecret, refundRedirectTypedData, runClaim, signAccept, verifyBuildAnswer,
@@ -42,6 +42,8 @@ const ESCROW = getAddress("0x7FFf1cE34532f76A6aFEb53E503891e671f891d6");
 const USDG = getAddress("0x857315614841c5d537a5F395f020fc5bCa0fdaC6");
 const ETH_FEED = getAddress("0x6ba540c3638cac8047599dA9fB09c03BE834b725");
 const OWNER_SAFE = getAddress("0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995");
+const PANEL_SAFE = getAddress("0x56A07C4571859278996BE577c82785cD6943e2cd");
+const RESOLVER = getAddress("0x26dB66f4AA5D4Ca365464bfc2425b27805F34A98");
 const SERVICE_KEYS = ["0x8aB1F0895B2012Db89Caf62e5b67E81137853ad0", "0xB2Ebe6323Aea29042985A7aB743d0F17A2175Fdc", "0x773B7Bc00Ec82753FCca6AF3C051b7Ddf2c7451b"].map((a) => a.toLowerCase());
 
 const chain = { ...robinhoodTestnet, rpcUrls: { default: { http: [RPC] } } };
@@ -285,7 +287,9 @@ const pushPrice = async (who: string, usd: number) => send(who, ETH_FEED, feedAb
 const ser = (x: unknown) => JSON.parse(JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? toHex(v) : v)));
 
 // ================================================================== state for --resume
-interface PendingCheck { area: string; name: string; id: string; sender: string; who: string; wantStatus: number; unlockAt: number; payee: string; amount: string; byAnyone?: { alt: boolean } }
+interface PendingCheck { area: string; name: string; id: string; sender: string; who: string; wantStatus: number; unlockAt: number; payee: string; amount: string; byAnyone?: { alt: boolean }; outcome?: OutcomePlan }
+/** OUTCOME (Polymarket) on testnet: one question per role, advanced by --resume as its windows open */
+interface OutcomePlan { role: "undisputed" | "panel" | "timeout"; qid: Hex; slug: string; stage: "open" | "proposed" | "disputed" }
 interface State { startedAt: string; fromBlock: string; rows: Row[]; pending: PendingCheck[]; throttles: string[]; ids: string[] }
 const loadState = (): State => JSON.parse(readFileSync(STATE, "utf8"));
 const saveState = (s: State) => writeFileSync(STATE, JSON.stringify(ser(s), null, 1), { mode: 0o600 });
@@ -350,6 +354,106 @@ await step("Pause", "owner Safe pauses creation: create and accept refused; OK, 
 return made.afterPause;
 }
 
+// ---------------------------------------------------------------- OUTCOME helpers
+const outcomePending: PendingCheck[] = [];
+const qinfo = (qid: Hex) => pc.readContract({ address: RESOLVER, abi: ifsoOutcomeResolverAbi, functionName: "getQuestion", args: [qid] }) as Promise<any>;
+const yesNo = (x: any) => { try { return JSON.stringify(JSON.parse(x.outcomes)) === '["Yes","No"]'; } catch { return false; } };
+/** the soonest-ending liquid Yes/No markets (the API's allow-list refuses thin or far-off ones) */
+async function pickMarkets(n: number): Promise<string[]> {
+  const min = new Date(Date.now() + 2 * 3600_000).toISOString().replace(/\.\d+Z$/, "Z");
+  const ms: any[] = await (await fetch(`https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&order=endDate&ascending=true&end_date_min=${min}&liquidity_num_min=10000&volume_num_min=50000`)).json();
+  return ms.filter(yesNo).slice(0, n).map((m) => m.slug as string);
+}
+/** the market's real answer once it closed (1 YES, 2 NO, 0 neither), from the public listing */
+async function realAnswer(slug: string): Promise<number | undefined> {
+  const [mk]: any[] = await (await fetch(`https://gamma-api.polymarket.com/markets?slug=${encodeURIComponent(slug)}`)).json();
+  if (!mk?.closed) return undefined;
+  const [y, n] = JSON.parse(mk.outcomePrices).map(Number);
+  return y === 1 && n === 0 ? 1 : y === 0 && n === 1 ? 2 : 0;
+}
+async function bondFor(who: string) {
+  const bond = BigInt((await pc.readContract({ address: RESOLVER, abi: ifsoOutcomeResolverAbi, functionName: "bondAmount" })) as bigint);
+  if ((await bal(adr(who))) < bond) await send(who, USDG, usdgAbi, "mint", [adr(who), bond * 2n]);
+  await send(who, USDG, usdgAbi, "approve", [RESOLVER, bond]);
+  return bond;
+}
+const QS = { OPEN: 1, PROPOSED: 2, DISPUTED: 3, FINAL: 4, VOID: 5 } as const;
+/** settles the escrow per the question's end state and checks chain + API */
+async function outcomeSettled(p: PendingCheck) {
+  const q = await qinfo(p.outcome!.qid);
+  const st = Number(q.state);
+  const want = st === QS.FINAL && Number(q.finalOutcome) === 1 ? S.RELEASED : S.RETURNED; // the escrow unlocks on YES
+  await waitStatus(BigInt(p.id), want, 900_000);
+  const evs = await noteEvents(BigInt(p.id));
+  onChain(`question ${st === QS.VOID ? "VOID (panel timed out)" : `FINAL outcome ${q.finalOutcome}`}; escrow settled by ${await settledBy(evs.at(-1)!.tx)}`);
+  await apiSees(p.sender, BigInt(p.id), want);
+}
+/** one --resume visit: advances the question as far as its windows allow; returns the next unlock time, or 0 when done */
+async function advanceOutcome(p: PendingCheck): Promise<number> {
+  const o = p.outcome!;
+  const q0 = await qinfo(o.qid);
+  let st = Number(q0.state);
+  const disputeWindow = Number(await pc.readContract({ address: RESOLVER, abi: ifsoOutcomeResolverAbi, functionName: "disputeWindow" }));
+  const panelWindow = Number(await pc.readContract({ address: RESOLVER, abi: ifsoOutcomeResolverAbi, functionName: "panelWindow" }));
+  if (o.role === "undisputed") {
+    if (st === QS.OPEN) {
+      // the resolver service proposes once two sources agree; give it a few ticks, else come back later
+      st = await until("service proposal", async () => Number((await qinfo(o.qid)).state) >= QS.PROPOSED && Number((await qinfo(o.qid)).state), 600_000, 15_000).catch(() => QS.OPEN);
+      if (st === QS.OPEN) { onChain("still OPEN: the service has not proposed yet (sources not final)"); return (await now()) + 1800; }
+    }
+    const q = await qinfo(o.qid);
+    if (st === QS.PROPOSED) {
+      const by = await settledBy((await pc.getLogs({ address: RESOLVER, event: ifsoOutcomeResolverAbi.find((x: any) => x.name === "Proposed") as any, args: { questionId: o.qid } as any, fromBlock: await pc.getBlockNumber() - 5_000_000n }))[0]!.transactionHash!);
+      onChain(`proposed ${q.proposed} by ${by} at ${new Date(Number(q.proposedAt) * 1000).toISOString()}`);
+      o.stage = "proposed";
+      const fin = Number(q.proposedAt) + disputeWindow;
+      if ((await now()) < fin) return fin + 60;
+      // past the window: the service finalizes; anyone may if it does not
+      const done = await until("finalize", async () => Number((await qinfo(o.qid)).state) === QS.FINAL, 600_000, 15_000).catch(() => false);
+      if (!done) await send("dave", RESOLVER, ifsoOutcomeResolverAbi, "finalize", [o.qid]);
+      st = QS.FINAL;
+    }
+    if (st >= QS.FINAL) { await outcomeSettled(p); return 0; }
+    throw new Error(`undisputed path found the question in state ${st}`);
+  }
+  // panel and timeout: dave proposes (if nobody did yet), erin disputes (if the service did not), then the panel decides or stays silent
+  if (st === QS.OPEN) {
+    await bondFor("dave");
+    await send("dave", RESOLVER, ifsoOutcomeResolverAbi, "propose", [o.qid, 2, keccak256(toHex(`testnet-run ${o.role} proposal`))]).catch((e) => onChain(`dave's proposal lost the race: ${String(e.message).slice(0, 60)}`));
+    st = Number((await qinfo(o.qid)).state);
+    onChain(`proposed ${(await qinfo(o.qid)).proposed}`);
+  }
+  if (st === QS.PROPOSED) {
+    // the service disputes proposals its sources contradict; give it two ticks, then erin disputes so the path is certain
+    const by = await until("service dispute", async () => Number((await qinfo(o.qid)).state) === QS.DISPUTED, 180_000, 15_000).then(() => "the service").catch(async () => {
+      await bondFor("erin");
+      await send("erin", RESOLVER, ifsoOutcomeResolverAbi, "dispute", [o.qid, keccak256(toHex(`testnet-run ${o.role} dispute`))]);
+      return "erin";
+    });
+    st = QS.DISPUTED;
+    onChain(`disputed by ${by}`);
+  }
+  if (st === QS.DISPUTED) {
+    o.stage = "disputed";
+    const q = await qinfo(o.qid);
+    if (o.role === "panel") {
+      const ans = (await realAnswer(o.slug)) ?? 1;
+      await assertTestnet();
+      onChain(`panel Safe decides ${ans}: ${safeExec(PANEL_SAFE, RESOLVER, encodeFunctionData({ abi: ifsoOutcomeResolverAbi, functionName: "panelResolve", args: [o.qid, ans] }))}`);
+      eq(Number((await qinfo(o.qid)).state), QS.FINAL, "final after the panel");
+      await outcomeSettled(p);
+      return 0;
+    }
+    const until_ = Number(q.disputedAt) + panelWindow;
+    if ((await now()) < until_) { onChain(`panel silent; times out at ${new Date(until_ * 1000).toISOString()}`); return until_ + 60; }
+    const done = await until("panel timeout VOID", async () => Number((await qinfo(o.qid)).state) === QS.VOID, 600_000, 15_000).catch(() => false);
+    if (!done) await send("dave", RESOLVER, ifsoOutcomeResolverAbi, "finalizeTimedOut", [o.qid]);
+    st = QS.VOID;
+  }
+  if (st >= QS.FINAL) { await outcomeSettled(p); return 0; }
+  throw new Error(`${o.role} path found the question in state ${st}`);
+}
+
 // ---------------------------------------------------------------- 8 OUTCOME (resolver): through the API as the site does it
 async function outcomeSteps(track: (x: Made) => Made) {
 const bobA = adr("bob");
@@ -357,20 +461,29 @@ await step("Outcome", "sports result payment built through the API ('arsenal win
   const r = await apiBuild("alice", `/ifso ${bobA} 20 if arsenal win`).then(() => "built").catch((e) => String(e.message));
   if (r !== "built") throw new Error(`the API cannot build a sports payment on this server: ${r}`);
 });
-await step("Outcome", "market (Polymarket) payment built through the API", async () => {
-  const markets: any[] = await (await fetch("https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=20&order=volume24hr&ascending=false")).json();
-  const yesNo = (x: any) => { try { return JSON.stringify(JSON.parse(x.outcomes)) === '["Yes","No"]'; } catch { return false; } };
-  const soon = markets.filter((x) => yesNo(x) && Date.parse(x.endDate) > Date.now() + 3600_000).sort((a, b) => Date.parse(a.endDate) - Date.parse(b.endDate));
-  const slug = soon[0]?.slug;
-  expect(slug, "no open Polymarket market found");
-  let mk: Made;
-  try {
-    mk = track(await apiCreate("alice", `/ifso ${bobA} 20 if polymarket ${slug} resolves yes`));
-  } catch (e) {
-    throw new Error(`slug ${slug}: ${(e as Error).message}`);
-  }
-  return `slug ${slug}, id ${mk.id}`;
-});
+const roles: OutcomePlan["role"][] = ["undisputed", "panel", "timeout"];
+const senders = { undisputed: "alice", panel: "heidi", timeout: "ivan" } as const;
+const slugs = await pickMarkets(3);
+for (let i = 0; i < roles.length; i++) {
+  const role = roles[i]!, slug = slugs[i]!, sender = senders[role];
+  await step("Outcome", `market (Polymarket) payment built and created through the API (${role} path)`, async () => {
+    expect(slug, "no open Yes/No Polymarket market found");
+    let mk: Made;
+    try {
+      mk = track(await apiCreate(sender, `/ifso ${bobA} 20 if polymarket ${slug} resolves yes`));
+    } catch (e) {
+      throw new Error(`slug ${slug}: ${(e as Error).message}`);
+    }
+    const c: any = await pc.readContract({ address: ESCROW, abi: ifsoEscrowAbi, functionName: "getCondition", args: [mk.id] });
+    const qid = c.key as Hex;
+    const qi: any = await qinfo(qid);
+    eq(Number(qi.state), 1, "question registered on the resolver (OPEN)");
+    onChain(`question ${qid.slice(0, 10)}.. OPEN, earliestResolve ${new Date(Number(qi.earliestResolve) * 1000).toISOString()}`);
+    await apiSees(sender, mk.id, S.OPEN);
+    outcomePending.push({ area: "Outcome", name: `OUTCOME ${role}: ${slug}`, id: mk.id.toString(), sender, who: "dave", wantStatus: 0, unlockAt: Number(qi.earliestResolve) + 30, payee: bobA, amount: U(20).toString(), outcome: { role, qid, slug, stage: "open" } });
+    return `slug ${slug}, id ${mk.id}, sender ${sender}`;
+  });
+}
 }
 
 // ---------------------------------------------------------------- 16 books
@@ -414,7 +527,10 @@ if (ONLY) {
   if (ONLY === "pause") {
     const afterPause = await pauseStep(tr);
     if (afterPause) await refused("Refund", "refunding before the expiry is refused", () => send("dave", ESCROW, ifsoEscrowAbi, "refund", [afterPause.id, false, false]), /NotExpired|revert/i);
-  } else if (ONLY === "outcome") await outcomeSteps(tr);
+  } else if (ONLY === "outcome") {
+    await outcomeSteps(tr);
+    st.pending.push(...outcomePending);
+  }
   else if (ONLY === "books") await booksStep(st.ids.length);
   else throw new Error(`--only ${ONLY}: pause, outcome or books`);
   for (const r of rows) {
@@ -437,6 +553,15 @@ if (RESUME) {
     const t = await now();
     if (t < p.unlockAt) { left.push(p); console.log(`still pending until ${new Date(p.unlockAt * 1000).toISOString()}: ${p.name}`); continue; }
     const id = BigInt(p.id);
+    if (p.outcome) {
+      let next = 0;
+      await step(p.area, `${p.name} (resumed, stage ${p.outcome.stage})`, async () => {
+        next = await advanceOutcome(p);
+        if (next) throw new Pending(`stage ${p.outcome!.stage}; next step unlocks at ${new Date(next * 1000).toISOString()}`);
+      });
+      if (next) left.push({ ...p, unlockAt: next });
+      continue;
+    }
     await step(p.area, `${p.name} (resumed)`, async () => {
       const before = BigInt(p.amount);
       if ((await status(id)) !== p.wantStatus && p.byAnyone && (await status(id)) <= S.MET) {
@@ -997,7 +1122,7 @@ await step("Settle PRICE", "price challenges: TRUE pot to the acceptor, FALSE po
 await booksStep(ids.length);
 
 // ================================================================== save state + report
-const st: State = { startedAt, fromBlock: fromBlock.toString(), rows, pending, throttles, ids: ids.map(String) };
+const st: State = { startedAt, fromBlock: fromBlock.toString(), rows, pending: [...pending, ...outcomePending], throttles, ids: ids.map(String) };
 saveState(st);
 writeReport(st);
 const pass = rows.filter((r) => r.ok).length, pend = rows.filter((r) => r.pending).length;
