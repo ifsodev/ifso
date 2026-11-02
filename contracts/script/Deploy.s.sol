@@ -27,7 +27,8 @@ import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 /// Env:
 ///   OWNER_MULTISIG     2-of-3 multisig that will own evaluator / resolver / router / escrow
 ///   PANEL_MULTISIG     outcome fallback panel multisig (separate signer set)
-///   RESOLVER_CREATOR   hot key of the resolver service allowed to register questions
+///   RESOLVER_CREATOR   the RELAYER hot key: the only key allowed to register questions (gas only, no bond). Never the
+///                      resolver key: the api registers questions and never holds that key (testnet run 2026-11-02)
 ///   FEE_WORK / FEE_TREASURY / FEE_PERKS / FEE_BURN   fee split destinations (80/10/5/5)
 ///   USDG       default: RHC USDG on 4663; a fresh MockUSDG on 31337; REQUIRED on every other chain
 ///   PYTH       default 0 everywhere. On 4663 / 46630 it MUST be 0 in v1 (asserted): the adapter is immutable,

@@ -29,7 +29,8 @@ export async function bootResolverEnv(): Promise<ResolverEnv> {
   const chain = await bootChain();
   const pg = await bootDb();
   const me = privateKeyToAccount(chain.resolverKey).address;
-  await chain.write(chain.deployer, chain.resolver, ifsoOutcomeResolverAbi as Abi, "setCreator", [me, true]);
+  // the relayer key is the question creator (bug 4, testnet 2026-11-02); the resolver key only bonds and resolves
+  await chain.write(chain.deployer, chain.resolver, ifsoOutcomeResolverAbi as Abi, "setCreator", [privateKeyToAccount(chain.relayerKey).address, true]);
   await chain.mint(me, 1000);
   const alerts: Array<[string, string]> = [];
   const logs: string[] = [];

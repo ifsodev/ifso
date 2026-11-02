@@ -19,7 +19,7 @@ The server holds three kinds of secret: the database and Redis passwords (made f
 
 - **Profile**: `testnet` (chain 46630, play money) or `mainnet` (chain 4663, real money). A server has one profile for life. Use a separate server for the other one.
 - **sha**: the 40-character id of one commit. You always deploy a sha, never a branch name, because a sha cannot move.
-- **Hot keys**: three wallets the backend signs with: the relayer (pays gas for claims), the keeper (settles and refunds) and the resolver (registers questions, proposes results). They are encrypted key files plus a password file each. Keep only small amounts in them.
+- **Hot keys**: three wallets the backend signs with: the relayer (pays gas for claims and registers result questions), the keeper (settles and refunds) and the resolver (proposes results with a bond). They are encrypted key files plus a password file each. Keep only small amounts in them.
 
 ## Step by step
 

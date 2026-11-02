@@ -27,7 +27,8 @@ On Robinhood Chain (4663 / 46630) it refuses unless `IFSO_ARMED=1` **and** the g
 `contracts/.armed-<chainid>` exist.
 
 ```bash
-export OWNER_MULTISIG=... PANEL_MULTISIG=... RESOLVER_CREATOR=... FEE_WORK=... FEE_TREASURY=... FEE_PERKS=... FEE_BURN=...
+export OWNER_MULTISIG=... PANEL_MULTISIG=... RESOLVER_CREATOR=<RELAYER address> FEE_WORK=... FEE_TREASURY=... FEE_PERKS=... FEE_BURN=...
+# RESOLVER_CREATOR is the relayer hot key (the api registers questions with it); never the resolver key, which bonds
 export GIT_COMMIT=$(git rev-parse HEAD)          # MAX_AMOUNT defaults to 1_000e6 (the launch cap)
 forge script script/Deploy.s.sol --rpc-url rhc --account <keystore name> --broadcast --slow
 forge script script/PostDeployCheck.s.sol --rpc-url rhc   # re-run the assertions from deployments/4663.json

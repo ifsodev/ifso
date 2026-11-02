@@ -1,5 +1,6 @@
 // Outcome resolver service for IfsoOutcomeResolver (studio-run, bonded, optimistic).
-//  - registers questions lazily, the first time someone builds a payment on a fixture / Polymarket question
+//  - plans questions lazily (build); the api registers them with the RELAYER key, the question creator, for a funded
+//    create (submit); this service with the RESOLVER key never creates questions, it bonds and resolves them
 //  - after earliestResolve: reads >= 2 independent sources, proposes only on agreement (USDG bond)
 //  - watches proposals made by anyone else and disputes the ones its sources contradict
 //  - finalizes undisputed proposals after the window; times out silent panels (=> VOID => refunds)
@@ -69,8 +70,10 @@ async function planRow(deps: Deps, row: QuestionRow, beforeInsert?: () => Promis
 }
 
 /**
- * Registers a planned question on the resolver (resolver key pays gas). Called only when a funded create is about to
- * be relayed (api `submit`) or by `ensure*` (tests and the resolver's own tools). Idempotent.
+ * Registers a planned question on the resolver. The RELAYER key is the resolver's question creator and pays the gas
+ * (createQuestion holds no money): the api role sends this and never holds the resolver key, which keeps the bond float
+ * and stays worker-only (testnet run 2026-11-02, bug 4). Called only when a funded create is about to be relayed (api
+ * `submit` / `prepareQuestion`) or by `ensure*` (tests and tools). Idempotent.
  */
 export async function registerPlanned(deps: Deps, id: Hex): Promise<void> {
   const [row] = await deps.db.select().from(questions).where(eq(questions.id, id));
@@ -80,9 +83,10 @@ export async function registerPlanned(deps: Deps, id: Hex): Promise<void> {
   const resolver = required(deps.clients.resolverContract, "RESOLVER_ADDRESS");
   const onchain = await readQuestion(deps, resolver, id);
   if (Number(onchain.state) === 0) {
+    if (!deps.clients.relayer) throw new Error("createQuestion failed: the relayer key (the resolver's question creator) is not configured");
     const r = await sendCall(
       deps,
-      deps.clients.resolver,
+      deps.clients.relayer,
       {
         address: resolver,
         abi: ifsoOutcomeResolverAbi,

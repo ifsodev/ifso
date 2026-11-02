@@ -1,4 +1,4 @@
-// R1-M7: `build` only PLANS a question (no chain write, no bond). The resolver key registers it when a funded
+// R1-M7: `build` only PLANS a question (no chain write, no bond). The relayer key (question creator) registers it when a funded
 // sender is about to create the escrow. Real Postgres, stubbed chain.
 import { afterAll, beforeAll, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { eq } from "drizzle-orm";

@@ -1,7 +1,8 @@
 // viem clients for Robinhood Chain. Three separate hot keys, each funded with a little ETH only:
-//  relayer  - submits claims, gasless creates/accepts, decisions, refund redirects (cannot redirect funds)
+//  relayer  - submits claims, gasless creates/accepts, decisions, refund redirects (cannot redirect funds); it is also
+//             the resolver's question creator (registers OUTCOME questions; gas only, no bond)
 //  keeper   - settle + refund sweeps (permissionless calls)
-//  resolver - registers questions, proposes outcomes with USDG bonds, disputes, finalizes
+//  resolver - proposes outcomes with USDG bonds, disputes, finalizes (worker only; never a question creator)
 import { createWalletClient, type Address } from "viem";
 import type { Account } from "viem/accounts";
 import { rhc, rhcTestnet } from "../config/chain";

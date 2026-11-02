@@ -29,11 +29,11 @@ const schema = z.object({
   KEEPER_SHADOW: z.string().optional(), //  "1": keeper and price watcher log decisions next to eth_call, never send
 
   // hot keys: encrypted keystore JSON v3 + password file (production). Raw *_PK is for a local anvil only (chain 31337).
-  RELAYER_KEYSTORE: z.string().optional(), //  submits claims / gasless creates / decisions (pays gas, can't redirect funds)
+  RELAYER_KEYSTORE: z.string().optional(), //  submits claims / gasless creates / decisions, registers OUTCOME questions (question creator; gas only)
   RELAYER_PASSWORD_FILE: z.string().optional(),
   KEEPER_KEYSTORE: z.string().optional(), //   settle + refund sweeps
   KEEPER_PASSWORD_FILE: z.string().optional(),
-  RESOLVER_KEYSTORE: z.string().optional(), // registers questions, proposes outcomes (holds USDG for bonds)
+  RESOLVER_KEYSTORE: z.string().optional(), // proposes / disputes / finalizes outcomes (holds USDG for bonds); not a question creator
   RESOLVER_PASSWORD_FILE: z.string().optional(),
   RELAYER_PK: hex.optional(),
   KEEPER_PK: hex.optional(),

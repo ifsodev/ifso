@@ -32,12 +32,12 @@ const ownerSafe = getAddress(dep.config.ownerMultisig) as Address, panelSafe = g
 
 mkdirSync(join(FORK_DIR, "keystores"), { recursive: true, mode: 0o700 });
 const keysFile = join(FORK_DIR, "keys.json");
-const keys: Record<string, Hex> = JSON.parse(readFileSync(keysFile, "utf8")); // made by fork-up.sh (needs the resolver address before the deploy)
+const keys: Record<string, Hex> = JSON.parse(readFileSync(keysFile, "utf8")); // made by fork-up.sh (needs the relayer address, the question creator, before the deploy)
 const people = ["alice", "bob", "carol", "dave", "erin", "fran", "gus", "heidi"];
 for (const p of people) if (!keys[p]) keys[p] = generatePrivateKey();
 writeFileSync(keysFile, JSON.stringify(keys), { mode: 0o600 });
 const acct = (n: string) => privateKeyToAccount(keys[n]!);
-if (acct("resolver").address.toLowerCase() !== (dep.config.resolverCreator as string).toLowerCase()) throw new Error("deployment resolverCreator is not the resolver key: run fork-up.sh, not setup.ts alone");
+if (acct("relayer").address.toLowerCase() !== (dep.config.resolverCreator as string).toLowerCase()) throw new Error("deployment resolverCreator is not the relayer key (the question creator): run fork-up.sh, not setup.ts alone");
 
 // ---- hot-key keystores (cast, encrypted) + password files
 const env: Record<string, string> = {};

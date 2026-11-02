@@ -28,16 +28,16 @@ anvil --fork-url "$UPSTREAM" -p "$ANVIL_PORT" --host 127.0.0.1 --block-time 1 --
 echo $! >"$FORK_DIR/anvil.pid"
 for _ in $(seq 1 60); do cast chain-id --rpc-url "http://127.0.0.1:$ANVIL_PORT" >/dev/null 2>&1 && break; sleep 0.5; done
 
-# the resolver service key must exist before the deploy (it becomes the registered question creator)
+# the service keys must exist before the deploy: the RELAYER key becomes the registered question creator
 cd "$app"
 bun -e '
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { writeFileSync } from "node:fs";
 const k = { relayer: generatePrivateKey(), keeper: generatePrivateKey(), resolver: generatePrivateKey() };
 writeFileSync(process.env.FORK_DIR + "/keys.json", JSON.stringify(k), { mode: 0o600 });
-console.log(privateKeyToAccount(k.resolver).address);
-' >"$FORK_DIR/resolver.addr"
-export RESOLVER_CREATOR="$(cat "$FORK_DIR/resolver.addr")"
+console.log(privateKeyToAccount(k.relayer).address);
+' >"$FORK_DIR/creator.addr"
+export RESOLVER_CREATOR="$(cat "$FORK_DIR/creator.addr")"
 
 echo "fork-up: deploy (contracts/script/fork-dryrun.sh)"
 (cd "$repo/contracts" && bash script/fork-dryrun.sh "$ANVIL_PORT") | tee "$FORK_DIR/logs/deploy.log" | tail -2

@@ -40,7 +40,7 @@ function can move, redirect or freeze escrowed USDG (invariant R7, `contracts/IN
 | IfsoEscrow | `setCreationPaused` | Pauses new payments and challenge accepts only; claim, settle, decisions, cancel and refund keep working | instant |
 | IfsoEscrow | `setMaxAmount` | Launch cap for new payments and accepts (0 removes it); never affects exits | instant |
 | IfsoConditionEvaluator | `setFeed`, `setPythId`, `setResolver` | Which feeds, price ids and resolvers new payments may use; existing payments are unaffected | instant |
-| IfsoOutcomeResolver | `setCreator` | Which service keys may register questions | instant |
+| IfsoOutcomeResolver | `setCreator` | Which service keys may register questions (the relayer key) | instant |
 | IfsoOutcomeResolver | `setBondAmount` | Bond for new proposals and disputes (10 to 10,000 USDG) | instant |
 | IfsoOutcomeResolver | `queuePanel` / `applyPanel` | Replaces the panel multisig | 48 h |
 | FeeRouter | `setRecipients` | Where creation fees are split (80 / 10 / 5 / 5) | instant |
@@ -49,8 +49,9 @@ function can move, redirect or freeze escrowed USDG (invariant R7, `contracts/IN
 ### Other roles
 - **Panel multisig**: decides disputed outcome questions within 72 h; if it stays silent the question is VOID and
   each side gets its own money back. It cannot touch any other payment.
-- **Resolver service**: registers questions and proposes results with a bond; anyone can dispute with a matching
-  bond. Its keys never hold user funds.
+- **Resolver service**: proposes results with a bond; anyone can dispute with a matching bond. Questions are
+  registered by the relayer key (the only question creator; gas only), so the resolver key with the bond float stays
+  on the worker. Its keys never hold user funds.
 - **Referee**: chosen per payment by the sender; can only release to the recipient or return to the sender.
 - **USDG issuer**: can freeze any address, including the escrow contract. A freeze of the escrow stops every exit.
   A frozen refund address of one side of a challenge never holds the other side's money: each side is paid on its
