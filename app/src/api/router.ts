@@ -61,6 +61,9 @@ export { paramsFromJson };
 function tickers(): Set<string> {
   return new Set(SEED_FEEDS.map((f) => f.ticker));
 }
+function stockTickers(): Set<string> {
+  return new Set(SEED_FEEDS.filter((f) => f.isStock).map((f) => f.ticker));
+}
 
 function gateDraft(ctx: Ctx, d: ConditionDraft | undefined) {
   if (d?.kind !== "PRICE") return;
@@ -274,7 +277,7 @@ export const appRouter = t.router({
   parse: t.procedure
     .input(z.object({ text: z.string().min(3).max(300), tzOffsetMin: z.number().int().optional() }))
     .query(({ input, ctx }) => {
-      const r = parseCommand(input.text, { nowMs: Date.now(), tzOffsetMin: input.tzOffsetMin, tickers: tickers() });
+      const r = parseCommand(input.text, { nowMs: Date.now(), tzOffsetMin: input.tzOffsetMin, tickers: tickers(), stockTickers: stockTickers() });
       if (r.condition?.kind === "PRICE") {
         const feed = SEED_FEEDS.find((f) => f.ticker === (r.condition as { ticker: string }).ticker);
         if (feed?.isStock && !stockPriceConditionAllowed(ctx.country)) r.errors.push(copy.preview.geoBlockedPrice);
@@ -295,7 +298,7 @@ export const appRouter = t.router({
       tzOffsetMin = it.tzOffsetMin ?? tzOffsetMin; // the offset the bot used, so the deadline is the same instant
     }
     if (!text) throw new TRPCError({ code: "BAD_REQUEST", message: "text or intentId required" });
-    const parsed = parseCommand(text, { nowMs: Date.now(), tzOffsetMin, tickers: tickers() });
+    const parsed = parseCommand(text, { nowMs: Date.now(), tzOffsetMin, tickers: tickers(), stockTickers: stockTickers() });
     if (!parsed.ok || !parsed.condition) throw new TRPCError({ code: "BAD_REQUEST", message: [...parsed.errors, ...parsed.ambiguities].join(" ") });
     gateDraft(ctx, parsed.condition);
 
@@ -553,7 +556,7 @@ export const appRouter = t.router({
   }),
 
   describe: t.procedure.input(z.object({ text: z.string().min(3).max(300) })).query(({ input }) => {
-    const r = parseCommand(input.text, { nowMs: Date.now(), tickers: tickers() });
+    const r = parseCommand(input.text, { nowMs: Date.now(), tickers: tickers(), stockTickers: stockTickers() });
     return r.condition ? describeCondition(r.condition) : null;
   }),
 });

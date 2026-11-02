@@ -20,6 +20,9 @@ export const copy = {
     challengeNeedsReferee: "For a challenge, name a referee (\"if @ref says so\") instead of both tapping OK.",
     challengeLinkPrivate: "Challenge links are private invites. Share it only with the person you mean.",
     inPast: "That time has already passed.",
+    tooSoon: (min: number) => `That is too soon. Pick a time at least ${min} minutes from now, so there is time to sign and send it.`,
+    tooSoonPriceChallenge: (min: number) =>
+      `That is too soon for a price challenge. Pick a deadline at least ${min} minutes from now, so the other person can accept before the price is known.`,
     badDate: (t: string) => `I couldn't read the date in "${t}". Try "on nov 1", "on the 1st", "by friday" or "in 3 days".`,
     unknownTicker: (t: string) => `${t} isn't available for price conditions yet.`,
     unknownCondition: (t: string) =>
@@ -45,6 +48,7 @@ export const copy = {
     optDayFirst: (d: string | number, m: string) => `${d} ${m}`,
     optMonthFirst: (d: string | number, m: string) => `${m} ${d}`,
     weekendRolled: "weekend date moved to Friday's close (US market hours)",
+    weekendRolledMonday: "weekend date moved to Monday's close (US market hours)",
     askWeekend: "US markets are closed that day. Which close should count?",
     optFridayClose: "Friday's close",
     optMondayClose: "Monday's close",

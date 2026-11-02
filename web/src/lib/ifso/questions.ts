@@ -2,6 +2,7 @@ import type { ParseQuestion, QuestionOption } from "./api";
 
 /** Replaces the first case-insensitive occurrence of `from`; the whole text is kept when `from` is not found. */
 export function replaceCI(text: string, from: string, to: string): string {
+  if (!from) return text; // an empty match would prepend `to` to the command ("2026-10-30/ifso ...")
   const i = text.toLowerCase().indexOf(from.toLowerCase());
   return i < 0 ? text : text.slice(0, i) + to + text.slice(i + from.length);
 }

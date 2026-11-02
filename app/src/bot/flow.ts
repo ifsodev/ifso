@@ -23,6 +23,8 @@ export interface FlowEnv {
   store: BotStore;
   publicAppUrl: string;
   tickers: ReadonlySet<string>;
+  /** stock tickers (New York market clock); the rest are crypto and use the user's zone */
+  stockTickers?: ReadonlySet<string>;
   fixtures?: FixtureLookup;
   now?: () => number;
 }
@@ -36,7 +38,7 @@ type Evaluated =
   | { t: "ready"; r: ParseResult; text: string; extra: string[] };
 
 async function evaluate(e: FlowEnv, text: string, user: { tz: string | null; tzOffsetMin: number } | undefined): Promise<Evaluated> {
-  const r = parseCommand(text, { nowMs: nowOf(e), tz: user?.tz ?? undefined, tzOffsetMin: user?.tzOffsetMin ?? 0, tickers: e.tickers });
+  const r = parseCommand(text, { nowMs: nowOf(e), tz: user?.tz ?? undefined, tzOffsetMin: user?.tzOffsetMin ?? 0, tickers: e.tickers, stockTickers: e.stockTickers });
   if (r.errors.length) return { t: "error", text: r.errors.join("\n") };
   if (r.questions[0]) return { t: "question", q: r.questions[0], r };
   if (r.ambiguities.length) return { t: "error", text: r.ambiguities.join("\n") };

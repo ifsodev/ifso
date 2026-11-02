@@ -34,6 +34,9 @@ export interface ParseContext {
   tz?: string;
   /** tickers with a registered price feed (upper-case) */
   tickers: ReadonlySet<string>;
+  /** the subset that are stocks (US market hours, New York clock). Others (crypto) trade around the clock and use
+   *  the user's zone. When omitted, every ticker except ETH and BTC counts as a stock. */
+  stockTickers?: ReadonlySet<string>;
   /** optional last prices (8-dec feed units, underlying terms) to infer the direction of "hits 200" */
   lastPrice?: Readonly<Record<string, number>>;
 }
@@ -81,6 +84,12 @@ const HEAD = new RegExp(
     String.raw`)?\s+(if|when|on|at|in|once)\s+(.+)$`,
   "i",
 );
+
+/** Seconds a deadline must lie ahead: time to sign and send (the contract refuses a deadline already reached). */
+export const MIN_LEAD = 120;
+/** A price challenge must stay open to accept until acceptBy + maxStale < deadline (contract), with the builder's
+ *  minimum acceptance window on top. */
+export const MIN_LEAD_PRICE_CHALLENGE = DEFAULTS.challengeMaxStale + DEFAULTS.challengeMinAcceptWindow + 60;
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_SHORT = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -130,6 +139,13 @@ export function parseCommand(input: string, ctx: ParseContext): ParseResult {
     res.errors.push(copy.parse.inPast);
   }
   if (res.condition?.kind === "TIME" && res.condition.at * 1000 <= ctx.nowMs) res.errors.push(copy.parse.inPast);
+  if (res.condition && !res.errors.includes(copy.parse.inPast)) {
+    const at = res.condition.kind === "TIME" ? res.condition.at : "deadline" in res.condition ? res.condition.deadline : 0;
+    const priceChallenge = res.twoSided && res.condition.kind === "PRICE" && res.condition.mode === "AT_DEADLINE";
+    const lead = priceChallenge ? MIN_LEAD_PRICE_CHALLENGE : MIN_LEAD;
+    if (at > 0 && at * 1000 < ctx.nowMs + lead * 1000)
+      res.errors.push(priceChallenge ? copy.parse.tooSoonPriceChallenge(Math.ceil(lead / 60)) : copy.parse.tooSoon(Math.ceil(lead / 60)));
+  }
 
   for (const q of res.questions)
     for (const o of q.options) {
@@ -161,6 +177,7 @@ export function expiryFor(c: ConditionDraft, nowSec: number): number | undefined
 
 /** Replaces the first case-insensitive occurrence; falls back to the whole text when `from` is not found. */
 export function replaceCI(text: string, from: string, to: string): string {
+  if (!from) return text; // an empty match would prepend `to` to the command ("2026-10-30/ifso ...")
   const i = text.toLowerCase().indexOf(from.toLowerCase());
   return i < 0 ? text : text.slice(0, i) + to + text.slice(i + from.length);
 }
@@ -210,10 +227,11 @@ function parseCondition(t: string, conn: string, ctx: ParseContext, res: ParseRe
 
   // ---- PRICE
   const pm = lower.match(
-    /^\$?([a-z]{1,6})\s+(?:(closes|close|ends|finishes|settles|is|trades|stays|hits|touches|reaches|tops|breaks|crosses|goes|gets)\s+)?(?:(at or above|at or below|above|over|below|under|>=|<=|>|<)\s+)?\$?(\d{1,7}(?:\.\d{1,8})?)(?:\s+(by|on|at|before|this|next)\s+(.+))?$/,
+    /^\$?([a-z]{1,6})\s+(?:(closes|close|ends|finishes|settles|is|trades|stays|hits|touches|reaches|tops|breaks|crosses|goes|gets)\s+)?(?:(at or above|at or below|above|over|below|under|>=|<=|>|<)\s+)?\$?(\d{1,7}(?:\.\d{1,8})?)(?:\s+(by|on|at|before|this|next|in)\s+(.+))?$/,
   );
   if (pm && ctx.tickers.has(pm[1]!.toUpperCase())) {
     const ticker = pm[1]!.toUpperCase();
+    const isStock = ctx.stockTickers ? ctx.stockTickers.has(ticker) : ticker !== "ETH" && ticker !== "BTC";
     const verb = pm[2] ?? "";
     const dirWord = pm[3] ?? "";
     const price = pm[4]!;
@@ -239,7 +257,7 @@ function parseCondition(t: string, conn: string, ctx: ParseContext, res: ParseRe
       });
     if (!verb || verb === "is" || verb === "trades" || verb === "stays") res.notes.push(copy.parse.atDeadlineMeaning);
 
-    const prepWhen = pm[5] ? `${pm[5] === "this" || pm[5] === "next" ? pm[5] + " " : ""}${pm[6]}` : undefined;
+    const prepWhen = pm[5] ? `${pm[5] === "this" || pm[5] === "next" || pm[5] === "in" ? pm[5] + " " : ""}${pm[6]}` : undefined;
     let deadline: number | undefined;
     if (!prepWhen)
       ask(res, {
@@ -252,7 +270,10 @@ function parseCondition(t: string, conn: string, ctx: ParseContext, res: ParseRe
         ],
       });
     else {
-      deadline = parseWhen(prepWhen, ctx.nowMs, 0, touch ? 20 : 16, res, true, ctx.tz);
+      // stocks follow the New York market clock; crypto trades around the clock, so the user's own zone counts
+      deadline = isStock
+        ? parseWhen(prepWhen, ctx.nowMs, 0, touch ? 20 : 16, res, true, ctx.tz)
+        : parseWhen(prepWhen, ctx.nowMs, ctx.tzOffsetMin ?? 0, touch ? 20 : 16, res, false, ctx.tz);
       if (deadline === undefined && !res.ambiguities.length) res.errors.push(copy.parse.badDate(prepWhen));
     }
     return {
@@ -314,6 +335,8 @@ export function parseWhen(
   tzName?: string,
 ): number | undefined {
   let p = phrase.toLowerCase().trim().replace(/^(by|on|at|before)\s+/, "");
+  const said = p; // the words as typed (after "by"), so an answer can replace exactly them
+  let timeWords = "";
   let hour = defaultHour;
   let minute = 0;
   let explicitTime = false;
@@ -326,6 +349,7 @@ export function parseWhen(
     hour = h;
     minute = Number(tm[2] ?? 0);
     explicitTime = true;
+    timeWords = tm[0].trim();
     p = p.slice(0, tm.index).trim();
   }
   if (p === "noon") {
@@ -353,7 +377,8 @@ export function parseWhen(
 
   let matched = false;
   if (p === "" && explicitTime) {
-    matched = true; // "at 5pm" = today
+    matched = true; // "at 5pm" = the next 5pm: today, or tomorrow once today's has passed
+    if (wallToUnix(y, mo, d, hour, minute, offMin) * 1000 <= nowMs) d += 1;
   } else if (p === "today" || p === "tonight" || p === "end of day" || p === "eod" || p === "the close" || p === "close") {
     matched = true;
     if (p === "tonight" && !explicitTime) hour = 21;
@@ -441,16 +466,25 @@ export function parseWhen(
       const ymd = (t: Date) => `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
       const fri = new Date(Date.UTC(y, mo, d - (wday === 6 ? 1 : 2)));
       const mon = new Date(Date.UTC(y, mo, d + (wday === 6 ? 2 : 1)));
-      dd -= wday === 6 ? 1 : 2;
-      res.notes.push(copy.parse.weekendRolled);
-      ask(res, {
-        kind: "weekend",
-        text: copy.parse.askWeekend,
-        options: [
-          { label: copy.parse.optFridayClose, replace: [p, ymd(fri)] },
-          { label: copy.parse.optMondayClose, replace: [p, ymd(mon)] },
-        ],
-      });
+      const at = (t: Date) => `${ymd(t)}${timeWords ? " " + timeWords : ""}`;
+      const friPassed = nyWallClockToUnix(fri.getUTCFullYear(), fri.getUTCMonth() + 1, fri.getUTCDate(), hour, minute) * 1000 <= nowMs;
+      if (friPassed) {
+        // Friday's close is already behind us: Monday's is the only one left, so no question
+        dd += wday === 6 ? 2 : 1;
+        res.notes.push(copy.parse.weekendRolledMonday);
+      } else {
+        dd -= wday === 6 ? 1 : 2;
+        res.notes.push(copy.parse.weekendRolled);
+        // each answer replaces the date words exactly as typed (never an empty match), so it rebuilds a valid command
+        ask(res, {
+          kind: "weekend",
+          text: copy.parse.askWeekend,
+          options: [
+            { label: copy.parse.optFridayClose, replace: [said, at(fri)] },
+            { label: copy.parse.optMondayClose, replace: [said, at(mon)] },
+          ],
+        });
+      }
     }
     unix = nyWallClockToUnix(target.getUTCFullYear(), target.getUTCMonth() + 1, dd, hour, minute);
   }

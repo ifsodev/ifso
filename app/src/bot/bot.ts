@@ -38,6 +38,7 @@ export function createBot(deps: Deps, opts: BotOptions = {}): Bot | undefined {
     store: opts.store ?? drizzleBotStore(deps.db),
     publicAppUrl: deps.env.PUBLIC_APP_URL,
     tickers: new Set(SEED_FEEDS.map((f) => f.ticker)),
+    stockTickers: new Set(SEED_FEEDS.filter((f) => f.isStock).map((f) => f.ticker)),
     fixtures: opts.fixtures ?? ((team, opp, on) => listFixtureMatches(deps, team, opp, on)),
     now: opts.now,
   };
