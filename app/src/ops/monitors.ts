@@ -7,7 +7,7 @@ import { SEED_FEEDS, type FeedInfo } from "../config/chain";
 import type { Env } from "../config/env";
 import { escrows, questions, cursors, chainEvents } from "../db/schema";
 import { isStockFeedSession, stockFeedOpenSeconds } from "../core/price";
-import { Status } from "../core/types";
+import { Kind, PRICE_TOUCH, Status } from "../core/types";
 import type { Deps } from "../workers/deps";
 import type { AlertFn } from "./alerts";
 
@@ -21,13 +21,21 @@ const QUESTION_DISPUTED = 3; // proposal disputed, waiting on the panel
 /** Pure thresholds, so each alert is unit-testable without a database. */
 export const keeperLagged = (decidableSince: Date, now: Date) => now.getTime() - decidableSince.getTime() > KEEPER_LAG_MS;
 export const indexerBehind = (head: bigint, cursor: bigint) => head - cursor > INDEXER_MAX_BEHIND;
+/**
+ * Testnet run 2026-11-01: an OPEN escrow past its deadline is lagging only when the keeper could settle it. A PRICE TOUCH
+ * whose level was never reached cannot be settled after its deadline (it pays early on a touch, else it comes back at
+ * expiry through the refund sweep), so it is not counted.
+ */
+export const keeperShouldHaveSettled = (row: { kind: number; condition: unknown }) =>
+  !(row.kind === Kind.PRICE && Number((row.condition as { mode?: unknown } | null)?.mode) === PRICE_TOUCH);
 export const lowBalance = (wei: bigint, minEth: number) => Number(formatEther(wei)) < minEth;
 
 export async function runMonitors(deps: Deps, alert: AlertFn, now = new Date()) {
   const { db, clients, env } = deps;
   // keeper lag: an escrow whose deadline passed more than 10 minutes ago is still open
   const cutoff = new Date(now.getTime() - KEEPER_LAG_MS);
-  const lagging = await db.select({ id: escrows.id }).from(escrows).where(and(eq(escrows.status, Status.OPEN), lt(escrows.deadline, cutoff))).limit(5);
+  const lagging = (await db.select({ id: escrows.id, kind: escrows.kind, condition: escrows.condition }).from(escrows).where(and(eq(escrows.status, Status.OPEN), lt(escrows.deadline, cutoff), sql`not (${escrows.kind} = ${Kind.PRICE} and ${escrows.condition}->>'mode' = ${String(PRICE_TOUCH)})`)).limit(5))
+    .filter(keeperShouldHaveSettled); // same rule as the SQL above, kept as the unit-tested definition
   if (lagging.length) await alert("keeper-lag", `escrows decidable for over 10 minutes and not settled: ${lagging.map((r) => r.id).join(", ")}`);
 
   const earliest = new Date(now.getTime() - RESOLVER_UNPROPOSED_MS);
