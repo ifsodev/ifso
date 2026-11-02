@@ -65,3 +65,9 @@ export function feedsFor(chainId: string | undefined, testnetFeeds: string | und
 }
 
 export const SEED_FEEDS: FeedInfo[] = feedsFor(process.env.CHAIN_ID, process.env.TESTNET_FEEDS);
+
+/** The ticker a price condition's feed stands for ("ETH"), so pages can name it instead of the feed address. */
+export function tickerForFeed(feed: string | undefined, feeds: readonly FeedInfo[] = SEED_FEEDS): string | undefined {
+  if (!feed) return undefined;
+  return feeds.find((f) => f.feed.toLowerCase() === feed.toLowerCase())?.ticker;
+}

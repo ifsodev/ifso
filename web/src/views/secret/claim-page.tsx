@@ -86,7 +86,7 @@ function Summary({ view }: { view: EscrowView }) {
     <>
       <p className="sx-label">Read from the chain</p>
       <p className="sx-amount">{view.amountText} USDG</p>
-      <p>{describeOnChainCondition(view.condition)}</p>
+      <p>{describeOnChainCondition(view.condition, view.ticker)}</p>
       <div className="sx-row">
         <span>From</span>
         <span>{shortAddress(e.sender)}</span>

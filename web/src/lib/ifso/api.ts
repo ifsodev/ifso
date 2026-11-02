@@ -105,6 +105,8 @@ export interface EscrowView {
   escrow: EscrowRow;
   condition: Record<string, unknown>;
   amountText: string;
+  /** a price condition's ticker ("ETH"), when the service knows its feed */
+  ticker?: string;
 }
 export interface MineRow {
   id: string;

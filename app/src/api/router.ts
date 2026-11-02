@@ -13,7 +13,7 @@ import { formatUsdg } from "../core/money";
 import { describeCondition, parseCommand, type ConditionDraft } from "../core/parser";
 import { createAuthorizationTypedData, DecisionAction } from "../core/typedData";
 import { Kind, type CreateParams } from "../core/types";
-import { SEED_FEEDS } from "../config/chain";
+import { SEED_FEEDS, tickerForFeed, type FeedInfo } from "../config/chain";
 import { escrows, intents, questions, tgUsers } from "../db/schema";
 import { required } from "../chain";
 import { sendCall, simulate } from "../workers/tx";
@@ -61,6 +61,12 @@ export { paramsFromJson };
 function tickers(): Set<string> {
   return new Set(SEED_FEEDS.map((f) => f.ticker));
 }
+/** The `escrow` answer: chain state as read, plus the ticker of a price condition's feed (claim and challenge pages). */
+export function escrowView(e: { amount: bigint }, c: { kind: number | bigint; target?: string }, feeds: readonly FeedInfo[] = SEED_FEEDS) {
+  const ticker = Number(c.kind) === Kind.PRICE ? tickerForFeed(c.target, feeds) : undefined;
+  return jsonSafe({ escrow: e, condition: c, amountText: formatUsdg(e.amount), ...(ticker ? { ticker } : {}) });
+}
+
 function stockTickers(): Set<string> {
   return new Set(SEED_FEEDS.filter((f) => f.isStock).map((f) => f.ticker));
 }
@@ -454,7 +460,7 @@ export const appRouter = t.router({
     await readBudget(ctx); // audit L-2
     const { e, c } = await readEscrow(ctx.deps, input.id);
     if (e.status === 0) throw new TRPCError({ code: "NOT_FOUND" });
-    return jsonSafe({ escrow: e, condition: c, amountText: formatUsdg(e.amount) });
+    return escrowView(e as never, c as never);
   }),
 
   claim: t.procedure.input(z.object({ id: uint, recipient: addr, signature: hex })).mutation(async ({ input, ctx }) => {
