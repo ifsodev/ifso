@@ -59,4 +59,9 @@ The local run uses a prefix install and no real users or sudo. The Linux run nee
 - With Docker: `bash app/scripts/release/sandbox/docker-sandbox.sh` (Ubuntu 24.04; real `install.sh`, real users, real sudoers, `visudo -c`, the runner reaching every wrapper through `sudo -n`).
 - Without Docker: the VPS rehearsal. Pause the queue, copy this folder to the server, `sudo bash sandbox/run-sandbox.sh --linux` (it works only under its own scratch folder and a fake deploy), then deploy the already-live sha once through `ifso-deploy-release` as the release user and check every service is healthy, then resume.
 
+The gate calls plain `bun`, so bun must be on the service's default PATH: `/usr/local/bin/bun`, where `provision.sh` (Ifso's own
+server) installs it. The co-host layout (`provision-cohost.sh`) keeps bun in `/opt/ifso/bin`, so the runner does not run there;
+`arm.sh` refuses anyway, because the preflight it needs fails with `bun: No such file or directory`. Values with spaces in
+`paths.conf` must be double-quoted (the wrappers source the file with bash).
+
 The Linux run has not been done for this version; do not arm before it passes.

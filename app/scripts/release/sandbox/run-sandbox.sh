@@ -70,6 +70,11 @@ ok "release.env is mode 0600" test "$(stat -c '%a' "$ETC/release.env" 2>/dev/nul
 FAKES="$BASE/fakes"; mkdir -p "$FAKES"; cp "$HERE"/fakes/* "$FAKES/"; chmod +x "$FAKES"/*
 chown -R "$RUSER" "$BASE" 2>/dev/null || true
 [[ $MODE == local ]] && export IFSO_RELEASE_TEST_PATH="$FAKES"   # flock stand-in for hosts without flock(1)
+# Linux: bun where provision.sh puts it on the server (/usr/local/bin), so the gate run through sudo's clean PATH (preflight,
+# the systemd unit) finds it exactly as in production. The shim keeps the fake's dirname, which holds sandbox.env.
+if [[ $MODE == linux ]]; then printf '#!/bin/sh
+exec %s/bun "$@"
+' "$FAKES" >/usr/local/bin/bun; chmod 0755 /usr/local/bin/bun; fi
 KEY="$BASE/key"; ssh-keygen -q -t ed25519 -N '' -f "$KEY" -C sandbox; chmod 600 "$KEY"; chmod 644 "$KEY.pub"; chown "$RUSER" "$KEY" "$KEY.pub" 2>/dev/null || true
 echo "owner@example.invalid $(cat "$KEY.pub")" >"$ETC/allowed_signers"
 PUBKEY_LINE="$(cat "$KEY.pub")"; : "$PUBKEY_LINE"
@@ -126,8 +131,9 @@ new_world() { # new_world <name>
   setconf FORBIDDEN_FILE "$ETC/forbidden.txt"
   setconf INFRA_RETRY_S 0; setconf VERIFY_TRIES 2; setconf VERIFY_RETRY_S 0; setconf GAP_SLEEP 0; setconf PREFLIGHT_AUTO 0
   setconf FETCH_WAIT 0; setconf TRANSIENT_MAX_PASSES 6; setconf IFSO_SANDBOX 1; setconf DISK_MIN_GB 0
-  setconf DEPLOY_CMD "sudo -n $SBIN/ifso-deploy-release"; setconf NOTIFY_CMD "sudo -n $SBIN/ifso-release-notify"
-  setconf GHRELEASE_CMD "sudo -n $SBIN/ifso-release-ghrelease"; setconf PREFLIGHT_DIR "$W/home/preflight"
+  # Linux: no *_CMD lines, so the runner uses its built-in `sudo -n /usr/local/sbin/...` defaults, exactly as on the server
+  # (an unquoted "sudo -n ..." value would also break every wrapper that sources paths.conf).
+  setconf PREFLIGHT_DIR "$W/home/preflight"
   [[ $MODE == local ]] && { setconf DEPLOY_CMD "$SBIN/ifso-deploy-release"; setconf NOTIFY_CMD "$SBIN/ifso-release-notify"; setconf GHRELEASE_CMD "$SBIN/ifso-release-ghrelease"; }
   setconf TELEGRAM_API_BASE "x"; grep -v '^TELEGRAM_API_BASE=' "$CONF" >"$CONF.new"; cat "$CONF.new" >"$CONF"; rm -f "$CONF.new"
   printf 'TELEGRAM_BOT_TOKEN=123456:SANDBOXTESTTOKEN\nTELEGRAM_OPS_CHAT_ID=-100123\nTELEGRAM_API_BASE=http://127.0.0.1:%s\nGITHUB_RELEASE_TOKEN=sandbox-not-a-token\nPUBLIC_REPO=ifsodev/public-sandbox\nGITHUB_API_BASE=http://127.0.0.1:%s\nGITHUB_UPLOAD_BASE=http://127.0.0.1:%s/uploads\n' \
