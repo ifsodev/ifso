@@ -39,6 +39,14 @@ cast wallet import ifso-fork --keystore-dir "$tmp" --unsafe-password "fork" \
   --private-key "$(first .private_key <<<"$wallet")" >/dev/null
 unset wallet
 cast rpc anvil_setBalance "$deployer" 0x56BC75E2D63100000 --rpc-url "$rpc" >/dev/null # 100 ETH, fork only
+# The Safes come from a second throwaway wallet, as on mainnet (the owner makes them from his own wallet), so the
+# deployer is still at nonce 0 when Deploy.s.sol starts and the dry-run addresses match a real first deploy.
+maker_wallet="$(cast wallet new --json)"
+maker="$(first .address <<<"$maker_wallet")"
+cast wallet import ifso-fork-maker --keystore-dir "$tmp" --unsafe-password "fork" \
+  --private-key "$(first .private_key <<<"$maker_wallet")" >/dev/null
+unset maker_wallet
+cast rpc anvil_setBalance "$maker" 0x8AC7230489E80000 --rpc-url "$rpc" >/dev/null # 10 ETH, fork only
 
 # Two fresh 2-of-3 Safes (SafeL2 1.4.1 singleton + factory, verified on 4663 in chain-facts.md)
 SAFE_L2=0x29fcB43b46531BcA003ddC8FCB67FFE91900C762
@@ -51,9 +59,9 @@ make_safe() {
     0x0000000000000000000000000000000000000000)"
   salt="$1"
   addr="$(cast call "$SAFE_FACTORY" 'createProxyWithNonce(address,bytes,uint256)(address)' "$SAFE_L2" "$init" "$salt" \
-    --from "$deployer" --rpc-url "$rpc")"
+    --from "$maker" --rpc-url "$rpc")"
   cast send "$SAFE_FACTORY" 'createProxyWithNonce(address,bytes,uint256)' "$SAFE_L2" "$init" "$salt" \
-    --keystore "$tmp/ifso-fork" --password fork --rpc-url "$rpc" >/dev/null
+    --keystore "$tmp/ifso-fork-maker" --password fork --rpc-url "$rpc" >/dev/null
   echo "$addr"
 }
 OWNER_MULTISIG="$(make_safe "$RANDOM$RANDOM")"
@@ -65,6 +73,8 @@ export RESOLVER_CREATOR="${RESOLVER_CREATOR:-$(new_addr)}" FEE_WORK="${FEE_WORK:
 export GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 export IFSO_FORK_DRYRUN=1 IFSO_ARMED=0
 
+nonce="$(cast nonce "$deployer" --rpc-url "$rpc")"
+[ "$nonce" = "0" ] || { echo "fork-dryrun: deployer nonce is $nonce, expected 0 (a real first deploy)" >&2; exit 1; }
 forge script script/Deploy.s.sol --rpc-url "$rpc" --keystore "$tmp/ifso-fork" --password "fork" \
   --sender "$deployer" --broadcast --slow -q
 
