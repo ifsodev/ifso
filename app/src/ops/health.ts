@@ -2,6 +2,7 @@
 import { formatEther, formatUnits, erc20Abi } from "viem";
 import { sql } from "drizzle-orm";
 import type IORedis from "ioredis";
+import { ifsoOutcomeResolverAbi } from "../abi";
 import type { Deps } from "../workers/deps";
 
 export type Probe = () => Promise<string | null>;
@@ -38,6 +39,16 @@ export function defaultProbes(deps: Deps, redis?: IORedis): Record<string, Probe
       return low.length ? low.join(", ") : null;
     }),
   };
+  // Audit I-9: the api registers outcome questions with the RELAYER key (the resolver's question creator). A deploy
+  // that registered another address would fail every funded outcome create, so /readyz says so.
+  if (clients.resolverContract && clients.relayer?.account) {
+    const resolver = clients.resolverContract;
+    const relayer = clients.relayer.account.address;
+    probes.questionCreator = guard("question creator check failed", async () => {
+      const ok = await clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "isCreator", args: [relayer] });
+      return ok ? null : `relayer ${relayer} is not a question creator on the outcome resolver ${resolver} (setCreator)`;
+    });
+  }
   if (redis) probes.redis = guard("redis down", async () => ((await redis.ping()) === "PONG" ? null : "redis bad reply"));
   return probes;
 }

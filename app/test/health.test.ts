@@ -39,6 +39,27 @@ describe("health (R7)", () => {
     const poor = mkDeps({ relayer: { account: { address: "0x00000000000000000000000000000000000000ee" } }, publicClient: { getBlock: async () => ({ timestamp: BigInt(Math.floor(Date.now() / 1000)) }), getBalance: async () => 0n } });
     expect((await readiness(defaultProbes(poor))).reasons.join()).toContain("relayer ETH low");
   });
+  test("audit I-9: 503 when the relayer is not the resolver's question creator, 200 when it is", async () => {
+    const relayer = "0x00000000000000000000000000000000000000ee";
+    const resolverContract = "0x00000000000000000000000000000000000000aa";
+    const asked: unknown[] = [];
+    const withCreator = (isCreator: boolean) =>
+      mkDeps({
+        relayer: { account: { address: relayer } },
+        resolverContract,
+        publicClient: {
+          getBlock: async () => ({ timestamp: BigInt(Math.floor(Date.now() / 1000)) }),
+          getBalance: async () => 10n ** 18n,
+          readContract: async (a: { functionName: string; args: unknown[]; address: string }) => (asked.push([a.address, a.functionName, ...a.args]), isCreator),
+        },
+      });
+    const bad = await createApp(withCreator(false), new RateLimiter(), undefined, defaultProbes(withCreator(false))).request("/readyz");
+    expect(bad.status).toBe(503);
+    expect(((await bad.json()) as { reasons: string[] }).reasons.join()).toContain(`relayer ${relayer} is not a question creator`);
+    expect(asked).toContainEqual([resolverContract, "isCreator", relayer]);
+    const good = await createApp(withCreator(true), new RateLimiter(), undefined, defaultProbes(withCreator(true))).request("/readyz");
+    expect(good.status).toBe(200);
+  });
   test("a throwing probe becomes a reason, not a crash", async () => {
     expect((await readiness({ x: guard("x broke", async () => { throw new Error("no"); }) })).ok).toBe(false);
   });
