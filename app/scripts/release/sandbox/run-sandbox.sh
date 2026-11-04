@@ -93,6 +93,9 @@ new_world() { # new_world <name>
   mkdir -p "$S/app/src/api/routes" "$S/app/test"
   echo '{"name":"app"}' >"$S/app/package.json"; echo lock >"$S/app/bun.lock"; echo "export {}" >"$S/app/src/main.ts"
   echo "// banned words scan placeholder" >"$S/app/test/bannedWords.test.ts"
+  # the real repo carries its own pattern files; the scan must not flag them (install.sh seeds forbidden.txt from the example)
+  mkdir -p "$S/app/scripts/release" "$S/.githooks"; cp "$REL/forbidden.txt.example" "$S/app/scripts/release/forbidden.txt.example"
+  cp "$ETC/forbidden.txt" "$S/.githooks/public-guard.denylist"
   sg add -A; sg commit -q -m "chore: base of the sandbox"
   M0="$(git -C "$S" rev-parse HEAD)"
   git -C "$S" push -q "$W/private.git" main

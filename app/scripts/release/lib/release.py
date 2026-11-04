@@ -1118,6 +1118,10 @@ def cmd_remap(args):
     return 0
 
 
+# The files that hold the forbidden patterns themselves (install.sh seeds forbidden.txt from the example), never "hits".
+PATTERN_FILES = [":(exclude)app/scripts/release/forbidden.txt.example", ":(exclude).githooks/public-guard.denylist"]
+
+
 def cmd_scan_queue():
     """Forbidden-word scan of EVERY queue tree (the added and changed text), not only the diff of one commit: a word in an
     early update would be copied to the public repo at its slot. Patterns: FORBIDDEN_FILE, one regex per line."""
@@ -1128,7 +1132,7 @@ def cmd_scan_queue():
     sched = schedule()
     bad = 0
     for u in sched["updates"]:
-        c, out = run(["git", "-c", "safe.directory=*", "-C", CFG["queue_repo"], "grep", "-I", "-i", "-l", "-E", "|".join(f"({p})" for p in pats), u["sha"], "--"])
+        c, out = run(["git", "-c", "safe.directory=*", "-C", CFG["queue_repo"], "grep", "-I", "-i", "-l", "-E", "|".join(f"({p})" for p in pats), u["sha"], "--", *PATTERN_FILES])
         msg = subprocess.run(["git", "-C", CFG["queue_repo"], "log", "-1", "--format=%B", u["sha"]], capture_output=True, text=True).stdout
         mhit = [p for p in pats if re.search(p, msg, re.I)]
         if c == 0 or mhit:
