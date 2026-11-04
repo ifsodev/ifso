@@ -145,5 +145,14 @@ echo "== A1: the automatic preflight outlives the oneshot pass (systemd would ki
 ok "ifso-release.service keeps the detached preflight alive (KillMode=process)" grep -qx 'KillMode=process' "$HERE/../systemd/ifso-release.service"
 ok "the runner starts the preflight in its own session (detached)" grep -q 'start_new_session=True' "$HERE/../lib/release.py"
 
+echo "== C11: install.sh installs anvil for the gate, checksum-verified (tests are never skipped for a missing tool)"
+mkdir -p "$W/fdry"; printf '#!/bin/sh\necho anvil-stand-in\n' >"$W/fdry/anvil"; chmod +x "$W/fdry/anvil"; printf 'x\n' >"$W/fdry/forge"
+tar -czf "$W/foundry.tar.gz" -C "$W/fdry" anvil forge
+SUM="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$W/foundry.tar.gz")"
+FOUNDRY_TARBALL="$W/foundry.tar.gz" FOUNDRY_SHA256="$(printf '0%.0s' {1..64})" SYNC_PUBLIC_SRC="$W/sync-public.py" INST "$W/pfx3" >"$W/inst4.out" 2>&1; rc=$?
+ok "a foundry tarball with the wrong sha256 is refused and nothing is installed" bash -c "[[ $rc != 0 ]] && grep -qi 'sha256' '$W/inst4.out' && test ! -e '$W/pfx3/usr/local/bin/anvil'"
+FOUNDRY_TARBALL="$W/foundry.tar.gz" FOUNDRY_SHA256="$SUM" SYNC_PUBLIC_SRC="$W/sync-public.py" INST "$W/pfx3" >"$W/inst5.out" 2>&1
+ok "the verified tarball installs anvil (only anvil) for the gate" bash -c "test -x '$W/pfx3/usr/local/bin/anvil' && test ! -e '$W/pfx3/usr/local/bin/forge'"
+
 echo "hardening cases: $PASS passed, $FAIL failed"
 [[ $FAIL == 0 ]]

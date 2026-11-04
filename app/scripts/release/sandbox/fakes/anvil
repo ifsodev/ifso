@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stand-in for anvil: the gate only checks that it exists before running tests that start a local chain.
+exit 0

@@ -90,6 +90,8 @@ chown -R "$RUSER" "$BASE" 2>/dev/null || true
 if [[ $MODE == linux ]]; then printf '#!/bin/sh
 exec %s/bun "$@"
 ' "$FAKES" >/usr/local/bin/bun; chmod 0755 /usr/local/bin/bun; fi
+# ... and anvil (install.sh puts the real one in /usr/local/bin from a checksum-verified foundry tarball)
+[[ $MODE == linux ]] && install -m 0755 "$FAKES/anvil" /usr/local/bin/anvil
 KEY="$BASE/key"; ssh-keygen -q -t ed25519 -N '' -f "$KEY" -C sandbox; chmod 600 "$KEY"; chmod 644 "$KEY.pub"; chown "$RUSER" "$KEY" "$KEY.pub" 2>/dev/null || true
 # allowed_signers: install.sh already put the SERVER's signing key in (the key every runner-made commit is signed with); the
 # owner's key (the queue commits) is added the way the README says, appended
@@ -123,6 +125,7 @@ new_world() { # new_world <name>
   for n in 01 02 03; do
     echo "export const tu$n = true" >"$S/app/src/api/routes/tu$n.ts"
     echo "// test $n" >"$S/app/test/tu$n.test.ts"
+    [[ $n == 01 ]] && echo "// starts a local anvil chain" >>"$S/app/test/tu$n.test.ts"   # a test that needs anvil is run, not skipped
     [[ $n == 03 ]] && echo perk >"$S/app/src/api/routes/tu03.perk" && echo "export const page = 3" >"$S/web/src/tu03.tsx"   # TU03 also changes web/
     sg add -A; sg commit -q -m "feat(api): TU$n sandbox update $n"
   done
@@ -240,6 +243,7 @@ ok "crash mid-release: state says push NOT done yet" bash -c "! python3 -c 'impo
 rpass
 ok "crash mid-release: next pass adopted the push and released TU03" test "$(st TU03)" = released
 ok "crash mid-release: exactly one TU03 commit on main" test "$(main_subjects | grep -c 'TU03')" = 1
+ok "a changed test that spawns anvil is run by the gate (never skipped)" bash -c "python3 -c 'import json,sys; g=json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU01\"][\"gate\"]; sys.exit(0 if \"test/tu01.test.ts\" in g[\"tests\"] else 1)'"
 ok "world 1: 3 of 3 released" bash -c "test '$(st TU01)' = released -a '$(st TU02)' = released -a '$(st TU03)' = released"
 ok "world 1: public copy caught up (no publicPending left)" test -z "$(st TU02 publicPending)"
 ok "world 1: public tree == private tree" public_equals_private
@@ -403,6 +407,10 @@ runarm() { # runarm [KEY=VALUE...]: the real arm.sh as root (Linux) or under the
   if [[ $MODE == linux ]]; then env "$@" SYSTEMCTL="$SYSTEMCTL" LAUNCH_AT="$FUTURE" bash "$REL/arm.sh" >"$W/arm.out" 2>&1
   else env "$@" PREFIX="$PFX" SYSTEMCTL=true LAUNCH_AT="$FUTURE" bash "$REL/arm.sh" >"$W/arm.out" 2>&1; fi
 }
+setconf GATE_ANVIL no-such-anvil-here
+as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4-noanvil.out" 2>&1
+ok "no anvil on the server: the update whose test needs it FAILS preflight with a clear reason (not skipped)" bash -c "grep -q 'TU01: FAIL.*anvil' '$W/pf-w4-noanvil.out' && grep -q 'TU02: PASS' '$W/pf-w4-noanvil.out'"
+setconf GATE_ANVIL anvil
 as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4a.out" 2>&1
 ok "preflight on the base main: 3 of 3 PASS" grep -q "preflight: 3 of 3 PASS" "$W/home/preflight/status"
 # an owner fix lands on private main AFTER that preflight: its results no longer say anything about the new main

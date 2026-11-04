@@ -56,6 +56,7 @@ CFG = {
     "gate_web_install": E("GATE_WEB_INSTALL", "bun install --frozen-lockfile"),
     "gate_web_test": E("GATE_WEB_TEST", "bun run test"),
     "gate_web_build": E("GATE_WEB_BUILD", "bun run build"),
+    "gate_anvil": E("GATE_ANVIL", "anvil"),                       # tests that start a local chain need it (install.sh installs it)
     "gate_always": [x for x in E("GATE_ALWAYS_TESTS", "test/bannedWords.test.ts").split(",") if x],
     "allowed_signers": E("ALLOWED_SIGNERS", "/etc/ifso-release/allowed_signers"),
     "forbidden_file": E("FORBIDDEN_FILE", "/etc/ifso-release/forbidden.txt"),
@@ -387,14 +388,17 @@ def changed_tests(g, parent, landed, log):
         if f.startswith("app/") and f.endswith(".ts"):
             rel = f[4:]
             for c in ([rel] if rel.endswith(".test.ts") else [rel[:-3] + ".test.ts", rel[:-3] + ".unit.test.ts"]):
-                p = os.path.join(g, "app", c)
-                # tests that spawn anvil need foundry; they ran on the build machine (documented skip, listed in the state)
-                if os.path.exists(p) and "anvil" not in open(p, errors="ignore").read().lower() and c not in tests:
+                if os.path.exists(os.path.join(g, "app", c)) and c not in tests:
                     tests.append(c)
     for a in CFG["gate_always"]:
         if os.path.exists(os.path.join(g, "app", a)) and a not in tests:
             tests.append(a)
     return files, sorted(tests)
+
+
+def anvil_tests(g, tests):
+    """The targeted tests that start a local anvil chain (they need anvil on this server; they are never skipped)."""
+    return [t for t in tests if "anvil" in open(os.path.join(g, "app", t), errors="ignore").read().lower()]
 
 
 def gate_at(g, source_repo, parent, landed, log, label=""):
@@ -409,6 +413,10 @@ def gate_at(g, source_repo, parent, landed, log, label=""):
     files, tests = changed_tests(g, parent, landed, log)
     app = os.path.join(g, "app")
     res = {"gateKind": "light", "tests": tests, "changed": len(files), "seconds": {}}
+    need = anvil_tests(g, tests)
+    if need and not shutil.which(CFG["gate_anvil"]):
+        raise Fail(f"gate: {len(need)} changed test(s) start anvil ({', '.join(need[:3])}) and there is no {CFG['gate_anvil']} on this "
+                   f"server: install it (install.sh FOUNDRY_TARBALL=... FOUNDRY_SHA256=...), never skip the tests")
     t0 = time.time()
 
     def once():

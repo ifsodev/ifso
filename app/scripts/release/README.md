@@ -73,6 +73,11 @@ The local run uses a prefix install and no real users or sudo. The Linux run nee
 - `run-sandbox.sh --linux` runs only inside that container, never on a real server: it overwrites `/usr/local/bin/bun` with a fake, rewrites `/etc/ifso-release/paths.conf` and `allowed_signers` and adds users. It refuses unless `docker-sandbox.sh` set `IFSO_SANDBOX_CONTAINER=1` and the container runtime's `/.dockerenv` exists.
 - On the server itself the proof is the rehearsal instead: pause the queue, deploy a new signed descendant of the live sha through `ifso-deploy-release` as the release user, check every service is healthy, resume.
 
+The gate never skips a test. Changed tests that start a local chain need `anvil`: install it with install.sh
+(`FOUNDRY_VERSION=<ver> FOUNDRY_SHA256=<sha256 of foundry_v<ver>_linux_<arch>.tar.gz from the release's checksums>`, or
+`FOUNDRY_TARBALL=<file>` instead of the version); only `anvil` is extracted, to `/usr/local/bin`, after the checksum matches.
+Without it such an update FAILS the gate (and the preflight) with a clear reason.
+
 The gate calls plain `bun`, so bun must be on the service's default PATH: `/usr/local/bin/bun`, where `provision.sh` (Ifso's own
 server) installs it. The co-host layout (`provision-cohost.sh`) keeps bun in `/opt/ifso/bin`, so the runner does not run there;
 `arm.sh` refuses anyway, because the preflight it needs fails with `bun: No such file or directory`. Values with spaces in

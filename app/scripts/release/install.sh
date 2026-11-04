@@ -3,6 +3,7 @@
 # checkout of this folder:
 #   sudo RELEASE_GIT_NAME="<name>" RELEASE_GIT_EMAIL="<email>" SYNC_PUBLIC_SRC=/root/sync-public.py \
 #        PUBLIC_GITHUB_REPO=<public-owner>/<repo> bash install.sh
+# FOUNDRY_VERSION or FOUNDRY_TARBALL, with FOUNDRY_SHA256: installs anvil for the gate (checksum-verified; see below).
 # PUBLIC_GITHUB_REPO: the public repo; paths.conf gets PUBLIC_CI_API (public CI watcher, arming check) and PUBLIC_COMMIT_URL.
 # SYNC_PUBLIC_SRC: the private public-copy tool (docs/tools/sync-public.py, copied over by hand); needed on the first run.
 # RELEASE_GIT_NAME / RELEASE_GIT_EMAIL: the identity of the commits the runner makes itself on private main (cherry-picks,
@@ -121,6 +122,30 @@ gc user.useConfigOnly true
 if [[ ! -e "$(P $RHOME/queue.git)" && -z "$PREFIX" ]]; then
   as_r() { runuser -u "$RUSER" -- "$@"; }
   as_r git init -q --bare "$RHOME/queue.git"
+fi
+# ---- anvil for the gate: the app tests that start a local chain need it, and the gate never skips them (an update whose changed
+# tests need anvil FAILS the gate on a server without it). From a foundry release tarball, sha256-verified, anvil only:
+#   FOUNDRY_TARBALL=<local foundry_v<ver>_linux_<arch>.tar.gz> or FOUNDRY_VERSION=<ver> (downloaded), plus FOUNDRY_SHA256=<hex>
+#   (take it from the release's published checksums; the same version as the contracts' forge).
+if [[ -n "${FOUNDRY_TARBALL:-}${FOUNDRY_VERSION:-}" ]]; then
+  [[ "${FOUNDRY_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || die "FOUNDRY_SHA256 (64 hex) is required with FOUNDRY_TARBALL / FOUNDRY_VERSION"
+  ftmp="$(mktemp -d)"
+  tarball="${FOUNDRY_TARBALL:-}"
+  if [[ -z "$tarball" ]]; then
+    case "$(uname -m)" in x86_64) farch=amd64 ;; aarch64 | arm64) farch=arm64 ;; *) die "no foundry build for $(uname -m)" ;; esac
+    tarball="$ftmp/foundry.tar.gz"
+    curl -fsSL --retry 3 -o "$tarball" "https://github.com/foundry-rs/foundry/releases/download/v${FOUNDRY_VERSION}/foundry_v${FOUNDRY_VERSION}_linux_${farch}.tar.gz" \
+      || { rm -rf "$ftmp"; die "could not download foundry $FOUNDRY_VERSION"; }
+  fi
+  got="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$tarball")"
+  [[ "$got" == "$FOUNDRY_SHA256" ]] || { rm -rf "$ftmp"; die "foundry tarball sha256 is $got, expected $FOUNDRY_SHA256: nothing installed"; }
+  tar -xzf "$tarball" -C "$ftmp" anvil || { rm -rf "$ftmp"; die "no anvil in the foundry tarball"; }
+  install -d -m 0755 "$(P /usr/local/bin)"
+  install -m 0755 "$ftmp/anvil" "$(P /usr/local/bin/anvil)"
+  rm -rf "$ftmp"
+  say "anvil installed (sha256 verified)"
+elif [[ ! -x "$(P /usr/local/bin/anvil)" ]] && ! command -v anvil >/dev/null 2>&1; then
+  say "WARNING: no anvil: updates whose changed tests start anvil will FAIL the gate (run again with FOUNDRY_TARBALL or FOUNDRY_VERSION, and FOUNDRY_SHA256)"
 fi
 # ---- three keys, made HERE (also under PREFIX for the sandbox); GitHub refuses one key as both a deploy key and an account key
 as_owner() { if [[ -z "$PREFIX" ]]; then runuser -u "$RUSER" -- "$@"; else "$@"; fi; }
