@@ -61,7 +61,12 @@ CFG = {
     "preflight_auto": E("PREFLIGHT_AUTO", "1") == "1",
     "sandbox": E("IFSO_SANDBOX", "0") == "1",
     "public_ci_api": "" if "CHANGE_ME" in E("PUBLIC_CI_API", "") else E("PUBLIC_CI_API", "").rstrip("/"),  # https://api.github.com/repos/<owner>/<repo>; empty or the install placeholder = off
-    "max_per_pass": int(E("MAX_PER_PASS", "0")),                   # 0 = no limit; the sandbox uses 1 to stage a crash on a chosen update
+    "max_per_pass": int(E("MAX_PER_PASS", "0")),
+    # /readyz answers 503 when the chain head is over the APP's 60 s (app/src/ops/health.ts RPC_MAX_LAG_S). Robinhood Chain (an
+    # Orbit chain) makes no block without traffic, so a quiet hour would fail every post-release check and roll good updates
+    # back. The runner accepts a 503 whose ONLY reasons are head lag up to this many seconds. CALIBRATE on the server before
+    # arming (sample the head-block age 40+ times; README) and set it in paths.conf with margin.
+    "rpc_max_lag_s": int(E("RPC_MAX_LAG_S", "60")),                   # 0 = no limit; the sandbox uses 1 to stage a crash on a chosen update
 }
 SCHEDULE = os.path.join(RELEASE_HOME, "schedule.json")
 STATE = os.path.join(RELEASE_HOME, "state.json")
@@ -458,10 +463,24 @@ def json_get(obj, dotted):
     return obj
 
 
+def readyz_only_lag(body):
+    """The head lag in seconds when EVERY readyz reason is 'rpc head lag Ns ...', else None."""
+    try:
+        reasons = json.loads(body).get("reasons") or []
+        lags = [re.fullmatch(r"rpc head lag (\d+)s.*", r) for r in reasons]
+        return max(int(m.group(1)) for m in lags) if lags and all(lags) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def check_one(chk):
     """One content check. perk_gated: the feature is ON but answers 'hold N to unlock' until the token exists, so the
     LOCKED answer is the expected one (a 200 with the open body would be the failure only if locked_contains is missing)."""
     code, body = http_get(CFG["api"] + chk["path"])
+    if chk["path"] == "/readyz" and code == 503:
+        lag = readyz_only_lag(body)
+        if lag is not None and lag <= CFG["rpc_max_lag_s"]:
+            return True, f"/readyz: only rpc head lag {lag}s, within RPC_MAX_LAG_S={CFG['rpc_max_lag_s']} (a quiet chain)"
     if chk.get("perk_gated"):
         want = chk.get("locked_contains", "")
         if code in (200, 401, 402, 403) and want and want in body:

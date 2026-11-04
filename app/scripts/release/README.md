@@ -36,6 +36,17 @@ involved on launch day. It is inert until armed.
 4. From the Mac: `SERVER=root@<ip> bash push-queue.sh`. On the server: `release.py make-schedule --queue-repo ... --base <main sha> --manifest <file>`.
 5. `sudo ifso-release-preflight` until every update passes, then a rehearsal deploy of a new signed descendant of the live sha through `ifso-deploy-release`, then `sudo LAUNCH_AT=<...Z> bash arm.sh`. It refuses unless: the queue scan is clean; `schedule.json` is current; the last preflight ran on the CURRENT private main and schedule and passed every pending and held update; public CI on the public main tip finished with 0 non-success (anonymous GitHub API); and `GITHUB_RELEASE_TOKEN` / `PUBLIC_REPO` in `release.env` can create and delete a draft Release. Going without GitHub Releases needs `ALLOW_NO_RELEASE_TOKEN=1` and prints a WARNING.
 
+### Calibrate the post-release check (before arming)
+
+`/readyz` answers 503 when the chain head is older than the app's 60 s. Robinhood Chain makes no block without traffic, so on a
+quiet hour every post-release check could fail and roll good updates back. The runner accepts a 503 whose ONLY reasons are head
+lag up to `RPC_MAX_LAG_S` (paths.conf, default 60). Sample on the server, then set it with margin:
+
+```bash
+for i in $(seq 40); do curl -s http://127.0.0.1:8080/readyz; echo; sleep 15; done
+for i in $(seq 40); do echo $(( $(date +%s) - $(cast block latest --field timestamp --rpc-url "$RPC_URL") )); sleep 15; done
+```
+
 ## Daily commands (group `ifso-ops`)
 
 | Command | What it does |

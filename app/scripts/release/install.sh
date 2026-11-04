@@ -83,6 +83,9 @@ NOTIFY_BIN=$(P /usr/local/sbin/ifso-release-notify)
 PUBLIC_SYNC_STATE=$RHOME/home/public-sync.json
 FORBIDDEN_FILE=$(P /etc/ifso-release/forbidden.txt)
 API_URL=http://127.0.0.1:8080
+# post-release check: a /readyz 503 whose only reason is chain head lag passes up to this many seconds (the app's own limit is
+# 60 s). CALIBRATE before arming: sample the head-block age on this server 40+ times (README, "Calibrate") and set it with margin.
+RPC_MAX_LAG_S=60
 PUBLIC_COMMIT_URL=https://github.com/CHANGE_ME/CHANGE_ME/commit/{sha}
 CONF
   chmod 0644 "$CONF"

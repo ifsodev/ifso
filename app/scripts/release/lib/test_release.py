@@ -217,6 +217,29 @@ class ReleaseAlerts(unittest.TestCase):
             R.run, R.CFG["ghrelease_cmd"] = old_run, old_cmd
 
 
+class ReadyzLag(unittest.TestCase):
+    """The app's /readyz fails on RPC head lag over its own 60 s; an Orbit chain makes no blocks without traffic, so the runner's
+    post-release check takes RPC_MAX_LAG_S (calibrated on the server) for a readyz whose ONLY reasons are head lag."""
+
+    def answer(self, code, reasons):
+        return lambda url, timeout=15: (code, json.dumps({"ok": not reasons, "reasons": reasons}))
+
+    def test_quiet_chain_lag_within_the_runner_limit_passes(self):
+        old, lag = R.http_get, R.CFG.get("rpc_max_lag_s")
+        R.http_get, R.CFG["rpc_max_lag_s"] = self.answer(503, ["rpc head lag 90s (max 60s)"]), 300
+        try:
+            self.assertTrue(R.check_one({"path": "/readyz"})[0])
+            R.http_get = self.answer(503, ["rpc head lag 400s (max 60s)"])
+            self.assertFalse(R.check_one({"path": "/readyz"})[0])
+            R.http_get = self.answer(503, ["rpc head lag 90s (max 60s)", "db down"])
+            self.assertFalse(R.check_one({"path": "/readyz"})[0])
+        finally:
+            R.http_get, R.CFG["rpc_max_lag_s"] = old, lag
+
+    def test_default_limit_is_the_apps_60_s(self):
+        self.assertEqual(R.CFG["rpc_max_lag_s"], 60)
+
+
 class Resume(unittest.TestCase):
     def test_resume_leaves_one_note_for_the_next_pass(self):
         open(R.PAUSE, "w").close()
