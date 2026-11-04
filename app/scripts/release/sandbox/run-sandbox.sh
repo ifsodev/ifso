@@ -38,14 +38,16 @@ fi
 as_rel() { if [[ $MODE == linux ]]; then runuser -u "$RUSER" -- "$@"; else "$@"; fi; }
 as_ops() { if [[ $MODE == linux ]]; then runuser -u "$OPS" -- sudo -n "$@"; else "$@"; fi; }
 
-# ---- install (once): the real install.sh
+# ---- install (once): the real install.sh. The identity of the runner's own commits (reverts, re-applies, cherry-picks) comes
+# from install.sh ONLY: the sandbox never sets user.name / user.email itself, so a missing identity fails here as on the server.
+GIT_NAME="Ifso Release"; GIT_EMAIL="release@example.invalid"
 if [[ $MODE == linux ]]; then
   PFX=""
   SYSTEMCTL="$ROOT/fakes-systemctl"; printf '#!/bin/sh\necho "systemctl $*" >>/tmp/systemctl.calls\nexit 0\n' >"$SYSTEMCTL"; chmod +x "$SYSTEMCTL"
   getent group ifso-ops >/dev/null || groupadd --system ifso-ops
   id "$OPS" >/dev/null 2>&1 || useradd -m -G ifso-ops "$OPS"
   note "install.sh (real, as root)"
-  SYSTEMCTL="$SYSTEMCTL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
+  SYSTEMCTL="$SYSTEMCTL" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
   ok "install.sh ran clean" test $? -eq 0
   ok "sudoers file installed 0440 root" test "$(stat -c '%a %U' /etc/sudoers.d/ifso-release)" = "440 root"
   ok "visudo -c passes on the whole sudo configuration" visudo -c
@@ -57,12 +59,16 @@ if [[ $MODE == linux ]]; then
 else
   PFX="$ROOT/root"; mkdir -p "$PFX"
   note "install.sh (PREFIX mode: no users, no systemctl)"
-  PREFIX="$PFX" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
+  PREFIX="$PFX" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
   ok "install.sh ran clean" test $? -eq 0
   CONF="$PFX/etc/ifso-release/paths.conf"; LIBDIR="$PFX/usr/local/lib/ifso-release"; SBIN="$PFX/usr/local/sbin"; ETC="$PFX/etc/ifso-release"
   BASE="$ROOT/base"; mkdir -p "$BASE"
   export IFSO_RELEASE_LIB="$LIBDIR" IFSO_RELEASE_CONF="$CONF"   # local mode: no sudo, so the wrappers need to be told where they live
+  # local mode: the release user's global git config is the one install.sh wrote under the prefix (never this machine's own)
+  export GIT_CONFIG_GLOBAL="$PFX/var/lib/ifso-release/.gitconfig" GIT_CONFIG_NOSYSTEM=1
 fi
+RGITCFG="$PFX/var/lib/ifso-release/.gitconfig"
+ok "install.sh set the release user's git identity (name, email, no guessing)" bash -c "test \"\$(git config --file '$RGITCFG' user.email)\" = '$GIT_EMAIL' && test \"\$(git config --file '$RGITCFG' user.name)\" = '$GIT_NAME' && test \"\$(git config --file '$RGITCFG' user.useConfigOnly)\" = true"
 ok "wrappers installed and executable" test -x "$SBIN/ifso-deploy-release" -a -x "$SBIN/ifso-release-notify" -a -x "$SBIN/ifso-release-status" -a -x "$SBIN/ifso-release-ghrelease"
 ok "paths.conf has no secrets and no token words" bash -c "! grep -qiE 'token|password|secret' '$CONF'"
 ok "release.env is mode 0600" test "$(stat -c '%a' "$ETC/release.env" 2>/dev/null || stat -f '%Lp' "$ETC/release.env")" = 600
@@ -110,7 +116,7 @@ new_world() { # new_world <name>
   QTIP="$(git -C "$S" rev-parse HEAD)"
   # the server's clone of private main: signs with the sandbox key (on the real server: the server-made signing key)
   git clone -q "$W/private.git" "$W/backend"
-  for kv in "user.name=Owner" "user.email=owner@example.invalid" "gpg.format=ssh" "user.signingkey=$KEY" "commit.gpgsign=true" "gpg.ssh.allowedSignersFile=$ETC/allowed_signers"; do
+  for kv in "gpg.format=ssh" "user.signingkey=$KEY" "commit.gpgsign=true" "gpg.ssh.allowedSignersFile=$ETC/allowed_signers"; do
     git -C "$W/backend" config "${kv%%=*}" "${kv#*=}"
   done
   git -C "$W/backend" remote add public "$W/public.git"
@@ -282,6 +288,7 @@ ok "gate failure: TU01 HELD" test "$(st TU01)" = held
 ok "gate failure: TU01 never reached private main" test "$(main_subjects | grep -c 'TU01')" = 0
 ok "deploy failure: TU02 HELD" test "$(st TU02)" = held
 ok "deploy failure: TU02 reverted on main (signed revert exists)" bash -c "git -C '$W/private.git' log --format=%s main | grep -q '^Revert .*TU02'"
+ok "the runner's revert carries the release identity from install.sh" bash -c "test \"\$(git -C '$W/private.git' log -1 --format='%an <%ae>' --grep='^Revert' main)\" = '$GIT_NAME <$GIT_EMAIL>'"
 ok "deploy failure: production never keeps the held updates (no TU01 or TU02 route in the live tree; the live tree is not older than the start)" bash -c "! git -C '$W/private.git' cat-file -e '$(prod_sha):app/src/api/routes/tu02.ts' && ! git -C '$W/private.git' cat-file -e '$(prod_sha):app/src/api/routes/tu01.ts' && git -C '$W/private.git' merge-base --is-ancestor '$BEFORE_PROD' '$(prod_sha)'"
 ok "no cascade: TU03 released although TU01 and TU02 are held" test "$(st TU03)" = released
 ok "perk-gated TU03 is ON and answers locked (check passed)" bash -c "python3 -c 'import json; assert json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"verify\"][\"/v1/tu03\"][\"ok\"]'"

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Installs the Ifso release runner on the server, UNARMED (timer disabled, no flag file). Run ON THE SERVER as root, from a
-# checkout of this folder:   sudo bash install.sh
+# checkout of this folder:
+#   sudo RELEASE_GIT_NAME="<name>" RELEASE_GIT_EMAIL="<email>" bash install.sh
+# RELEASE_GIT_NAME / RELEASE_GIT_EMAIL: the identity of the commits the runner makes itself on private main (cherry-picks,
+# reverts, re-applies). Use an account that is a member of the Vercel team that builds web/ (the owner's GitHub noreply
+# address), or Vercel skips the build of a rollback. Stored in paths.conf; a later run without them reuses those values.
 # Safe to run again. Arming is a separate, single step (arm.sh) on launch day.
 #
 # What it makes:
@@ -21,6 +25,21 @@ say() { printf '[install] %s\n' "$*"; }
 P() { printf '%s%s' "$PREFIX" "$1"; }
 RUSER=ifso-release
 RHOME=/var/lib/ifso-release
+die() { printf '[install] %s\n' "$*" >&2; exit 1; }
+# conf_get KEY: the value already in paths.conf (quotes stripped), or nothing
+conf_get() { [[ -r "$(P /etc/ifso-release/paths.conf)" ]] && sed -n "s/^$1=//p" "$(P /etc/ifso-release/paths.conf)" | tail -1 | tr -d "\"'" || true; }
+# conf_set KEY VALUE: replace or add one line (double-quoted: the wrappers source the file with bash)
+conf_set() {
+  local f; f="$(P /etc/ifso-release/paths.conf)"
+  grep -v "^$1=" "$f" >"$f.new" || true
+  printf '%s="%s"\n' "$1" "$2" >>"$f.new"; cat "$f.new" >"$f"; rm -f "$f.new"
+}
+# ---- the runner's git identity: without it git refuses (or guesses) every commit the runner makes, so every rollback pauses
+GIT_NAME="${RELEASE_GIT_NAME:-$(conf_get RELEASE_GIT_NAME)}"
+GIT_EMAIL="${RELEASE_GIT_EMAIL:-$(conf_get RELEASE_GIT_EMAIL)}"
+[[ -n "$GIT_NAME" && -n "$GIT_EMAIL" && "$GIT_NAME$GIT_EMAIL" != *CHANGE_ME* ]] \
+  || die "no git identity for the runner's commits: sudo RELEASE_GIT_NAME='<name>' RELEASE_GIT_EMAIL='<email>' bash install.sh (README, 'Install on the server')"
+[[ "$GIT_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+$ && "$GIT_NAME" != *[\"\'\$\`]* ]] || die "RELEASE_GIT_EMAIL must look like an email and RELEASE_GIT_NAME must not contain quotes or \$"
 if [[ -z "$PREFIX" ]]; then
   getent group ifso-ops >/dev/null || groupadd --system ifso-ops
   id "$RUSER" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$RHOME" --create-home --shell /bin/bash "$RUSER"
@@ -57,6 +76,17 @@ PUBLIC_COMMIT_URL=https://github.com/CHANGE_ME/CHANGE_ME/commit/{sha}
 CONF
   chmod 0644 "$CONF"
 fi
+conf_set RELEASE_GIT_NAME "$GIT_NAME"
+conf_set RELEASE_GIT_EMAIL "$GIT_EMAIL"
+chmod 0644 "$CONF"
+# ---- the release user's global git config, written to its file directly (also under PREFIX, where the sandbox points
+# GIT_CONFIG_GLOBAL at it): identity, never a guessed one, and every runner commit signed with the server's signing key
+GITCFG="$(P $RHOME/.gitconfig)"
+gc() { git config --file "$GITCFG" "$@"; }
+gc user.name "$GIT_NAME"
+gc user.email "$GIT_EMAIL"
+gc user.useConfigOnly true
+[[ -z "$PREFIX" ]] && chown "$RUSER:$RUSER" "$GITCFG" && chmod 0644 "$GITCFG"
 [[ -e "$(P /etc/ifso-release/allowed_signers)" ]] || install -m 0644 /dev/null "$(P /etc/ifso-release/allowed_signers)"
 [[ -e "$(P /etc/ifso-release/forbidden.txt)" ]] || install -m 0644 "$HERE/forbidden.txt.example" "$(P /etc/ifso-release/forbidden.txt)"
 [[ -e "$(P /etc/ifso-release/release.env)" ]] || {
@@ -100,11 +130,11 @@ Host github-ifso-public
 SSH
     as_r chmod 600 "$RHOME/.ssh/config"
   fi
-  as_r git config --global gpg.format ssh
-  as_r git config --global user.signingkey "$RHOME/.ssh/id_ed25519_signing.pub"
-  as_r git config --global commit.gpgsign true
-  as_r git config --global gpg.ssh.allowedSignersFile /etc/ifso-release/allowed_signers
-  as_r git config --global safe.directory '*'
+  as_r git config --file "$GITCFG" gpg.format ssh
+  as_r git config --file "$GITCFG" user.signingkey "$RHOME/.ssh/id_ed25519_signing.pub"
+  as_r git config --file "$GITCFG" commit.gpgsign true
+  as_r git config --file "$GITCFG" gpg.ssh.allowedSignersFile /etc/ifso-release/allowed_signers
+  as_r git config --file "$GITCFG" safe.directory '*'
   echo
   echo "Installed UNARMED (timer disabled, no flag file). Public keys, to register on GitHub:"
   echo "  private repo, WRITE deploy key : $(cat "$RHOME/.ssh/id_ed25519_private.pub")"
