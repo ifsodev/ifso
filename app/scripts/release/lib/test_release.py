@@ -123,6 +123,40 @@ class Small(unittest.TestCase):
             R.run = old
 
 
+class FetchAfterPush(unittest.TestCase):
+    """A fetch blip right after a SUCCESSFUL push must not turn into a Fail (that would revert a good update and hold it)."""
+
+    def fake(self, fetch_code, origin="a" * 40):
+        def run(cmd, **k):
+            if "push" in cmd:
+                return 0, "pushed"
+            if "fetch" in cmd:
+                return fetch_code, "fatal: unable to access 'https://github.com/': Could not resolve host" if fetch_code else ""
+            if cmd[-1] == "origin/main":
+                return 0, origin
+            if cmd[-1] == "main":
+                return 0, "a" * 40
+            return 0, ""
+        return run
+
+    def test_fetch_blip_after_a_good_push_is_not_a_failure(self):
+        old = R.run
+        R.run = self.fake(128)
+        try:
+            R.push_main(None)  # push succeeded, origin/main == main (push updates the tracking ref): no exception
+        finally:
+            R.run = old
+
+    def test_origin_not_main_after_the_push_waits_and_never_fails(self):
+        old = R.run
+        R.run = self.fake(128, origin="b" * 40)
+        try:
+            with self.assertRaises(R.Blocked):
+                R.push_main(None)
+        finally:
+            R.run = old
+
+
 class Resume(unittest.TestCase):
     def test_resume_leaves_one_note_for_the_next_pass(self):
         open(R.PAUSE, "w").close()

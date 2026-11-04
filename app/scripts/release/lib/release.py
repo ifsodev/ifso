@@ -359,9 +359,11 @@ def push_main(log):
     code, out = run(["git", "-c", "safe.directory=*", "push", "origin", "main"], cwd=CFG["repo"], log=log, timeout=300)
     if code:
         raise Blocked(f"git push origin main failed: {out.strip()[-200:]}")
-    git("fetch", "-q", "origin", log=log)
-    if git("rev-parse", "origin/main") != git("rev-parse", "main"):
-        raise Blocked("origin/main is not main after the push")
+    # the push itself moved origin/main; a fetch blip here is NOT a failure of the update (a Fail would revert a good update
+    # and hold it). Compare what we have; if they differ, wait (Blocked): the next pass pushes again (a no-op) and goes on.
+    git("fetch", "-q", "origin", log=log, ok=True)
+    if git("rev-parse", "origin/main", ok=True) != git("rev-parse", "main"):
+        raise Blocked("origin/main is not main after the push (fetch blip?): retried next pass, nothing reverted")
 
 
 # ------------------------------------------------------------------ gate
