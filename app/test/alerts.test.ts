@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { ALERT_DEDUPE_MS, makeAlert } from "../src/ops/alerts";
+import { ALERT_DEDUPE_MS, LOG_ONLY_CAUSES, makeAlert } from "../src/ops/alerts";
 import { indexerBehind, keeperLagged, lowBalance } from "../src/ops/monitors";
 
 function setup(armed: boolean) {
   let t = 1_000_000;
   const sent: { url: string; body: { chat_id: string; text: string } }[] = [];
   const logs: string[] = [];
+  const extras: Record<string, unknown>[] = [];
   const fetchImpl = (async (url: string, init: { body: string }) => (sent.push({ url, body: JSON.parse(init.body) }), { ok: true, status: 200 })) as never;
-  const alert = makeAlert({ armed, token: "TOKEN", chatId: "-100", log: (m) => logs.push(m), fetchImpl, now: () => t });
-  return { alert, sent, logs, advance: (ms: number) => (t += ms) };
+  const alert = makeAlert({ armed, token: "TOKEN", chatId: "-100", log: (m, x) => (logs.push(m), extras.push(x ?? {})), fetchImpl, now: () => t });
+  return { alert, sent, logs, extras, advance: (ms: number) => (t += ms) };
 }
 
 describe("alerts (R6)", () => {
@@ -16,7 +17,7 @@ describe("alerts (R6)", () => {
     const { alert, sent, advance } = setup(true);
     expect(await alert("keeper-lag", "a")).toBe(true);
     expect(await alert("keeper-lag", "b")).toBe(false);
-    expect(await alert("rpc-failover", "c")).toBe(true); // other cause is independent
+    expect(await alert("low-balance", "c")).toBe(true); // other cause is independent
     advance(ALERT_DEDUPE_MS - 1);
     expect(await alert("keeper-lag", "d")).toBe(false);
     advance(2);
@@ -24,6 +25,19 @@ describe("alerts (R6)", () => {
     expect(sent.length).toBe(3);
     expect(sent[0]!.body.chat_id).toBe("-100");
     expect(sent[0]!.url).toContain("/sendMessage");
+  });
+  test("self-healing causes (rpc-failover, indexer-reorg) are raised and logged, never sent, even when armed", async () => {
+    const { alert, sent, logs, extras } = setup(true);
+    expect([...LOG_ONLY_CAUSES].sort()).toEqual(["indexer-reorg", "rpc-failover"]);
+    for (const cause of ["rpc-failover", "indexer-reorg"]) {
+      expect(await alert(cause, "primary RPC failing")).toBe(true); // handled: the log is the configured sink
+      expect(await alert(cause, "again")).toBe(true); //              every occurrence is logged; nothing to dedupe
+    }
+    expect(sent.length).toBe(0);
+    expect(logs.filter((l) => l.includes("log-only")).length).toBe(4);
+    expect(extras[0]).toMatchObject({ cause: "rpc-failover", length: "primary RPC failing".length });
+    expect(await alert("keeper-lag", "x")).toBe(true); // a cause someone must act on is still sent
+    expect(sent.length).toBe(1);
   });
   test("unarmed: logs only, never calls the network (and counts as handled, audit I-10)", async () => {
     const { alert, sent, logs } = setup(false);

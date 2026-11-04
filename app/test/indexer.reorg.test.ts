@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 import { eq } from "drizzle-orm";
 import { keccak256, toHex, type Abi, type Hex } from "viem";
 import { ifsoEscrowAbi } from "../src/abi";
+import { makeAlert } from "../src/ops/alerts";
 import { Status } from "../src/core/types";
 import { chainEvents, cursors, escrows } from "../src/db/schema";
 import { REWIND_BLOCKS, indexerTick, resetIndexerState, type NotifyEvent } from "../src/workers/indexer";
@@ -20,7 +21,14 @@ describe.skipIf(!haveAnvil() || !havePostgres())("indexer reorg safety", () => {
   let pg: TestDb;
   let deps: Deps;
   const seen: NotifyEvent[] = [];
-  const alerts: string[] = [];
+  const alerts: string[] = []; // causes raised and logged by the real alert function
+  const sent: string[] = []; //   Telegram sends (armed, fake fetch): a reorg rewind heals itself, so none
+  const alertFn = () =>
+    makeAlert({
+      armed: true, token: "T", chatId: "1",
+      log: (_m, x) => void (x?.cause && alerts.push(String(x.cause))),
+      fetchImpl: (async (_u: string, init: { body: string }) => (sent.push(init.body), { ok: true, status: 200 })) as never,
+    });
   const sync = () => indexerTick(deps, async (e) => void seen.push(e));
   const salt = (s: string) => keccak256(toHex(s));
   const idOf = async (from: Hex, s: Hex) => (await chain.pc.readContract({ address: chain.escrow, abi: ifsoEscrowAbi, functionName: "idFor", args: [from, s] })) as bigint;
@@ -30,7 +38,7 @@ describe.skipIf(!haveAnvil() || !havePostgres())("indexer reorg safety", () => {
     resetIndexerState();
     chain = await bootChain();
     pg = await bootDb();
-    deps = { ...makeTestDeps(chain, pg.db), alert: async (cause) => (alerts.push(cause), true) };
+    deps = { ...makeTestDeps(chain, pg.db), alert: alertFn() };
   });
   afterAll(async () => {
     chain?.stop();
@@ -45,7 +53,7 @@ describe.skipIf(!haveAnvil() || !havePostgres())("indexer reorg safety", () => {
     const n = seen.length;
     expect(n).toBeGreaterThan(0);
     resetIndexerState(); // new process
-    deps = { ...makeTestDeps(chain, pg.db), alert: async (cause) => (alerts.push(cause), true) };
+    deps = { ...makeTestDeps(chain, pg.db), alert: alertFn() };
     await sync();
     expect(seen.length).toBe(n);
     const [cur] = await pg.db.select().from(cursors).where(eq(cursors.name, "main"));
@@ -81,7 +89,8 @@ describe.skipIf(!haveAnvil() || !havePostgres())("indexer reorg safety", () => {
     expect((await row(b1))?.status).toBe(Status.OPEN); //               only on fork B
     expect((await row(shared))?.status).toBe(Status.OPEN); //           on both, stored once
     expect((await row(e0))?.status).toBe(Status.OPEN); //               the release was undone
-    expect(alerts).toContain("indexer-reorg");
+    expect(alerts).toContain("indexer-reorg"); // raised and logged
+    expect(sent).toEqual([]); //                 but never sent: log-only, self-healing
 
     const events = await pg.db.select().from(chainEvents);
     const keys = events.map((e) => `${e.blockNumber}:${e.logIndex}`);

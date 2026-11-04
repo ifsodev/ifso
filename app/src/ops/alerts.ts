@@ -5,6 +5,12 @@ import type { Env } from "../config/env";
 export const ALERT_DEDUPE_MS = 30 * 60 * 1000;
 
 /**
+ * Self-healing causes: raised and logged (cause and text length), never sent and never claimed. The rule is to alert
+ * only when someone must act; an RPC failover and an indexer reorg rewind both recover on their own.
+ */
+export const LOG_ONLY_CAUSES: ReadonlySet<string> = new Set(["rpc-failover", "indexer-reorg"]);
+
+/**
  * Resolves true when the alert was handled as configured: sent to Telegram, or written to the log because alerts are
  * not armed (log-only is the configured sink, so a caller waiting for delivery must not stall forever on it). False
  * when it was not delivered: a failed send, or the cause was already claimed in the last 30 minutes.
@@ -34,6 +40,10 @@ export function makeAlert(o: AlertOptions): AlertFn {
       return true;
     });
   return async (cause, text) => {
+    if (LOG_ONLY_CAUSES.has(cause)) {
+      o.log("alert (log-only: self-healing)", { cause, length: text.length, text });
+      return true;
+    }
     if (!(await claim(cause, ALERT_DEDUPE_MS))) return false;
     if (!o.armed || !o.token || !o.chatId) {
       o.log("alert (not sent: unarmed)", { cause, text });
