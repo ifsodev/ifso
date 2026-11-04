@@ -7,7 +7,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE" || exit 2
 bad=0
 if command -v shellcheck >/dev/null; then
-  if shellcheck -S style ./*.sh sbin/* sandbox/*.sh sandbox/fakes/bun sandbox/fakes/systemctl; then echo "shellcheck: clean"; else echo "shellcheck: FINDINGS"; bad=1; fi
+  if shellcheck -S style ./*.sh sbin/* sandbox/*.sh sandbox/fakes/bun sandbox/fakes/node sandbox/fakes/systemctl; then echo "shellcheck: clean"; else echo "shellcheck: FINDINGS"; bad=1; fi
 else echo "shellcheck: not installed (skipped)"; fi
 python3 -m py_compile lib/*.py sandbox/fake_world.py sandbox/fakes/flock && echo "py_compile: ok" || bad=1
 find . -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null

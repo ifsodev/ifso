@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stand-in for node: the gate only checks that a node runtime exists before it builds web/ (the fake bun does the build).
+exit 0

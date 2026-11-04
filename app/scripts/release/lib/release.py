@@ -26,7 +26,7 @@ Unarmed = log only: with no launchAt, or without the root-owned ALLOW_REAL_DEPLO
 every alert goes to logs/notify-log-only.log (never Telegram). Everything is configured by environment variables so the
 sandbox proof can run the real code against local bare repos.
 """
-import datetime as dt, fcntl, hashlib, json, os, re, shlex, subprocess, sys, time, urllib.request
+import datetime as dt, fcntl, hashlib, json, os, re, shlex, shutil, subprocess, sys, time, urllib.request
 
 LIB = os.path.dirname(os.path.abspath(__file__))
 E = os.environ.get
@@ -48,6 +48,14 @@ CFG = {
     "gate_install": E("GATE_INSTALL", "bun install --frozen-lockfile"),
     "gate_typecheck": E("GATE_TYPECHECK", "bun run typecheck"),
     "gate_test": E("GATE_TEST", "bun test --timeout 90000"),
+    # web/: an update that changes it also gets the web tests and the PRODUCTION build (a page dropped only by the production
+    # build was an earlier project's incident 20). Needs a node runtime for `next build`; without one the update is FLAGGED
+    # (alert, gate result webUngated), not held. GATE_WEB=off turns the web steps off on purpose (also flagged).
+    "gate_web": E("GATE_WEB", "auto"),
+    "gate_web_runtime": E("GATE_WEB_RUNTIME", "node"),
+    "gate_web_install": E("GATE_WEB_INSTALL", "bun install --frozen-lockfile"),
+    "gate_web_test": E("GATE_WEB_TEST", "bun run test"),
+    "gate_web_build": E("GATE_WEB_BUILD", "bun run build"),
     "gate_always": [x for x in E("GATE_ALWAYS_TESTS", "test/bannedWords.test.ts").split(",") if x],
     "allowed_signers": E("ALLOWED_SIGNERS", "/etc/ifso-release/allowed_signers"),
     "forbidden_file": E("FORBIDDEN_FILE", "/etc/ifso-release/forbidden.txt"),
@@ -410,14 +418,29 @@ def gate_at(g, source_repo, parent, landed, log, label=""):
     if not ok:
         raise Transient(f"gate: install failed after retries (registry or network?): {out.strip()[-160:]}")
     res["seconds"]["install"] = round(time.time() - t0, 1)
-    steps = [("typecheck", CFG["gate_typecheck"])]
+    steps = [("typecheck", CFG["gate_typecheck"], app)]
     if tests:
-        steps.append(("targeted tests", f"{CFG['gate_test']} " + " ".join("./" + t for t in tests)))
-    for name, cmd in steps:
+        steps.append(("targeted tests", f"{CFG['gate_test']} " + " ".join("./" + t for t in tests), app))
+    web = os.path.join(g, "web")
+    if any(f.startswith("web/") for f in files) and os.path.isfile(os.path.join(web, "package.json")):
+        if CFG["gate_web"] == "off":
+            res["web"], res["webUngated"] = "NOT GATED: GATE_WEB=off", True
+        elif not shutil.which(CFG["gate_web_runtime"]):
+            res["web"], res["webUngated"] = f"NOT GATED: no {CFG['gate_web_runtime']} on this server for the web production build", True
+        else:
+            def web_once():
+                c, o = run(f"nice -n 10 {CFG['gate_web_install']}", cwd=web, log=log, timeout=2400)
+                return c == 0, o
+            ok, out = retrying(web_once, "gate web install", log)
+            if not ok:
+                raise Transient(f"gate: web install failed after retries (registry or network?): {out.strip()[-160:]}")
+            steps += [("web tests", CFG["gate_web_test"], web), ("web production build", CFG["gate_web_build"], web)]
+            res["web"] = "tests + production build"
+    for name, cmd, cwd in steps:
         t1 = time.time()
-        code, out = run(f"nice -n 10 {cmd}", cwd=app, log=log, timeout=2400)
+        code, out = run(f"nice -n 10 {cmd}", cwd=cwd, log=log, timeout=2400)
         if code:  # one re-run: a flaky first run is recorded, a failing second one holds the update
-            code, out = run(f"nice -n 10 {cmd}", cwd=app, log=log, timeout=2400)
+            code, out = run(f"nice -n 10 {cmd}", cwd=cwd, log=log, timeout=2400)
             if code == 0:
                 res.setdefault("flakyPassedOnRerun", []).append(name)
         res["seconds"][name] = round(time.time() - t1, 1)
@@ -757,6 +780,12 @@ def release_steps(st, sched, u, t, log, resuming):
 
     def s_gate():
         t["gate"] = gate_at(CFG["gate_dir"], CFG["repo"], git("rev-parse", t["landedSha"] + "^"), t["landedSha"], log)
+        if t["gate"].get("webUngated"):
+            notify(st, f"WEB CHANGE NOT GATED {u['id']}", plain(
+                f"{u['id']} changes web/ but the server gate could not run the web tests and production build ({t['gate']['web']})",
+                "not yet: the update goes on (app gate passed); the website part is checked only by Vercel's own build",
+                "flagged, not held", f"check the Vercel build of {u['id']}'s commit and the live page right after the release"),
+                failure=True, key=f"web-ungated-{u['id']}")
 
     def s_push():
         t["pushed"] = True

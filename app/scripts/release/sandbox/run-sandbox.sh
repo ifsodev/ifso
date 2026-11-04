@@ -109,7 +109,8 @@ new_world() { # new_world <name>
   git init -q --bare -b main "$W/private.git"; git init -q --bare -b main "$W/public.git"; git init -q --bare -b main "$W/queue.git"
   S="$W/seed"; git init -q -b main "$S"
   sg() { git -C "$S" -c user.name=Owner -c user.email=owner@example.invalid -c gpg.format=ssh -c "user.signingkey=$KEY" -c commit.gpgsign=true "$@"; }
-  mkdir -p "$S/app/src/api/routes" "$S/app/test"
+  mkdir -p "$S/app/src/api/routes" "$S/app/test" "$S/web/src"
+  echo '{"name":"web","scripts":{"test":"vitest run","build":"next build"}}' >"$S/web/package.json"
   echo '{"name":"app"}' >"$S/app/package.json"; echo lock >"$S/app/bun.lock"; echo "export {}" >"$S/app/src/main.ts"
   echo "// banned words scan placeholder" >"$S/app/test/bannedWords.test.ts"
   # the real repo carries its own pattern files; the scan must not flag them (install.sh seeds forbidden.txt from the example)
@@ -122,7 +123,7 @@ new_world() { # new_world <name>
   for n in 01 02 03; do
     echo "export const tu$n = true" >"$S/app/src/api/routes/tu$n.ts"
     echo "// test $n" >"$S/app/test/tu$n.test.ts"
-    [[ $n == 03 ]] && echo perk >"$S/app/src/api/routes/tu03.perk"
+    [[ $n == 03 ]] && echo perk >"$S/app/src/api/routes/tu03.perk" && echo "export const page = 3" >"$S/web/src/tu03.tsx"   # TU03 also changes web/
     sg add -A; sg commit -q -m "feat(api): TU$n sandbox update $n"
   done
   git -C "$S" push -q "$W/queue.git" tu-queue
@@ -149,6 +150,7 @@ new_world() { # new_world <name>
   setconf PUBLIC_SYNC_STATE "$W/home/public-sync.json"; setconf API_URL "http://127.0.0.1:$PORT"
   setconf ALLOW_FILE "$W/ALLOW_REAL_DEPLOY"; setconf RELEASE_ENV "$W/release.env"; setconf DEPLOY_LOCK "$W/deploy.lock"
   setconf FORBIDDEN_FILE "$ETC/forbidden.txt"
+  setconf GATE_WEB_RUNTIME node
   setconf PUBLIC_CI_API ""   # the CI watcher stays off in the passes (world 4 points it at the fake GitHub for arm.sh)
   setconf INFRA_RETRY_S 0; setconf VERIFY_TRIES 2; setconf VERIFY_RETRY_S 0; setconf GAP_SLEEP 0; setconf PREFLIGHT_AUTO 0
   setconf FETCH_WAIT 0; setconf TRANSIENT_MAX_PASSES 6; setconf IFSO_SANDBOX 1; setconf DISK_MIN_GB 0
@@ -245,6 +247,8 @@ ok "world 1: public history has one author" one_public_author
 ok "world 1: every private commit signed by an allowed key" all_signed
 ok "world 1: perk-gated TU03 passed its check as 'locked'" bash -c "python3 -c 'import json; v=json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"verify\"]; assert v[\"/v1/tu03\"][\"ok\"]'"
 ok "world 1: production runs the last release" test "$(prod_subject)" = "feat(api): TU03 sandbox update 03"
+ok "web/ change (TU03): the gate ran the web install, tests and the PRODUCTION build" bash -c "grep -q '^web install' '$CTL/bun.calls' && grep -q '^web run test' '$CTL/bun.calls' && grep -q '^web run build' '$CTL/bun.calls'"
+ok "updates without a web/ change ran no web step" test "$(grep -c '^web run build' "$CTL/bun.calls")" = 1
 # pause / abort / resume
 rp set-times --launch-at "$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"))')" >/dev/null
 as_ops "$SBIN/ifso-release-pause" "sandbox maintenance" >/dev/null 2>&1
@@ -292,6 +296,8 @@ ok "stale schedule: ONE plain alert naming both shas" bash -c "grep '/sendMessag
 rpre run >"$W/pf-stale.out" 2>&1; PFS=$?
 ok "stale schedule: preflight also stops with one clear line (exit 3)" bash -c "test $PFS -eq 3 && grep -q 'STALE schedule.json' '$W/pf-stale.out'"
 cp "$W/schedule.good" "$W/home/schedule.json"
+# --- a server without node cannot build web/: the update is not held for that, but it is FLAGGED (alert + state)
+setconf GATE_WEB_RUNTIME no-such-node-here
 # --- injected failures: TU01 test fails, TU02 deploy fails after the switch
 touch "$CTL/test-fail-TU01" "$CTL/deploy-fail-TU02"
 BEFORE_PROD="$(prod_sha)"
@@ -308,6 +314,7 @@ ok "perk-gated TU03 is ON and answers locked (check passed)" bash -c "python3 -c
 ok "alerts: HELD TU01 in plain words (what/users/done/next)" bash -c "grep '/sendMessage' '$CTL/requests.jsonl' | grep 'HELD TU01' | grep -q 'Users affected'"
 ok "alerts: TU02 ROLLED BACK" tg_has "TU02 ROLLED BACK"
 ok "alerts: TU03 release note to the ops chat" tg_has "TU03 released"
+ok "no node on the server: TU03's web/ change is flagged NOT GATED (alert + gate result), never silently skipped" bash -c "tg_has() { grep '/sendMessage' '$CTL/requests.jsonl' | grep -q \"\$1\"; }; tg_has 'WEB CHANGE NOT GATED TU03' && python3 -c 'import json,sys; g=json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"gate\"]; sys.exit(0 if g.get(\"webUngated\") else 1)'"
 ok "alerts go to the OPS chat only (one chat id used)" bash -c "grep '/sendMessage' '$CTL/requests.jsonl' | grep -o 'chat_id=[-0-9]*' | sort -u | wc -l | tr -d ' ' | grep -q '^1$'"
 ok "public tree == private tree after the held round" public_equals_private
 ok "status: released 1, held 2" bash -c "as_ops() { :; }; python3 - <<'PY'

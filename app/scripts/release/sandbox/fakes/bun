@@ -3,6 +3,7 @@
 # update under test (named in the subject of the commit checked out). install fails while $SANDBOX_CTL/install-fail exists.
 # shellcheck disable=SC1091
 . "$(dirname "$0")/sandbox.env"   # SANDBOX_CTL of the current world, written by run-sandbox.sh
+echo "$(basename "$PWD") $*" >>"$SANDBOX_CTL/bun.calls"   # which package (app or web) ran which step
 case "${1:-}" in
   install) [[ -e "$SANDBOX_CTL/install-fail" ]] && { echo "error: registry unreachable"; exit 1; }; echo "installed"; exit 0 ;;
   run) echo "typecheck ok"; exit 0 ;;
