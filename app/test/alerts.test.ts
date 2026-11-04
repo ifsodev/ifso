@@ -25,9 +25,9 @@ describe("alerts (R6)", () => {
     expect(sent[0]!.body.chat_id).toBe("-100");
     expect(sent[0]!.url).toContain("/sendMessage");
   });
-  test("unarmed: logs only, never calls the network", async () => {
+  test("unarmed: logs only, never calls the network (and counts as handled, audit I-10)", async () => {
     const { alert, sent, logs } = setup(false);
-    expect(await alert("keeper-lag", "x")).toBe(false);
+    expect(await alert("keeper-lag", "x")).toBe(true);
     expect(sent.length).toBe(0);
     expect(logs.some((l) => l.includes("unarmed"))).toBe(true);
   });

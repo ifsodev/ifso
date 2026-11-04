@@ -7,6 +7,7 @@ import { loadEnv } from "../src/config/env";
 import type { FeedInfo } from "../src/config/chain";
 import { isStockFeedSession, stockFeedOpenSeconds } from "../src/core/price";
 import { chainEvents, cursors } from "../src/db/schema";
+import { makeAlert } from "../src/ops/alerts";
 import { checkOracles, checkOutflow, feedProblem, outflowAlerts, outflowsOf, type Outflow } from "../src/ops/monitors";
 import type { Deps } from "../src/workers/deps";
 import { bootDb, havePostgres, type TestDb } from "./helpers/chain";
@@ -161,5 +162,41 @@ describe.skipIf(!havePostgres())("checkOutflow (real Postgres, indexed events)",
     await pg.db.update(cursors).set({ block: 30n }).where(eq(cursors.name, "main"));
     await checkOutflow(deps, fn, new Date(now.getTime() + 60_000));
     expect(alerts.filter(([c]) => c.startsWith("large-release-")).map(([c]) => c)).toEqual(["large-release-" + ev("Released", {}, 30n).txHash + "-0"]);
+  });
+});
+
+describe.skipIf(!havePostgres())("audit I-10: the outflow cursor waits for delivery", () => {
+  let pg: TestDb;
+  beforeAll(async () => {
+    pg = await bootDb();
+  });
+  afterAll(async () => pg?.stop());
+
+  test("a failed send holds the cursor and the release is raised again; a delivered or unarmed send moves it", async () => {
+    const now = new Date("2026-10-21T10:00:00Z");
+    const big = ev("Released", { id: "7", to: A(7), amount: usdg(1800) }, 40n);
+    await pg.db.insert(chainEvents).values([{ ...big, address: ESCROW, blockTime: new Date(now.getTime() - 60_000) }]);
+    await pg.db.insert(cursors).values([{ name: "main", block: 45n }, { name: "outflow-watch", block: 39n }]);
+    const deps = { env: loadEnv({ OUTFLOW_WINDOW_USDG: "100000" }), db: pg.db, log: () => {}, clients: { escrow: ESCROW } } as unknown as Deps;
+    const outCursor = async () => (await pg.db.select().from(cursors).where(eq(cursors.name, "outflow-watch")))[0]!.block;
+    const cause = `large-release-${big.txHash}-0`;
+
+    const tries: string[] = [];
+    await checkOutflow(deps, async (c) => (tries.push(c), false), now); // Telegram down
+    expect(tries).toEqual([cause]);
+    expect(await outCursor()).toBe(39n);
+
+    await checkOutflow(deps, async (c) => (tries.push(c), true), new Date(now.getTime() + 60_000)); // sent
+    expect(tries).toEqual([cause, cause]);
+    expect(await outCursor()).toBe(45n);
+
+    // unarmed (log-only) counts as delivered: an unarmed server never stalls on the same block
+    const big2 = ev("Released", { id: "8", to: A(8), amount: usdg(1800) }, 50n);
+    await pg.db.insert(chainEvents).values([{ ...big2, address: ESCROW, blockTime: now }]);
+    await pg.db.update(cursors).set({ block: 55n }).where(eq(cursors.name, "main"));
+    const logs: string[] = [];
+    await checkOutflow(deps, makeAlert({ armed: false, log: (m) => logs.push(m) }), new Date(now.getTime() + 120_000));
+    expect(logs).toContain("alert (not sent: unarmed)");
+    expect(await outCursor()).toBe(55n);
   });
 });

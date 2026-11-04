@@ -4,6 +4,11 @@ import type { Env } from "../config/env";
 
 export const ALERT_DEDUPE_MS = 30 * 60 * 1000;
 
+/**
+ * Resolves true when the alert was handled as configured: sent to Telegram, or written to the log because alerts are
+ * not armed (log-only is the configured sink, so a caller waiting for delivery must not stall forever on it). False
+ * when it was not delivered: a failed send, or the cause was already claimed in the last 30 minutes.
+ */
 export type AlertFn = (cause: string, text: string) => Promise<boolean>;
 
 export interface AlertOptions {
@@ -32,7 +37,7 @@ export function makeAlert(o: AlertOptions): AlertFn {
     if (!(await claim(cause, ALERT_DEDUPE_MS))) return false;
     if (!o.armed || !o.token || !o.chatId) {
       o.log("alert (not sent: unarmed)", { cause, text });
-      return false;
+      return true; // audit I-10: log-only is the configured delivery while unarmed
     }
     try {
       const res = await (o.fetchImpl ?? fetch)(`https://api.telegram.org/bot${o.token}/sendMessage`, {

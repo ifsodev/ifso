@@ -216,7 +216,18 @@ export async function checkOutflow(deps: Deps, alert: AlertFn, now = new Date())
   const windowRows = await read(gte(chainEvents.blockTime, since));
   const freshRows = own ? await read(gt(chainEvents.blockNumber, own.block)) : windowRows;
   const list = outflowAlerts(windowRows.flatMap(outflowsOf), freshRows.flatMap(outflowsOf), env);
-  for (const a of list) await alert(a.cause, a.text);
+  // Audit I-10: the cursor moves past these blocks only when every per-transfer alert was delivered (sent, or logged
+  // while unarmed). A failed send keeps them fresh, so they are raised again once the 30-minute dedupe lets them
+  // through. The window total is recomputed from the time window every run, so it does not hold the cursor.
+  let delivered = true;
+  for (const a of list) {
+    const ok = await alert(a.cause, a.text);
+    if (a.cause !== "outflow-window" && !ok) delivered = false;
+  }
+  if (!delivered) {
+    deps.log("outflow alert not delivered, outflow cursor held", { at: own?.block?.toString() ?? null });
+    return list.length;
+  }
   await db.insert(cursors).values({ name: OUTFLOW_CURSOR, block: main.block }).onConflictDoUpdate({ target: cursors.name, set: { block: main.block } });
   return list.length;
 }
