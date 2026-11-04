@@ -213,10 +213,11 @@ await step("API", "healthz agrees with the deployment; readyz ok", async () => {
   const r = await (await fetch(`${A.api}/readyz`)).json();
   expect(r.ok, "readyz " + JSON.stringify(r));
 });
-await step("API", "geo: DE allowed, US and unknown blocked for stock prices", async () => {
+await step("API", "geo: DE and US allowed, GB and unknown blocked for stock prices", async () => {
   const g = async (c?: string) => (await (await fetch(`${A.api}/geo`, { headers: c ? { "cf-ipcountry": c, "cf-connecting-ip": "203.0.113.9" } : { "cf-connecting-ip": "203.0.113.9" } })).json()).stockPriceConditionsAllowed;
   eq(await g("DE"), true, "DE");
-  eq(await g("US"), false, "US");
+  eq(await g("US"), true, "US"); // DECISIONS #41: only GB and CH are gated
+  eq(await g("GB"), false, "GB");
   eq(await g(undefined), false, "unknown");
 });
 await step("API", "parse + describe + a question the site must show (weekend close)", async () => {
@@ -237,7 +238,7 @@ await step("API", "perks locked without the token; planBatch answers locked", as
   const s = await q("stats", {});
   expect(typeof s.escrowsCreated === "number" || typeof s.escrowsCreated === "string", "stats");
 });
-await refused("Region", "stock price condition refused from the US (build)", () => apiBuild("alice", "/ifso link 20 if spy closes above 100 on nov 3", { link: true, headers: { "cf-ipcountry": "US", "cf-connecting-ip": "203.0.113.10" } }), /FORBIDDEN|not available|region|your/i);
+await refused("Region", "stock price condition refused from the UK (build)", () => apiBuild("alice", "/ifso link 20 if spy closes above 100 on nov 3", { link: true, headers: { "cf-ipcountry": "GB", "cf-connecting-ip": "203.0.113.10" } }), /FORBIDDEN|not available|region|your/i);
 
 // ---------------------------------------------------------------- 1 create (every way)
 const T10 = "in 10 minutes";
@@ -659,6 +660,7 @@ await step("Price", "swap the ETH/USD feed for a controllable double (fork only)
 await step("Price", "TOUCH: price crosses the level inside the window; price watcher releases early", async () => {
   const mm = await apiCreate("alice", `/ifso ${bobA} 20 if eth touches at or above 5000 by in 3 hours`);
   const before = await bal(bobA);
+  await warpBy(5); // the round must be at or after the window start (creation second + 1)
   await mock.push(5200_00000000n);
   await waitStatus(mm.id, S.RELEASED, 120_000);
   eq((await bal(bobA)) - before, U(20), "bob received");
