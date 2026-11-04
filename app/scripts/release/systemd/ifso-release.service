@@ -20,6 +20,11 @@ Environment=IFSO_ALLOW_REAL_DEPLOY=1
 # flock: one pass at a time (the runner also holds its own lock); a pass that finds the lock busy exits at once
 ExecStart=/usr/bin/flock -n /var/lib/ifso-release/home/.service.lock /usr/bin/python3 /usr/local/lib/ifso-release/lib/release.py pass
 TimeoutStartSec=3h
+# The pass starts the automatic preflight detached (release.py preflight_kick) and exits. With the default
+# KillMode=control-group systemd would kill it the moment the oneshot pass ends; KillMode=process stops only the main
+# process, so the preflight finishes (it has its own lock and never takes the release lock). journalctl may note
+# "left-over process" on the next start: that is this preflight, expected.
+KillMode=process
 Nice=10
 IOSchedulingClass=idle
 CPUWeight=20

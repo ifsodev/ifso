@@ -386,6 +386,37 @@ ok "failed rollback: after resume and retry the queue completes" test "$(st TU01
 ok "resume after a runner pause: ONE 'release queue RESUMED' message (the wrapper's), not a second from the next pass" test "$(grep '/sendMessage' "$CTL/requests.jsonl" | grep -c 'release queue RESUMED')" = 1
 as_rel kill "$(cat "$ROOT/w3.pid")" 2>/dev/null || true
 
+# =====================================================================================================================
+note "WORLD 4: arming (arm.sh, the real one): only on a preflight of the CURRENT main and schedule"
+new_world w4
+FUTURE="$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+runarm() { # runarm [KEY=VALUE...]: the real arm.sh as root (Linux) or under the prefix (local); output in $W/arm.out
+  if [[ $MODE == linux ]]; then env "$@" SYSTEMCTL="$SYSTEMCTL" LAUNCH_AT="$FUTURE" bash "$REL/arm.sh" >"$W/arm.out" 2>&1
+  else env "$@" PREFIX="$PFX" SYSTEMCTL=true LAUNCH_AT="$FUTURE" bash "$REL/arm.sh" >"$W/arm.out" 2>&1; fi
+}
+as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4a.out" 2>&1
+ok "preflight on the base main: 3 of 3 PASS" grep -q "preflight: 3 of 3 PASS" "$W/home/preflight/status"
+# an owner fix lands on private main AFTER that preflight: its results no longer say anything about the new main
+git -C "$S" checkout -q main; echo "export const fix = 1" >"$S/app/src/ownerfix.ts"; sg add -A; sg commit -q -m "fix(api): owner fix after the preflight"
+git -C "$S" push -q "$W/private.git" main
+runarm ARM_TEST=1; ARC=$?
+ok "arm.sh refuses preflight results from an older main (and says which)" bash -c "test $ARC -ne 0 && grep -q 'preflight ran on main' '$W/arm.out'"
+ok "refused arming left no flag file" test ! -e "$W/ALLOW_REAL_DEPLOY"
+as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4b.out" 2>&1
+cp "$W/home/preflight/results.json" "$W/pf-good.json"
+python3 - "$W/home/preflight/results.json" <<'PY'
+import json, sys
+p = sys.argv[1]; r = json.load(open(p)); r["sfp"] = "0" * 16; json.dump(r, open(p, "w"))
+PY
+runarm ARM_TEST=1; ARC=$?
+ok "arm.sh refuses preflight results of another schedule" bash -c "test $ARC -ne 0 && grep -q 'another schedule' '$W/arm.out'"
+cp "$W/pf-good.json" "$W/home/preflight/results.json"
+runarm ARM_TEST=1; ARC=$?
+ok "arm.sh arms on a preflight of the current main and schedule" bash -c "test $ARC -eq 0 && test -e '$W/ALLOW_REAL_DEPLOY' && grep -q ARMED '$W/arm.out'"
+ok "arming wrote LAUNCH_AT and the slots" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/schedule.json\")); sys.exit(0 if s[\"launchAt\"]==\"$FUTURE\" and all(u[\"slot\"] for u in s[\"updates\"]) else 1)'"
+rm -f "$W/ALLOW_REAL_DEPLOY"
+as_rel kill "$(cat "$ROOT/w4.pid")" 2>/dev/null || true
+
 if [[ $MODE == linux ]]; then
   note "sudo rules (real sudoers, real users)"
   ok "ops user can read the status through sudo" runuser -u "$OPS" -- sudo -n "$SBIN/ifso-release-status" --short

@@ -141,5 +141,9 @@ INST "$W/pfx2" >"$W/inst3.out" 2>&1
 ok "a second install.sh run keeps the installed copy (no SYNC_PUBLIC_SRC needed again)" grep -q 'stand-in' "$W/pfx2/usr/local/lib/ifso-release/lib/sync-public.py"
 ok "no reference to the missing server push script" bash -c "! grep -rq 'push-to-server[.]sh' '$HERE/..'"
 
+echo "== A1: the automatic preflight outlives the oneshot pass (systemd would kill the whole cgroup by default)"
+ok "ifso-release.service keeps the detached preflight alive (KillMode=process)" grep -qx 'KillMode=process' "$HERE/../systemd/ifso-release.service"
+ok "the runner starts the preflight in its own session (detached)" grep -q 'start_new_session=True' "$HERE/../lib/release.py"
+
 echo "hardening cases: $PASS passed, $FAIL failed"
 [[ $FAIL == 0 ]]

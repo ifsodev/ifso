@@ -8,6 +8,7 @@
     release.py make-schedule --queue-repo P --base SHA [--ref tu-queue] [--manifest F] [--count 72]
     release.py remap --queue-repo P --ref NEWBRANCH [--tag T]   re-point pending AND held updates at a rebuilt queue
     release.py scan-queue             forbidden-word scan of every queue tree (arming precondition)
+    release.py arm-check              arming preconditions: schedule current, preflight of the current main and schedule all PASS
     release.py notify-test            one test alert through the notify wrapper
 
 Everything is driven by $RELEASE_HOME/state.json, written atomically after every step, so a pass that dies anywhere
@@ -976,6 +977,51 @@ def queue_settled(st, sched):
 
 
 # ------------------------------------------------------------------ commands
+def sched_fp(sched):
+    """Fingerprint of the schedule's updates (id=sha): preflight results carry it, arming compares it."""
+    return hashlib.sha256("".join(f"{u['id']}={u['sha']}" for u in sched["updates"]).encode()).hexdigest()[:16]
+
+
+def arm_problems(results_path):
+    """Why arming must be refused (empty = arm). The schedule must be current, and the last preflight must have run on the
+    CURRENT private main and the CURRENT schedule, covering every pending and held update, with no failure."""
+    out = []
+    sched = schedule()
+    st = init_state(sched)
+    stale = queue_alignment_error(sched)
+    if stale:
+        out.append(stale)
+    r = load(results_path, None)
+    if not r:
+        return out + [f"no preflight results ({results_path}): run sudo ifso-release-preflight first"]
+    git("fetch", "-q", "origin", ok=True)
+    main = rev(CFG["repo"], "origin/main")
+    if r.get("stale"):
+        out.append(f"the last preflight did not run: {r['stale'][:160]}")
+    elif r.get("main") != main:
+        out.append(f"preflight ran on main {str(r.get('main'))[:12]} but private main is now {main[:12]}: run sudo ifso-release-preflight again")
+    if r.get("sfp") != sched_fp(sched):
+        out.append("preflight results belong to another schedule (schedule.json changed since): run sudo ifso-release-preflight again")
+    want = [u["id"] for u in sched["updates"] if st["updates"][u["id"]]["status"] in ("pending", "held", "in_progress")]
+    res = r.get("results") or {}
+    missing = [k for k in want if k not in res or res[k].get("skipped")]
+    if missing:
+        out.append(f"preflight did not test {', '.join(missing[:8])}{' ...' if len(missing) > 8 else ''} (a --only run does not count)")
+    bad = sorted(k for k in want if k in res and not res[k].get("ok"))
+    if bad or r.get("failing"):
+        out.append(f"preflight failures: {', '.join(bad or r.get('failing'))}")
+    return out
+
+
+def cmd_arm_check(args):
+    probs = arm_problems(arg(args, "--preflight", os.path.join(RELEASE_HOME, "preflight", "results.json")))
+    for p in probs:
+        print(f"REFUSED: {p}")
+    if not probs:
+        print("arming checks: schedule current, preflight current and all PASS")
+    return 1 if probs else 0
+
+
 def cmd_status(short=False):
     sched = load(SCHEDULE, None)
     if sched is None:
@@ -1213,6 +1259,8 @@ def main():
             return cmd_make_schedule(a)
         if cmd == "remap":
             return cmd_remap(a)
+        if cmd == "arm-check":
+            return cmd_arm_check(a)
         if cmd == "scan-queue":
             return cmd_scan_queue()
         if cmd == "pause":

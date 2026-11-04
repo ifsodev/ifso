@@ -19,7 +19,7 @@ Rules it keeps (each one cost an earlier project hours):
   order, held ones included (the owner retries them).
 Output: $PF/results.json, $PF/status (one line), $PF/logs/<TUnn>.log. One alert per (main, failing set), one all-clear.
 """
-import fcntl, hashlib, json, os, sys, time
+import fcntl, os, sys
 
 LIB = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, LIB)
@@ -134,8 +134,7 @@ def run_all(only=None, quiet=False):
     return 1 if bad else 0
 
 
-def sched_fp(sched):
-    return hashlib.sha256("".join(f"{u['id']}={u['sha']}" for u in sched["updates"]).encode()).hexdigest()[:16]
+sched_fp = R.sched_fp  # one definition: arm-check compares the results against it
 
 
 def auto():
