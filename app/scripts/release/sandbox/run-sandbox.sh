@@ -155,6 +155,7 @@ new_world() { # new_world <name>
   setconf FORBIDDEN_FILE "$ETC/forbidden.txt"
   setconf GATE_WEB_RUNTIME node
   setconf PUBLIC_CI_API ""   # the CI watcher stays off in the passes (world 4 points it at the fake GitHub for arm.sh)
+  setconf VERCEL_STATUS_API ""   # the Vercel watcher stays off unless a world turns it on (worlds 1 to 3, at the fake GitHub)
   setconf INFRA_RETRY_S 0; setconf VERIFY_TRIES 2; setconf VERIFY_RETRY_S 0; setconf GAP_SLEEP 0; setconf PREFLIGHT_AUTO 0
   setconf FETCH_WAIT 0; setconf TRANSIENT_MAX_PASSES 6; setconf IFSO_SANDBOX 1; setconf DISK_MIN_GB 0
   # Linux: no *_CMD lines, so the runner uses its built-in `sudo -n /usr/local/sbin/...` defaults, exactly as on the server
@@ -235,6 +236,8 @@ ok "broken public copy: TU02 is released anyway" test "$(st TU02)" = released
 ok "broken public copy: flagged publicPending" test "$(st TU02 publicPending)" = True
 ok "broken public copy: ONE alert (keyed by cause)" test "$(grep '/sendMessage' "$CTL/requests.jsonl" | grep -c 'PUBLIC COPY FAILED')" = 1
 git -C "$W/backend" remote set-url public "$W/public.git"
+# TU03 changes web/: the Vercel watcher reads its commit status at the fake GitHub; Vercel says the deploy FAILED
+setconf VERCEL_STATUS_API "http://127.0.0.1:$PORT/repos/ifsodev/private-sandbox"; echo failure >"$CTL/vercel-state"
 # TU03: crash between the push and the state write
 EXTRA="IFSO_CRASH_AT=TU03:push:before-save" rpass; CRASH=$?
 ok "crash mid-release: the pass really died" test "$CRASH" -ne 0 -o "$(st TU03)" = in_progress
@@ -243,6 +246,11 @@ ok "crash mid-release: state says push NOT done yet" bash -c "! python3 -c 'impo
 rpass
 ok "crash mid-release: next pass adopted the push and released TU03" test "$(st TU03)" = released
 ok "crash mid-release: exactly one TU03 commit on main" test "$(main_subjects | grep -c 'TU03')" = 1
+ok "B17: Vercel FAILED on TU03's web/ commit: ONE 'VERCEL DEPLOY FAILED (TU03)' alert, TU03 stays released" bash -c "test \"\$(grep '/sendMessage' '$CTL/requests.jsonl' | grep -c 'VERCEL DEPLOY FAILED (TU03)')\" = 1 && test '$(st TU03)' = released"
+ok "B17: the commit read is TU03's private main commit" bash -c "grep -q \"/commits/\$(python3 -c 'import json; print(json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"landedSha\"])')/status\" '$CTL/requests.jsonl'"
+rpass
+ok "B17: a later pass does not repeat the Vercel alert" test "$(grep '/sendMessage' "$CTL/requests.jsonl" | grep -c 'VERCEL DEPLOY')" = 1
+setconf VERCEL_STATUS_API ""; rm -f "$CTL/vercel-state"
 ok "a changed test that spawns anvil is run by the gate (never skipped)" bash -c "python3 -c 'import json,sys; g=json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU01\"][\"gate\"]; sys.exit(0 if \"test/tu01.test.ts\" in g[\"tests\"] else 1)'"
 ok "world 1: 3 of 3 released" bash -c "test '$(st TU01)' = released -a '$(st TU02)' = released -a '$(st TU03)' = released"
 ok "world 1: public copy caught up (no publicPending left)" test -z "$(st TU02 publicPending)"
@@ -253,6 +261,7 @@ ok "world 1: perk-gated TU03 passed its check as 'locked'" bash -c "python3 -c '
 ok "world 1: production runs the last release" test "$(prod_subject)" = "feat(api): TU03 sandbox update 03"
 ok "web/ change (TU03): the gate ran the web install, tests and the PRODUCTION build" bash -c "grep -q '^web install' '$CTL/bun.calls' && grep -q '^web run test' '$CTL/bun.calls' && grep -q '^web run build' '$CTL/bun.calls'"
 ok "updates without a web/ change ran no web step" test "$(grep -c '^web run build' "$CTL/bun.calls")" = 1
+ok "B17: no Vercel watch on updates without a web/ change (TU01, TU02)" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/state.json\"))[\"updates\"]; sys.exit(0 if \"vercel\" not in s[\"TU01\"] and \"vercel\" not in s[\"TU02\"] and s[\"TU03\"][\"vercel\"][\"state\"]==\"failed\" else 1)'"
 # pause / abort / resume
 rp set-times --launch-at "$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"))')" >/dev/null
 as_ops "$SBIN/ifso-release-pause" "sandbox maintenance" >/dev/null 2>&1
@@ -305,6 +314,7 @@ setconf GATE_WEB_RUNTIME no-such-node-here
 # --- injected failures: TU01 test fails, TU02 deploy fails after the switch
 touch "$CTL/test-fail-TU01" "$CTL/deploy-fail-TU02"
 BEFORE_PROD="$(prod_sha)"
+setconf VERCEL_STATUS_API "http://127.0.0.1:$PORT/repos/ifsodev/private-sandbox"; setconf VERCEL_WAIT_MINUTES 0   # Vercel never reports
 rpass
 ok "gate failure: TU01 HELD" test "$(st TU01)" = held
 ok "gate failure: TU01 never reached private main" test "$(main_subjects | grep -c 'TU01')" = 0
@@ -319,6 +329,8 @@ ok "alerts: HELD TU01 in plain words (what/users/done/next)" bash -c "grep '/sen
 ok "alerts: TU02 ROLLED BACK" tg_has "TU02 ROLLED BACK"
 ok "alerts: TU03 release note to the ops chat" tg_has "TU03 released"
 ok "no node on the server: TU03's web/ change is flagged NOT GATED (alert + gate result), never silently skipped" bash -c "tg_has() { grep '/sendMessage' '$CTL/requests.jsonl' | grep -q \"\$1\"; }; tg_has 'WEB CHANGE NOT GATED TU03' && python3 -c 'import json,sys; g=json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"gate\"]; sys.exit(0 if g.get(\"webUngated\") else 1)'"
+ok "B17: Vercel never reported a deploy for TU03's web/ commit: 'VERCEL DEPLOY MISSING (TU03)', TU03 released" bash -c "grep '/sendMessage' '$CTL/requests.jsonl' | grep -q 'VERCEL DEPLOY MISSING (TU03)' && test '$(st TU03)' = released"
+setconf VERCEL_STATUS_API ""; setconf VERCEL_WAIT_MINUTES 20
 ok "alerts go to the OPS chat only (one chat id used)" bash -c "grep '/sendMessage' '$CTL/requests.jsonl' | grep -o 'chat_id=[-0-9]*' | sort -u | wc -l | tr -d ' ' | grep -q '^1$'"
 ok "public tree == private tree after the held round" public_equals_private
 ok "status: released 1, held 2" bash -c "as_ops() { :; }; python3 - <<'PY'
@@ -394,8 +406,11 @@ ok "failed rollback: further passes do nothing while paused (no loop, no second 
 rm -f "$CTL/deploy-fail-TU01" "$CTL/deploy-fail-revert"
 as_ops "$SBIN/ifso-release-resume" >/dev/null 2>&1
 as_ops "$SBIN/ifso-release-retry" TU01 >/dev/null 2>&1
+setconf VERCEL_STATUS_API "http://127.0.0.1:$PORT/repos/ifsodev/private-sandbox"; echo success >"$CTL/vercel-state"
 rpass
 ok "failed rollback: after resume and retry the queue completes" test "$(st TU01)" = released
+ok "B17: Vercel deploy of TU03's web/ commit succeeded: watch closed, no Vercel alert" bash -c "test '$(st TU03)' = released && python3 -c 'import json,sys; sys.exit(0 if json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"vercel\"][\"state\"]==\"ok\" else 1)' && ! grep '/sendMessage' '$CTL/requests.jsonl' | grep -q 'VERCEL DEPLOY'"
+setconf VERCEL_STATUS_API ""
 ok "resume after a runner pause: ONE 'release queue RESUMED' message (the wrapper's), not a second from the next pass" test "$(grep '/sendMessage' "$CTL/requests.jsonl" | grep -c 'release queue RESUMED')" = 1
 as_rel kill "$(cat "$ROOT/w3.pid")" 2>/dev/null || true
 

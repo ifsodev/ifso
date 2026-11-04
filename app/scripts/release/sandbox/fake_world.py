@@ -5,6 +5,8 @@
   Telegram               POST /bot<token>/sendMessage         (recorded in requests.jsonl)
   GitHub                 GET/POST/PATCH/DELETE /repos/<o>/<r>/releases..., POST /uploads/... assets, GET .../commits/main/check-runs
                          (CTL/ci.json = the check-runs; CTL/gh-token-bad = creating a Release answers 403)
+                         GET .../commits/<sha>/status and .../commits/<sha>/check-runs for any other sha: Vercel's commit status
+                         (CTL/vercel-state = success | failure | pending; absent = Vercel never reported anything)
 Injected failures are files in the control folder: readyz-down, verify-fail-TUnn (the route answers 500).
 usage: fake_world.py <port-file> <ctl-dir> <repo-dir> <opt-dir>
 """
@@ -67,6 +69,14 @@ class H(BaseHTTPRequestHandler):
             f = os.path.join(CTL, "ci.json")
             runs = json.load(open(f)) if os.path.exists(f) else [{"id": 1, "name": "app", "status": "completed", "conclusion": "success", "head_sha": "0" * 40}]
             return self.reply(200, {"total_count": len(runs), "check_runs": runs})
+        m = re.fullmatch(r"/repos/([^/]+/[^/]+)/commits/([0-9a-f]{40})/(status|check-runs)", p)
+        if m:  # Vercel's commit status on a private main commit
+            self.rec()
+            f = os.path.join(CTL, "vercel-state")
+            vs = open(f).read().strip() if os.path.exists(f) else ""
+            if m.group(3) == "status":
+                return self.reply(200, {"state": vs or "pending", "statuses": [{"context": "Vercel", "state": vs}] if vs else []})
+            return self.reply(200, {"total_count": 0, "check_runs": []})
         m = re.fullmatch(r"/repos/([^/]+/[^/]+)/releases/tags/(.+)", p)
         if m:
             r = releases.get(m.group(2))

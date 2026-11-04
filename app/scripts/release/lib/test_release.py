@@ -348,5 +348,87 @@ class PublicCI(unittest.TestCase):
             R.CFG["public_ci_api"] = ""
 
 
+class VercelStatus(unittest.TestCase):
+    """B17 (3): after a release that changes web/, Vercel's commit status of that commit is read every pass; a failed deploy or
+    none within VERCEL_WAIT_MINUTES is ONE alert per update. Never blocks a release; API errors only wait."""
+
+    def setUp(self):
+        self.sent, self.answer = [], {"statuses": [], "check_runs": []}
+        self.old = (R.run, R.vercel_api_get, R.CFG["vercel_api"], R.CFG["vercel_wait_min"])
+        R.run = lambda cmd, **k: (self.sent.append(cmd[1]) or (0, ""))
+        R.vercel_api_get = lambda path, timeout=15: self.answer
+        R.CFG["vercel_api"], R.CFG["vercel_wait_min"] = "http://gh.invalid/repos/o/r", 20
+        self.s = sched72()
+
+    def tearDown(self):
+        R.run, R.vercel_api_get, R.CFG["vercel_api"], R.CFG["vercel_wait_min"] = self.old
+
+    def st(self, minutes_ago=1):
+        st = state(self.s, TU03="released")
+        st["updates"]["TU03"]["vercel"] = {"sha": "c" * 40, "state": "watching",
+                                           "since": R.iso(R.now() - dt.timedelta(minutes=minutes_ago))}
+        return st
+
+    def test_failed_vercel_deploy_alerts_once(self):
+        st = self.st()
+        self.answer = {"statuses": [{"context": "Vercel", "state": "failure"}], "check_runs": []}
+        R.vercel_tick(st, self.s)
+        R.vercel_tick(st, self.s)
+        self.assertEqual(self.sent, ["VERCEL DEPLOY FAILED (TU03)"])
+        self.assertEqual(st["updates"]["TU03"]["status"], "released")
+        self.assertEqual(st["updates"]["TU03"]["vercel"]["state"], "failed")
+
+    def test_no_deploy_within_the_wait_alerts_missing(self):
+        st = self.st(minutes_ago=5)
+        R.vercel_tick(st, self.s)
+        self.assertEqual(self.sent, [])  # still inside the wait: nothing yet
+        st["updates"]["TU03"]["vercel"]["since"] = R.iso(R.now() - dt.timedelta(minutes=30))
+        R.vercel_tick(st, self.s)
+        R.vercel_tick(st, self.s)
+        self.assertEqual(self.sent, ["VERCEL DEPLOY MISSING (TU03)"])
+
+    def test_pending_past_the_wait_alerts_missing(self):
+        st = self.st(minutes_ago=30)
+        self.answer = {"statuses": [], "check_runs": [{"name": "Vercel - ifso", "status": "in_progress", "conclusion": None}]}
+        R.vercel_tick(st, self.s)
+        self.assertEqual(self.sent, ["VERCEL DEPLOY MISSING (TU03)"])
+        self.assertEqual(st["updates"]["TU03"]["vercel"]["state"], "stuck")
+
+    def test_success_is_quiet_and_other_contexts_are_ignored(self):
+        st = self.st(minutes_ago=30)
+        self.answer = {"statuses": [{"context": "Vercel", "state": "success"}, {"context": "ci/app", "state": "failure"}], "check_runs": []}
+        R.vercel_tick(st, self.s)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(st["updates"]["TU03"]["vercel"]["state"], "ok")
+
+    def test_superseded_cancelled_build_is_not_a_failure(self):
+        self.assertEqual(R.vercel_state([{"context": "Vercel", "state": "cancelled"}], []), "cancelled")
+        self.assertEqual(R.vercel_state([], [{"name": "Vercel", "conclusion": "cancelled"}, {"name": "Vercel", "conclusion": "failure"}]), "failed")
+
+    def test_api_errors_wait_and_off_by_default(self):
+        st = self.st(minutes_ago=30)
+
+        def boom(path, timeout=15):
+            raise OSError("rate limited")
+        R.vercel_api_get = boom
+        R.vercel_tick(st, self.s)
+        self.assertEqual((self.sent, st["updates"]["TU03"]["vercel"]["state"]), ([], "watching"))
+        R.CFG["vercel_api"] = ""
+        R.vercel_api_get = lambda path, timeout=15: {"statuses": [{"context": "Vercel", "state": "failure"}]}
+        R.vercel_tick(st, self.s)
+        self.assertEqual(self.sent, [])
+
+    def test_install_placeholder_and_empty_keep_it_off(self):
+        import importlib
+        for v in ("", "https://api.github.com/repos/CHANGE_ME/CHANGE_ME"):
+            os.environ["VERCEL_STATUS_API"] = v
+            try:
+                self.assertEqual(importlib.reload(R).CFG["vercel_api"], "")
+            finally:
+                os.environ.pop("VERCEL_STATUS_API", None)
+        importlib.reload(R)
+        self.old = (R.run, R.vercel_api_get, R.CFG["vercel_api"], R.CFG["vercel_wait_min"])
+
+
 if __name__ == "__main__":
     unittest.main()

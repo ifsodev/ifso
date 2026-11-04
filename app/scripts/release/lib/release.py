@@ -71,6 +71,14 @@ CFG = {
     "sandbox": E("IFSO_SANDBOX", "0") == "1",
     "public_ci_api": "" if "CHANGE_ME" in E("PUBLIC_CI_API", "") else E("PUBLIC_CI_API", "").rstrip("/"),  # https://api.github.com/repos/<owner>/<repo>; empty or the install placeholder = off
     "max_per_pass": int(E("MAX_PER_PASS", "0")),
+    # Vercel builds web/ from PRIVATE main. After a release that changes web/, the runner reads the GitHub commit statuses and
+    # check-runs of that commit (Vercel posts them) and alerts when the Vercel deploy failed or never finished within
+    # VERCEL_WAIT_MINUTES. Never blocks a release. VERCEL_STATUS_API=https://api.github.com/repos/<owner>/<private repo>
+    # (empty or CHANGE_ME = off); a private repo needs VERCEL_STATUS_TOKEN_FILE: a file readable by the release user holding a
+    # fine-grained READ-ONLY token (Commit statuses + Checks: read) on that repo only. Anonymous when no file is set.
+    "vercel_api": "" if "CHANGE_ME" in E("VERCEL_STATUS_API", "") else E("VERCEL_STATUS_API", "").rstrip("/"),
+    "vercel_token_file": E("VERCEL_STATUS_TOKEN_FILE", ""),
+    "vercel_wait_min": float(E("VERCEL_WAIT_MINUTES", "20")),
     # /readyz answers 503 when the chain head is over the APP's 60 s (app/src/ops/health.ts RPC_MAX_LAG_S). Robinhood Chain (an
     # Orbit chain) makes no block without traffic, so a quiet hour would fail every post-release check and roll good updates
     # back. The runner accepts a 503 whose ONLY reasons are head lag up to this many seconds. CALIBRATE on the server before
@@ -821,6 +829,8 @@ def release_steps(st, sched, u, t, log, resuming):
         t.pop("pushed", None)
         t.pop("blockedReason", None)
         st["lastReleaseAt"] = t["releasedAt"]
+        if CFG["vercel_api"] and web_changed(t["landedSha"]):  # read by vercel_tick at the end of this and later passes
+            t["vercel"] = {"sha": t["landedSha"], "since": t["releasedAt"], "state": "watching"}
         st.pop("allDone", None)
         nxt = next_pending(st, sched, any_time=True)
         pub = t.get("publicSha")
@@ -950,6 +960,75 @@ def public_ci_tick(st):
         say(f"public CI check skipped: {type(e).__name__}")
 
 
+def web_changed(sha):
+    code, out = run(["git", "-c", "safe.directory=*", "-C", CFG["repo"], "diff-tree", "--no-commit-id", "--name-only", "-r", sha])
+    return code == 0 and any(x.startswith("web/") for x in out.splitlines())
+
+
+def vercel_api_get(path, timeout=15):
+    """One GitHub API GET for the Vercel watcher (anonymous, or the read-only token file). Raises on any error."""
+    hdr = {"Accept": "application/vnd.github+json", "User-Agent": "ifso-release"}
+    tf = CFG["vercel_token_file"]
+    if tf:
+        tok = open(tf).read().strip()
+        if tok:
+            hdr["Authorization"] = f"Bearer {tok}"
+    with urllib.request.urlopen(urllib.request.Request(f"{CFG['vercel_api']}{path}", headers=hdr), timeout=timeout) as r:
+        return json.load(r)
+
+
+def vercel_state(statuses, check_runs):
+    """'failed', 'ok', 'cancelled', 'pending' or 'none' from a commit's statuses and check-runs (only entries whose name says Vercel)."""
+    v = [s.get("state") for s in statuses if "vercel" in str(s.get("context", "")).lower()]
+    v += [c.get("conclusion") or c.get("status") for c in check_runs if "vercel" in str(c.get("name", "")).lower()]
+    if not v:
+        return "none"
+    if any(x in ("failure", "error", "timed_out", "action_required") for x in v):
+        return "failed"
+    if all(x == "cancelled" for x in v):  # Vercel cancels a build that a newer push replaced: not a failure
+        return "cancelled"
+    if any(x in ("pending", "queued", "in_progress", "requested", "waiting", None) for x in v):
+        return "pending"
+    return "ok"
+
+
+def vercel_tick(st, sched):
+    """For each released update that changed web/: read Vercel's commit status of its private main commit. A failed deploy, or
+    none finished within VERCEL_WAIT_MINUTES, raises ONE alert per update. API errors only wait. Never blocks a release."""
+    if not CFG["vercel_api"]:
+        return
+    for u in sched["updates"]:
+        t = st["updates"].get(u["id"]) or {}
+        w = t.get("vercel")
+        if not w or w.get("state") != "watching":
+            continue
+        try:
+            sha = w["sha"]
+            statuses = vercel_api_get(f"/commits/{sha}/status").get("statuses", [])
+            runs = vercel_api_get(f"/commits/{sha}/check-runs?per_page=100").get("check_runs", [])
+        except Exception as e:  # noqa: BLE001
+            say(f"Vercel status of {u['id']} skipped: {type(e).__name__}")
+            continue
+        state = vercel_state(statuses, runs)
+        late = (now() - parse(w["since"])).total_seconds() > CFG["vercel_wait_min"] * 60
+        if state in ("ok", "cancelled"):
+            w["state"] = state
+        elif state == "failed":
+            w["state"] = "failed"
+            notify(st, f"VERCEL DEPLOY FAILED ({u['id']})", plain(
+                f"{u['id']} changed web/ and Vercel reported a FAILED deploy for its commit {sha[:10]}",
+                "the API and the bot run the new code; the website still shows the previous version", "nothing is blocked; releases continue",
+                "open the Vercel deployment of that commit (blocked author? build error?) and fix it through the owner-fix path"),
+                failure=True, key=f"vercel-{u['id']}")
+        elif late:
+            w["state"] = "missing" if state == "none" else "stuck"
+            notify(st, f"VERCEL DEPLOY MISSING ({u['id']})", plain(
+                f"{u['id']} changed web/, but Vercel {'never reported a deploy' if state == 'none' else 'did not finish its deploy'} for its "
+                f"commit {sha[:10]} within {CFG['vercel_wait_min']:g} minutes", "the website may still show the previous version",
+                "nothing is blocked; releases continue", "check the Vercel project (a commit author outside the Vercel team is skipped) and the live page"),
+                failure=True, key=f"vercel-{u['id']}")
+
+
 def preflight_kick():
     if not CFG["preflight_auto"]:
         return
@@ -1054,6 +1133,7 @@ def _pass():
         if CFG["max_per_pass"] and done_now >= CFG["max_per_pass"]:
             break
     public_ci_tick(st)
+    vercel_tick(st, sched)
     save(STATE, st)
     ping(health_problems(st, sched), health_notes(st))
     preflight_kick()
