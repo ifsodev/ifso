@@ -1223,10 +1223,21 @@ def arg(args, name, default=None):
 def cmd_make_schedule(args):
     qrepo, ref, base = arg(args, "--queue-repo"), arg(args, "--ref", "tu-queue"), arg(args, "--base")
     count = int(arg(args, "--count", "72"))
+    if count < 1:
+        sys.exit("--count must be the number of updates (72); the count check cannot be switched off")
     manifest = load(arg(args, "--manifest", "/nonexistent"), {})
     shas = subprocess.run(["git", "-C", qrepo, "rev-list", "--first-parent", "--reverse", f"{base}..{ref}"], capture_output=True, text=True, check=True).stdout.split()
-    if count and len(shas) != count:
-        sys.exit(f"the queue has {len(shas)} commits after the base, expected {count}")
+    if len(shas) != count:
+        # ids are given by POSITION: one extra or missing commit shifts every later TU id, note, poster, tag and manifest key
+        odd = []
+        for i, sha in enumerate(shas, 1):
+            subj = subprocess.run(["git", "-C", qrepo, "log", "-1", "--format=%h %s", sha], capture_output=True, text=True, check=True).stdout.strip()
+            if not re.search(r"\btu0*%d\b" % i, subj, re.I):
+                odd.append(f"  position {i}: {subj}")
+        sys.exit(f"REFUSED: the queue {ref} has {len(shas)} commits after the base {base[:10]}, but --count {count}. TU ids come from the "
+                 f"position, so this would shift every later id, note, poster and tag. Fix the QUEUE (squash an extra commit into "
+                 f"its update, e.g. a web half into the update it belongs to), do not renumber and do not change --count.\n"
+                 + ("Commits whose subject does not name the TU of their position (the first one is where it goes wrong):\n" + "\n".join(odd[:5]) if odd else ""))
     ups = []
     for i, sha in enumerate(shas, 1):
         tid = f"TU{i:02d}"

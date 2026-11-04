@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests of the runner's decision logic (no git, no network, no sudo). Run: python3 -m unittest discover -s lib -p 'test_*.py'"""
-import datetime as dt, json, os, sys, tempfile, unittest
+import datetime as dt, json, os, subprocess, sys, tempfile, unittest
 
 HOME = tempfile.mkdtemp(prefix="ifso-release-unit.")
 os.environ.update(RELEASE_HOME=HOME, NOTIFY_CMD="true", ALLOW_FILE=os.path.join(HOME, "ALLOW"), PUBLIC_CI_API="")
@@ -238,6 +238,41 @@ class ReadyzLag(unittest.TestCase):
 
     def test_default_limit_is_the_apps_60_s(self):
         self.assertEqual(R.CFG["rpc_max_lag_s"], 60)
+
+
+class MakeSchedule(unittest.TestCase):
+    """TU ids come from the queue POSITION, so a queue with a different number of commits than --count is refused loudly
+    (an extra commit would shift every later id, note, poster and tag). Nothing is renumbered."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.q = tempfile.mkdtemp(prefix="ifso-queue.")
+        g = lambda *a: subprocess.run(["git", "-C", cls.q, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", *a],
+                                      check=True, capture_output=True, text=True).stdout.strip()  # noqa: E731
+        g("init", "-q", "-b", "tu-queue")
+        g("commit", "-q", "--allow-empty", "-m", "chore: base")
+        cls.base = g("rev-parse", "HEAD")
+        for subj in ("feat(tu01): one", "feat(web): the web half of tu01", "feat(tu02): two", "feat(tu03): three"):
+            g("commit", "-q", "--allow-empty", "-m", subj)
+        cls.extra = g("log", "-1", "--format=%h", "--grep=web half")
+
+    def make(self, count):
+        return R.cmd_make_schedule(["--queue-repo", self.q, "--base", self.base, "--count", str(count)])
+
+    def test_wrong_count_is_refused_and_names_the_odd_commit(self):
+        with self.assertRaises(SystemExit) as e:
+            self.make(3)
+        msg = str(e.exception)
+        for want in ("4 commits", "--count 3", "do not renumber", self.extra, "feat(web)"):
+            self.assertIn(want, msg)
+
+    def test_count_zero_cannot_switch_the_check_off(self):
+        with self.assertRaises(SystemExit):
+            self.make(0)
+
+    def test_right_count_writes_the_schedule(self):
+        self.assertEqual(self.make(4), 0)
+        self.assertEqual([u["id"] for u in R.load(R.SCHEDULE, None)["updates"]], ["TU01", "TU02", "TU03", "TU04"])
 
 
 class Resume(unittest.TestCase):
