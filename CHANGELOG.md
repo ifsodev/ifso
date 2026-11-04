@@ -14,7 +14,7 @@ is under Unreleased and is grouped by area. Dates are the commit dates (UTC).
   relayed decisions and refund redirects (EIP-712, EOA or EIP-1271 signers), flat creation and resolver fees capped at
   5 USDG each, and a per-escrow launch cap on new entries.
 - 2026-10-30: Deploy script that is keyless, refuses real chains unless armed, writes a deployment record, asserts the
-  launch cap, a real Safe owner and Pyth off, and publishes source to Sourcify.
+  launch cap, a real multisig owner and Pyth off, and publishes source to Sourcify.
 - 2026-10-30: Application in `app/`: typed-data builder and parser, API, keeper, price watcher, indexer, outcome resolver
   workers, Telegram bot flow, per-role environment, RPC fallback and health probes, and `ifso-cli` to refund, settle and
   claim without the website, bot or server.
@@ -81,5 +81,5 @@ is under Unreleased and is grouped by area. Dates are the commit dates (UTC).
   after a late proposal still settles before expiry (round 2, L2).
 - 2026-10-30: The gas-starvation guard of a void refund covers the USDG proxy's second call frame (`g/16` instead of
   `g/63`), so a starved transfer can never record a payable side as owed (round 2, I1).
-- 2026-10-30: Deploy assertions now fail when the launch cap is removed, when the owner is not a real Safe, and when Pyth
+- 2026-10-30: Deploy assertions now fail when the launch cap is removed, when the owner is not a real multisig, and when Pyth
   is switched on.

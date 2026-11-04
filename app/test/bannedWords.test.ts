@@ -41,6 +41,12 @@ describe("banned words in user-facing copy", () => {
       for (const re of BANNED) expect(literals.filter((l) => re.test(l))).toEqual([]);
     }
   });
+  // CHANGELOG.md is public release-notes copy: every queued update adds an entry there.
+  test("CHANGELOG.md (repo root, public release notes) uses no banned or endorsement words", () => {
+    const lines = readFileSync(join(import.meta.dir, "../../CHANGELOG.md"), "utf8").split("\n");
+    const hits = lines.flatMap((l, i) => [...BANNED, ENDORSEMENT].filter((re) => re.test(l)).map((re) => `CHANGELOG.md:${i + 1} ${re}: ${l.trim()}`));
+    expect(hits).toEqual([]);
+  });
   test("no endorsement wording in copy", () => {
     expect(strings.filter(([, s]) => ENDORSEMENT.test(s))).toEqual([]);
   });
