@@ -1326,7 +1326,7 @@ def journal_at(repo, sha):
         raise SystemExit(f"REFUSED: {JOURNAL} in {sha[:10]} is not valid JSON ({e})")
 
 
-def journal_order(repo, base, shas):
+def journal_order(repo, base, shas, ids=None):
     """(problems, migrating ids) for the queue `shas` on `base`. Drizzle applies a migration only when its journal `when` is
     newer than the last APPLIED one, so a queued migration whose `when` is not above every earlier one (main's and the earlier
     queue entries') would be skipped silently on the server (an earlier project's incident 27)."""
@@ -1335,15 +1335,16 @@ def journal_order(repo, base, shas):
     top_from = "main (the base)"
     problems, migrating = [], set()
     for i, sha in enumerate(shas, 1):
+        tid = ids[i - 1] if ids else f"TU{i:02d}"
         new = sorted((e for e in journal_at(repo, sha) if e.get("tag") not in seen), key=lambda e: e.get("idx", 0))
         for e in new:
             w = int(e.get("when") or 0)
             if w <= top:
-                problems.append(f"  TU{i:02d} {sha[:10]}: migration {e.get('tag')} has when {w}, not above {top} ({top_from})")
+                problems.append(f"  {tid} {sha[:10]}: migration {e.get('tag')} has when {w}, not above {top} ({top_from})")
             else:
-                top, top_from = w, f"TU{i:02d} {e.get('tag')}"
+                top, top_from = w, f"{tid} {e.get('tag')}"
             seen.add(e.get("tag"))
-            migrating.add(f"TU{i:02d}")
+            migrating.add(tid)
     return problems, migrating
 
 
@@ -1395,8 +1396,10 @@ def cmd_make_schedule(args):
 
 
 def cmd_remap(args):
-    """Re-point PENDING and HELD updates at a rebuilt queue branch (matched by subject, in order). Run `retry` for held
+    """Re-point PENDING and HELD updates at a rebuilt queue branch. The branch (base..ref) must hold exactly those updates: the
+    same count and the same subjects in the same order, else it refuses with a diff and changes nothing. Run `retry` for held
     ones first; refuses while an update is in progress. The old schedule is kept as schedule.json.pre-<tag>."""
+    import difflib
     qrepo, ref = arg(args, "--queue-repo"), arg(args, "--ref")
     tag = arg(args, "--tag", now().strftime("%Y%m%dT%H%M%S"))
     sched = schedule()
@@ -1406,23 +1409,31 @@ def cmd_remap(args):
     base = arg(args, "--base", sched["base"])
     new = subprocess.run(["git", "-C", qrepo, "rev-list", "--first-parent", "--reverse", f"{base}..{ref}"], capture_output=True, text=True, check=True).stdout.split()
     subj = lambda s: subprocess.run(["git", "-C", qrepo, "log", "-1", "--format=%s", s], capture_output=True, text=True, check=True).stdout.strip()  # noqa: E731
-    newby = {}
-    for s in new:
-        newby.setdefault(subj(s), s)
+    waiting = [u for u in sched["updates"] if st["updates"][u["id"]]["status"] in ("pending", "held")]
+    want = []
+    for u in waiting:
+        old = subprocess.run(["git", "-C", CFG["queue_repo"], "log", "-1", "--format=%s", u["sha"]], capture_output=True, text=True).stdout.strip() \
+              or subprocess.run(["git", "-C", qrepo, "log", "-1", "--format=%s", u["sha"]], capture_output=True, text=True).stdout.strip()
+        if not old:
+            sys.exit(f"{u['id']}: its scheduled commit {u['sha'][:10]} is in neither queue repo; schedule.json untouched")
+        want.append(f"{u['id']}  {old}")
+    got = [f"{waiting[i]['id'] if i < len(waiting) else '(extra)'}  {subj(s)}" for i, s in enumerate(new)]
+    if len(new) != len(waiting) or [w.split("  ", 1)[1] for w in want] != [g.split("  ", 1)[1] for g in got]:
+        diff = "\n".join(difflib.unified_diff(want, got, "schedule.json (pending + held, in order)", f"{ref} ({base[:10]}..)", lineterm="", n=2))
+        sys.exit(f"REFUSED: {ref} has {len(new)} commits after {base[:10]}; the schedule has {len(waiting)} pending/held updates. The "
+                 f"rebuilt branch must hold exactly those, with the same subjects in the same order (pass --base <the main it was "
+                 f"rebuilt on>). schedule.json untouched.\n{diff}")
+    problems, _ = journal_order(qrepo, base, new, ids=[u["id"] for u in waiting])
+    if problems:
+        sys.exit(journal_refusal(problems))
     save(SCHEDULE + f".pre-{tag}", sched)
-    n = 0
-    for u in sched["updates"]:
-        if st["updates"][u["id"]]["status"] in ("pending", "held"):
-            old = subprocess.run(["git", "-C", CFG["queue_repo"], "log", "-1", "--format=%s", u["sha"]], capture_output=True, text=True).stdout.strip() \
-                  or subprocess.run(["git", "-C", qrepo, "log", "-1", "--format=%s", u["sha"]], capture_output=True, text=True).stdout.strip()
-            if old not in newby:
-                sys.exit(f"{u['id']}: no commit with subject '{old}' on {ref}; schedule.json untouched (backup kept)")
-            u["sha"] = newby[old]
-            n += 1
+    for u, s in zip(waiting, new):
+        u["sha"] = s
     sched["tip"] = new[-1] if new else sched["tip"]
     sched["base"] = base
     save(SCHEDULE, sched)
-    print(f"remapped {n} pending/held updates onto {ref}; tip {sched['tip'][:10]}; old schedule kept as schedule.json.pre-{tag}.\n"
+    print(f"remapped {len(waiting)} pending/held updates onto {ref} (same count, same subjects, same order); tip {sched['tip'][:10]}; "
+          f"old schedule kept as schedule.json.pre-{tag}.\n"
           f"Next: push the same branch to the server queue repo as {CFG['queue_ref'].rsplit('/', 1)[-1]}, then run a preflight.")
     return 0
 

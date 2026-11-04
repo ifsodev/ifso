@@ -53,7 +53,7 @@ for i in $(seq 40); do echo $(( $(date +%s) - $(cast block latest --field timest
 
 The runner fast-forwards an update whose parent is main and cherry-picks the others; after an owner fix the queue is rebuilt on
 the new main so nothing conflicts at its slot. There is no `queue-rebased` command: the path is `release.py remap` (re-points
-PENDING and HELD updates by subject) plus moving `tu-queue`, which the runner follows (`schedule.json`'s tip must equal it, or
+PENDING and HELD updates in order; it refuses with a diff unless the new branch holds exactly those updates, same count, same subjects, same order, and their migration journal `when` values still increase) plus moving `tu-queue`, which the runner follows (`schedule.json`'s tip must equal it, or
 every pass stops with one STALE line). `push-queue.sh` never overwrites `tu-queue`: a rebuilt queue goes to a NEW branch.
 Best: rebuild and preflight the queue on the Mac BEFORE pushing the owner fix, so the pause lasts minutes.
 

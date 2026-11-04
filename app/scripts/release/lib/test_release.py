@@ -512,5 +512,65 @@ class MigrationOrder(unittest.TestCase):
         self.assertEqual([u["migration"] for u in R.load(R.SCHEDULE, None)["updates"]], [True, False, True])
 
 
+class Remap(unittest.TestCase):
+    """E13: remap re-points pending AND held updates only when the rebuilt branch holds exactly them: the same count and the
+    same subjects in the same order. Anything else is refused with a diff and schedule.json is untouched."""
+
+    def setUp(self):
+        self.q = tempfile.mkdtemp(prefix="ifso-remap.")
+        self.g("init", "-q", "-b", "tu-queue")
+        self.g("commit", "-q", "--allow-empty", "-m", "chore: base")
+        self.base = self.g("rev-parse", "HEAD")
+        for i in (1, 2, 3):
+            self.g("commit", "-q", "--allow-empty", "-m", f"feat(tu0{i}): update {i}")
+        self.old = self.g("rev-list", "--reverse", f"{self.base}..tu-queue").split()
+        R.save(R.SCHEDULE, {"launchAt": None, "minGapMinutes": 2, "base": self.base, "tip": self.old[-1],
+                            "updates": [{"id": f"TU0{i}", "n": i, "name": f"u{i}", "sha": s, "slot": None, "dependsOn": [], "migration": False}
+                                        for i, s in enumerate(self.old, 1)]})
+        R.save(R.STATE, {"updates": {"TU01": {"status": "released"}, "TU02": {"status": "held"}, "TU03": {"status": "pending"}}})
+        self.oldq, R.CFG["queue_repo"] = R.CFG["queue_repo"], self.q
+
+    def tearDown(self):
+        R.CFG["queue_repo"] = self.oldq
+        os.remove(R.STATE)
+
+    def g(self, *a):
+        return subprocess.run(["git", "-C", self.q, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", *a],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def branch(self, name, subjects):
+        self.g("checkout", "-q", "-b", name, self.base)
+        for x in subjects:
+            self.g("commit", "-q", "--allow-empty", "-m", x)
+        self.g("checkout", "-q", "tu-queue")
+
+    def remap(self, ref):
+        return R.cmd_remap(["--queue-repo", self.q, "--ref", ref, "--tag", ref])
+
+    def test_swapped_order_is_refused_with_a_diff(self):
+        self.branch("r-swap", ["feat(tu03): update 3", "feat(tu02): update 2"])
+        with self.assertRaises(SystemExit) as e:
+            self.remap("r-swap")
+        self.assertIn("same order", str(e.exception))
+        self.assertIn("+TU02  feat(tu03): update 3", str(e.exception))
+        self.assertEqual([u["sha"] for u in R.load(R.SCHEDULE, None)["updates"]], self.old)
+
+    def test_extra_or_missing_commit_is_refused(self):
+        self.branch("r-extra", ["feat(tu02): update 2", "feat(web): stray half", "feat(tu03): update 3"])
+        with self.assertRaises(SystemExit) as e:
+            self.remap("r-extra")
+        self.assertIn("3 commits", str(e.exception))
+        self.branch("r-short", ["feat(tu02): update 2"])
+        with self.assertRaises(SystemExit):
+            self.remap("r-short")
+        self.assertEqual([u["sha"] for u in R.load(R.SCHEDULE, None)["updates"]], self.old)
+
+    def test_exact_branch_remaps_held_and_pending_in_order(self):
+        self.branch("r-ok", ["feat(tu02): update 2", "feat(tu03): update 3"])
+        self.assertEqual(self.remap("r-ok"), 0)
+        new = self.g("rev-list", "--reverse", f"{self.base}..r-ok").split()
+        self.assertEqual([u["sha"] for u in R.load(R.SCHEDULE, None)["updates"]], [self.old[0]] + new)
+
+
 if __name__ == "__main__":
     unittest.main()
