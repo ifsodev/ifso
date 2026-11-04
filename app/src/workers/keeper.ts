@@ -16,6 +16,7 @@ import { isShadow, sendCall, shadowCall, type ContractCall, type SendResult } fr
 import { raise, type Deps } from "./deps";
 import { fetchPythUpdate } from "./pyth";
 import { VOID_OWED_COUNTER, VOID_OWED_SENDER } from "./indexer";
+import { noteOutcomeWait, resetOutcomeWaits, takeReleased } from "./outcomeWaits";
 
 const BATCH = 50; //   sends per pass
 const SCAN = 200; //   rows looked at per pass (rows in backoff are skipped and do not count against it)
@@ -67,7 +68,7 @@ const BACKOFF_MAX_MS = 6 * 3600_000;
 // Audit L-4: waits (nothing to send yet) and failures (a send that reverted or errored) keep separate counters, so a row
 // that waited through a long hold window is retried after BACKOFF_BASE_MS on its first real failure, not after the cap.
 const backoff = new Map<string, { fails: number; waits: number; until: number }>();
-export const resetKeeperBackoff = () => backoff.clear();
+export const resetKeeperBackoff = () => (backoff.clear(), resetOutcomeWaits());
 const bkey = (pass: string, id: string) => `${pass}:${id}`;
 const skipping = (pass: string, id: string, nowMs: number) => (backoff.get(bkey(pass, id))?.until ?? 0) > nowMs;
 const skippedIds = (pass: string, nowMs: number) => [...backoff].filter(([k, v]) => k.startsWith(`${pass}:`) && v.until > nowMs).length;
@@ -274,6 +275,11 @@ async function settleOutcome(deps: Deps, now: Date) {
     }
     byQ.set(e.questionId, [...(byQ.get(e.questionId) ?? []), e]);
   }
+  // a question seen FINAL / VOID since the last pass: its rows' WAIT back-off ends now (a failure back-off stays)
+  for (const id of takeReleased()) {
+    const b = backoff.get(bkey("outcome", id));
+    if (b && b.fails === 0) backoff.delete(bkey("outcome", id));
+  }
   for (const [qid, list] of byQ) {
     // Audit M-3: rows on a question that is not final yet step aside (like PRICE rows since R2-M3) and the scan page
     // grows by the rows stepping aside, so 500 rows on an open question can no longer hide the payable rows behind them.
@@ -282,7 +288,10 @@ async function settleOutcome(deps: Deps, now: Date) {
     const resolver = conditionFromJson(list[0]!.condition as Record<string, unknown>).target;
     const [state] = await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "outcomeOf", args: [qid as Hex] });
     if (state !== RESOLVER_FINAL && state !== RESOLVER_VOID) {
-      for (const e of ready) noteWait("outcome", e.id, Date.now());
+      for (const e of ready) {
+        noteWait("outcome", e.id, Date.now());
+        noteOutcomeWait(qid, e.id);
+      }
       continue;
     }
     for (const e of ready.slice(0, BATCH)) {

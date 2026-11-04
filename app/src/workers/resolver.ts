@@ -18,6 +18,7 @@ import type { Env } from "../config/env";
 import { chainNow } from "./keeper";
 import { sendCall } from "./tx";
 import { raise, type Deps } from "./deps";
+import { questionSettled } from "./outcomeWaits";
 
 const sources = (deps: Deps) => deps.sources ?? liveSources;
 
@@ -338,6 +339,7 @@ function readQuestion(deps: Deps, resolver: Address, id: Hex) {
 async function syncRow(deps: Deps, resolver: Address, id: Hex): Promise<OnchainQuestion> {
   const o = await readQuestion(deps, resolver, id);
   const state = Number(o.state);
+  if (state === 4 || state === 5) questionSettled(id); // FINAL / VOID: the keeper settles its payments on its next tick
   await deps.db
     .update(questions)
     .set({

@@ -14,6 +14,7 @@ import { Kind, Status } from "../core/types";
 import { getLogsChunked } from "../chain/rpc";
 import { chainEvents, cursors, escrows, questions } from "../db/schema";
 import { raise, type Deps } from "./deps";
+import { questionSettled } from "./outcomeWaits";
 
 const CHUNK = 5_000n;
 export const REWIND_BLOCKS = 50n;
@@ -129,6 +130,7 @@ async function rewind(deps: Deps, cursorBlock: bigint): Promise<{ block: bigint;
       for (const qid of touchedQuestions) {
         const q = await pc.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "getQuestion", args: [qid as Hex] });
         const state = Number(q.state);
+        if (state === 4 || state === 5) questionSettled(qid);
         await tx
           .update(questions)
           .set({
@@ -278,4 +280,5 @@ async function applyResolverEvent(deps: Deps, name: string, qid: string, args: R
   else if (name === "Disputed") await deps.db.update(questions).set({ state: 3 }).where(eq(questions.id, qid));
   else if (name === "Finalized") await deps.db.update(questions).set({ state: 4, finalOutcome: Number(args.outcome) }).where(eq(questions.id, qid));
   else if (name === "PanelTimedOut") await deps.db.update(questions).set({ state: 5 }).where(eq(questions.id, qid));
+  if (name === "Finalized" || name === "PanelTimedOut") questionSettled(qid); // its payments settle on the next keeper tick
 }
