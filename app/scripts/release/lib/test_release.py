@@ -123,6 +123,20 @@ class Small(unittest.TestCase):
             R.run = old
 
 
+class Resume(unittest.TestCase):
+    def test_resume_leaves_one_note_for_the_next_pass(self):
+        open(R.PAUSE, "w").close()
+        R.cmd_resume()
+        self.assertFalse(os.path.exists(R.PAUSE))
+        self.assertTrue(R.take_resume_note())   # the pass after resume stays quiet: the wrapper already posted
+        self.assertFalse(R.take_resume_note())  # consumed: a later manual PAUSE removal is announced by the runner
+
+    def test_resume_when_not_paused_leaves_no_note(self):
+        R.take_resume_note()
+        R.cmd_resume()
+        self.assertFalse(R.take_resume_note())
+
+
 class PublicCI(unittest.TestCase):
     def test_failure_and_timeout_are_red(self):
         runs = [{"id": 1, "name": "app", "conclusion": "failure"}, {"id": 2, "name": "web", "conclusion": "timed_out"},

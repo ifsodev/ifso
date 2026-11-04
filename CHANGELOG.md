@@ -79,7 +79,7 @@ is under Unreleased and is grouped by area. Dates are the commit dates (UTC).
   change that is announced but still pending at settle keeps a decided result.
 - 2026-10-30: The OUTCOME expiry minimum adds `PROPOSAL_GRACE` (2 days) for an honest proposal made late, so a dispute
   after a late proposal still settles before expiry (round 2, L2).
-- 2026-10-30: The gas-starvation guard of a void payout covers the USDG proxy's second call frame (`g/16` instead of
+- 2026-10-30: The gas-starvation guard of a void refund covers the USDG proxy's second call frame (`g/16` instead of
   `g/63`), so a starved transfer can never record a payable side as owed (round 2, I1).
 - 2026-10-30: Deploy assertions now fail when the launch cap is removed, when the owner is not a real Safe, and when Pyth
   is switched on.

@@ -66,6 +66,7 @@ STATE = os.path.join(RELEASE_HOME, "state.json")
 LOGS = os.path.join(RELEASE_HOME, "logs")
 PAUSE = os.path.join(RELEASE_HOME, "PAUSE")
 ABORT = os.path.join(RELEASE_HOME, "ABORT")
+RESUME_NOTED = os.path.join(RELEASE_HOME, "RESUME_ANNOUNCED")  # written by `resume`: the wrapper already told the chat
 RUN_LOCK = os.path.join(RELEASE_HOME, ".run.lock")
 DEPLOY_TRANSIENT = 75
 STEPS = ["apply", "gate", "push", "deploy", "verify", "sync", "ghrelease", "publish"]
@@ -907,8 +908,9 @@ def _pass():
         return 0
     if st.pop("pausedSeen", None):
         st.pop("rollbackIncomplete", None)
-        notify(st, "release queue RESUMED", plain("the pause is over", "no", "releases continue",
-               f"overdue updates go one at a time, {sched.get('minGapMinutes', 2)} minutes apart; then the normal slots"))
+        if not take_resume_note():  # ifso-release-resume already posted RESUMED (naming who); only a manual PAUSE removal reaches here
+            notify(st, "release queue RESUMED", plain("the pause is over", "no", "releases continue",
+                   f"overdue updates go one at a time, {sched.get('minGapMinutes', 2)} minutes apart; then the normal slots"))
     low = disk_low()
     if low:
         notify(st, "DISK LOW", plain(low, "no", "no update starts until space is freed", "free disk space on the server"), failure=True, key="disk", every=3600)
@@ -1150,6 +1152,15 @@ def cmd_abort():
     return 0
 
 
+def take_resume_note():
+    """True once after `resume` removed PAUSE (its wrapper announced it); the marker is consumed."""
+    try:
+        os.remove(RESUME_NOTED)
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def cmd_resume():
     """Removes PAUSE. A stale ABORT (asked for while no pass was running) would fail the NEXT update at its first step
     (an earlier project incident 4): if no pass holds the run lock, nothing is left to abort, so it is removed."""
@@ -1164,6 +1175,8 @@ def cmd_resume():
             print("note: a release pass is running; it still stops at its next step (ABORT kept)")
     if os.path.exists(PAUSE):
         os.remove(PAUSE)
+        with open(RESUME_NOTED, "w") as f:
+            f.write(iso(now()) + "\n")
         print("resumed: the next pass (within 5 minutes) continues")
     else:
         print("was not paused")

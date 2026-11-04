@@ -362,6 +362,7 @@ as_ops "$SBIN/ifso-release-resume" >/dev/null 2>&1
 as_ops "$SBIN/ifso-release-retry" TU01 >/dev/null 2>&1
 rpass
 ok "failed rollback: after resume and retry the queue completes" test "$(st TU01)" = released
+ok "resume after a runner pause: ONE 'release queue RESUMED' message (the wrapper's), not a second from the next pass" test "$(grep '/sendMessage' "$CTL/requests.jsonl" | grep -c 'release queue RESUMED')" = 1
 as_rel kill "$(cat "$ROOT/w3.pid")" 2>/dev/null || true
 
 if [[ $MODE == linux ]]; then

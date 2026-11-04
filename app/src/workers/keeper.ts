@@ -360,7 +360,7 @@ async function payOwedVoids(deps: Deps) {
         const r = await execute(deps, { meta: { kind: "claim-void", escrowId: e.id }, call: call(false), send: true, reason: "owed side of a voided challenge" });
         if (isShadow(deps) || !r || r.ok) return r;
         const alt = await execute(deps, { meta: { kind: "claim-void-alt", escrowId: e.id }, call: call(true), send: true, reason: "owed side, primary refused" });
-        if (alt && !alt.ok) await raise(deps, `void-stuck-${e.id}-${counterSide ? "counter" : "sender"}`, `owed ${counterSide ? "acceptor" : "sender"} payout of voided escrow ${e.id} failed on both addresses`);
+        if (alt && !alt.ok) await raise(deps, `void-stuck-${e.id}-${counterSide ? "counter" : "sender"}`, `owed ${counterSide ? "acceptor" : "sender"} share of voided escrow ${e.id} could not be sent to either address`);
         return alt;
       })) sends++;
     }
