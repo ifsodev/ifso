@@ -183,6 +183,40 @@ class DeadMan(unittest.TestCase):
             os.remove(R.PAUSE)
 
 
+class ReleaseAlerts(unittest.TestCase):
+    """GitHub Release failures are keyed by CAUSE: an outage or a config error is ONE alert, not one per tag per pass."""
+
+    def test_one_alert_per_cause_not_per_tag(self):
+        sent, answer = [], {"code": 4, "out": ""}
+        old_run, old_cmd = R.run, R.CFG["ghrelease_cmd"]
+
+        def run(cmd, **k):
+            if cmd[0] == "ghrel":
+                return answer["code"], answer["out"].replace("TAG", cmd[1])
+            sent.append(cmd)
+            return 0, ""
+        R.run, R.CFG["ghrelease_cmd"] = run, "ghrel"
+        try:
+            st, s = {}, sched72()
+            ups = s["updates"][:5]
+            for t in range(2):  # two passes over five released updates
+                answer["out"] = "create release TAG: HTTP 500"
+                for u in ups:
+                    R.github_release(st, u, {}, os.path.join(HOME, "gh.log"))
+            self.assertEqual(len(sent), 1, [c[1] for c in sent])
+            answer["out"] = "ifso-release-ghrelease: PUBLIC_REPO must be owner/name in /etc/ifso-release/release.env"
+            for u in ups:
+                R.github_release(st, u, {}, os.path.join(HOME, "gh.log"))
+            self.assertEqual(len(sent), 2)
+            answer.update(code=0, out="release TAG created")
+            for u in ups:
+                R.github_release(st, u, {}, os.path.join(HOME, "gh.log"))
+            self.assertEqual(len(sent), 3)  # one all-clear, once
+            self.assertIn("work again", sent[-1][1])
+        finally:
+            R.run, R.CFG["ghrelease_cmd"] = old_run, old_cmd
+
+
 class Resume(unittest.TestCase):
     def test_resume_leaves_one_note_for_the_next_pass(self):
         open(R.PAUSE, "w").close()

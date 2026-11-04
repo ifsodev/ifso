@@ -626,14 +626,32 @@ def github_release(st, u, t, log):
     if code:
         t["releaseError"] = out.strip()[-160:]
         auth = any(x in out for x in ("401", "403", "no token"))
-        notify(st, "GITHUB RELEASES BLOCKED (token permission)" if auth else f"GITHUB RELEASE FAILED {u['id']}", plain(
-            f"the GitHub Release for {u['id']} was not created: {out.strip()[-160:]}", f"no. {u['id']} itself is live",
-            "nothing; releases continue", "the owner checks the release token (draft create and delete); the Release is created on a later pass"),
-            failure=True, key="ghrelease-auth" if auth else f"ghrelease-{u['id']}", every=6 * 3600 if auth else 3600)
+        cause = release_cause(out)
+        notify(st, "GITHUB RELEASES BLOCKED (token permission)" if auth else f"GITHUB RELEASES FAILING ({cause})", plain(
+            f"GitHub Releases are not being created ({u['id']} is the latest one): {out.strip()[-160:]}",
+            "no. The updates themselves are live", "nothing; releases continue",
+            "the owner checks the release token (draft create and delete) or GitHub's status; every missing Release is created on a "
+            "later pass. One alert per cause, a reminder an hour at most"),
+            failure=True, key="ghrelease-auth" if auth else f"ghrelease-{cause}", every=6 * 3600 if auth else 3600)
         return
     t["releaseTag"] = tag_for(u)
     t.pop("releaseError", None)
-    clear_alert(st, "ghrelease-auth", "GitHub releases work again", "the Release token works; missing Releases are created now")
+    gone = [k for k in list((st.get("alerts") or {})) if k.startswith("ghrelease-")]
+    for k in gone:
+        st["alerts"].pop(k, None)
+    if gone:
+        notify(st, "GitHub releases work again", "the Release wrapper works again; missing Releases are created now")
+
+
+def release_cause(out):
+    """The CAUSE of a failed GitHub Release, without the tag or sha in it, so one outage or one config error is one alert key:
+    'http-500', or the first words of the error with tags and shas removed."""
+    m = re.search(r"HTTP (\d{3})", out)
+    if m:
+        return f"http-{m.group(1)}"
+    text = re.sub(r"\b(update|bonus)-\d{2}\b|\bfix-[a-z0-9-]+|\b[0-9a-f]{7,40}\b|/\S+", "", out.strip().splitlines()[-1] if out.strip() else "")
+    words = re.findall(r"[a-z_]+", text.lower().split(":", 1)[-1])[:4]
+    return "-".join(words) or "unknown"
 
 
 def retry_missing_releases(st, sched):
