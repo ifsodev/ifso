@@ -8,10 +8,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REL="$(cd "$HERE/.." && pwd)"
 SYNC_PY="${SYNC_PUBLIC_PY:-$REL/../../../../docs/tools/sync-public.py}"
-command -v docker >/dev/null || { echo "docker not found: run the VPS rehearsal from README.md ('Linux proof') instead" >&2; exit 2; }
+command -v docker >/dev/null || { echo "docker not found: install Docker (or colima) here; the --linux sandbox never runs on a real server" >&2; exit 2; }
 [[ -f "$SYNC_PY" ]] || { echo "sync-public.py not found (set SYNC_PUBLIC_PY)" >&2; exit 2; }
 docker run --rm \
-  -v "$REL:/release:ro" -v "$SYNC_PY:/tools/sync-public.py:ro" -e SYNC_PUBLIC_PY=/tools/sync-public.py \
+  -v "$REL:/release:ro" -v "$SYNC_PY:/tools/sync-public.py:ro" -e SYNC_PUBLIC_PY=/tools/sync-public.py -e IFSO_SANDBOX_CONTAINER=1 \
   ubuntu:24.04 bash -c '
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive

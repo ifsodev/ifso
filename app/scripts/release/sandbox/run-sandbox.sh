@@ -16,6 +16,12 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REL="$(cd "$HERE/.." && pwd)"
 MODE=local; [[ "${1:-}" == --linux ]] && MODE=linux
+# --linux overwrites /usr/local/bin/bun, /etc/ifso-release/paths.conf and allowed_signers and adds users: on a real server it
+# would break production. It runs only in the throwaway container docker-sandbox.sh starts (marker env + the runtime's file).
+if [[ $MODE == linux && ( "${IFSO_SANDBOX_CONTAINER:-}" != 1 || ! ( -e /.dockerenv || -e /run/.containerenv ) ) ]]; then
+  echo "refusing: --linux runs only inside the throwaway container of sandbox/docker-sandbox.sh, never on a real server" >&2
+  exit 2
+fi
 SYNC_PY="${SYNC_PUBLIC_PY:-$REL/../../../../docs/tools/sync-public.py}"
 [[ -f "$SYNC_PY" ]] || { echo "sync-public.py not found (set SYNC_PUBLIC_PY)"; exit 2; }
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ifso-release-sandbox.XXXXXX")"

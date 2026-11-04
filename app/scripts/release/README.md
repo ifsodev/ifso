@@ -56,8 +56,9 @@ bash app/scripts/release/test-local.sh      # shellcheck, py_compile, 16 unit te
 
 The local run uses a prefix install and no real users or sudo. The Linux run needs a Linux root:
 
-- With Docker: `bash app/scripts/release/sandbox/docker-sandbox.sh` (Ubuntu 24.04; real `install.sh`, real users, real sudoers, `visudo -c`, the runner reaching every wrapper through `sudo -n`).
-- Without Docker: the VPS rehearsal. Pause the queue, copy this folder to the server, `sudo bash sandbox/run-sandbox.sh --linux` (it works only under its own scratch folder and a fake deploy), then deploy the already-live sha once through `ifso-deploy-release` as the release user and check every service is healthy, then resume.
+- `bash app/scripts/release/sandbox/docker-sandbox.sh` on a machine with Docker (or `colima start`): Ubuntu 24.04 in a throwaway container; real `install.sh`, real users, real sudoers, `visudo -c`, the runner reaching every wrapper through `sudo -n`.
+- `run-sandbox.sh --linux` runs only inside that container, never on a real server: it overwrites `/usr/local/bin/bun` with a fake, rewrites `/etc/ifso-release/paths.conf` and `allowed_signers` and adds users. It refuses unless `docker-sandbox.sh` set `IFSO_SANDBOX_CONTAINER=1` and the container runtime's `/.dockerenv` exists.
+- On the server itself the proof is the rehearsal instead: pause the queue, deploy a new signed descendant of the live sha through `ifso-deploy-release` as the release user, check every service is healthy, resume.
 
 The gate calls plain `bun`, so bun must be on the service's default PATH: `/usr/local/bin/bun`, where `provision.sh` (Ifso's own
 server) installs it. The co-host layout (`provision-cohost.sh`) keeps bun in `/opt/ifso/bin`, so the runner does not run there;

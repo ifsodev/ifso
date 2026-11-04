@@ -119,5 +119,16 @@ python3 -c 'import sys; open(sys.argv[1],"wb").write(b"\x89PNG\r\n\x1a\n"+b"0"*6
 ok "a real PNG poster is uploaded" GH update-03 t "$W/home/.relnotes-U1.md"
 ok "the upload happened" grep -q '/uploads/' "$W/api.log"
 
+echo "== E6: run-sandbox.sh --linux runs only inside its throwaway container (it rewrites bun, paths.conf, allowed_signers)"
+env -u IFSO_SANDBOX_CONTAINER bash "$HERE/run-sandbox.sh" --linux >"$W/linux1.out" 2>&1; rc1=$?
+ok "--linux without the container marker refuses (exit 2) and says why" bash -c "[[ $rc1 == 2 ]] && grep -q 'only inside the throwaway container' '$W/linux1.out'"
+IFSO_SANDBOX_CONTAINER=1 bash "$HERE/run-sandbox.sh" --linux >"$W/linux2.out" 2>&1; rc2=$?
+if [[ -e /.dockerenv || -e /run/.containerenv ]]; then
+  ok "(inside a container) the marker plus /.dockerenv is accepted past the guard" bash -c "! grep -q 'only inside the throwaway container' '$W/linux2.out'"
+else
+  ok "--linux with the env marker but no /.dockerenv (a real host) still refuses" bash -c "[[ $rc2 == 2 ]] && grep -q 'only inside the throwaway container' '$W/linux2.out'"
+fi
+ok "README never tells anyone to run the --linux sandbox on a real server" bash -c "! grep -qE 'bash sandbox/run-sandbox.sh --linux' '$HERE/../README.md' && grep -q 'never on a real server' '$HERE/../README.md'"
+
 echo "hardening cases: $PASS passed, $FAIL failed"
 [[ $FAIL == 0 ]]
