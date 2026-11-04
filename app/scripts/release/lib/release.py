@@ -1312,6 +1312,48 @@ def arg(args, name, default=None):
     return default
 
 
+JOURNAL = "app/drizzle/meta/_journal.json"
+
+
+def journal_at(repo, sha):
+    """The Drizzle migration journal entries in the tree of `sha` ([] when the tree has no journal)."""
+    p = subprocess.run(["git", "-c", "safe.directory=*", "-C", repo, "show", f"{sha}:{JOURNAL}"], capture_output=True, text=True)
+    if p.returncode:
+        return []
+    try:
+        return json.loads(p.stdout).get("entries") or []
+    except ValueError as e:
+        raise SystemExit(f"REFUSED: {JOURNAL} in {sha[:10]} is not valid JSON ({e})")
+
+
+def journal_order(repo, base, shas):
+    """(problems, migrating ids) for the queue `shas` on `base`. Drizzle applies a migration only when its journal `when` is
+    newer than the last APPLIED one, so a queued migration whose `when` is not above every earlier one (main's and the earlier
+    queue entries') would be skipped silently on the server (an earlier project's incident 27)."""
+    seen = {e.get("tag") for e in journal_at(repo, base)}
+    top = max([int(e.get("when") or 0) for e in journal_at(repo, base)] or [0])
+    top_from = "main (the base)"
+    problems, migrating = [], set()
+    for i, sha in enumerate(shas, 1):
+        new = sorted((e for e in journal_at(repo, sha) if e.get("tag") not in seen), key=lambda e: e.get("idx", 0))
+        for e in new:
+            w = int(e.get("when") or 0)
+            if w <= top:
+                problems.append(f"  TU{i:02d} {sha[:10]}: migration {e.get('tag')} has when {w}, not above {top} ({top_from})")
+            else:
+                top, top_from = w, f"TU{i:02d} {e.get('tag')}"
+            seen.add(e.get("tag"))
+            migrating.add(f"TU{i:02d}")
+    return problems, migrating
+
+
+def journal_refusal(problems):
+    return ("REFUSED: the Drizzle migration journal `when` values are not increasing in queue order. Drizzle skips a migration "
+            "whose `when` is not newer than the last applied one, so these would never run on the server:\n" + "\n".join(problems[:10]) +
+            f"\nFix the QUEUE: give each listed migration a `when` (in {JOURNAL}) between the previous migration's and the next one's, "
+            "rebuild the queue and run this again.")
+
+
 def cmd_make_schedule(args):
     qrepo, ref, base = arg(args, "--queue-repo"), arg(args, "--ref", "tu-queue"), arg(args, "--base")
     count = int(arg(args, "--count", "72"))
@@ -1330,13 +1372,16 @@ def cmd_make_schedule(args):
                  f"position, so this would shift every later id, note, poster and tag. Fix the QUEUE (squash an extra commit into "
                  f"its update, e.g. a web half into the update it belongs to), do not renumber and do not change --count.\n"
                  + ("Commits whose subject does not name the TU of their position (the first one is where it goes wrong):\n" + "\n".join(odd[:5]) if odd else ""))
+    problems, migrating = journal_order(qrepo, base, shas)
+    if problems:
+        sys.exit(journal_refusal(problems))
     ups = []
     for i, sha in enumerate(shas, 1):
         tid = f"TU{i:02d}"
         subj = subprocess.run(["git", "-C", qrepo, "log", "-1", "--format=%s", sha], capture_output=True, text=True, check=True).stdout.strip()
         m = manifest.get(tid, {})
         ups.append({"id": tid, "n": i, "name": m.get("name") or re.sub(r"^\w+(\([^)]*\))?!?:\s*", "", subj), "sha": sha, "slot": None,
-                    "dependsOn": m.get("dependsOn", []), "migration": bool(m.get("migration")), "perk_gated": bool(m.get("perk_gated")),
+                    "dependsOn": m.get("dependsOn", []), "migration": bool(m.get("migration")) or tid in migrating, "perk_gated": bool(m.get("perk_gated")),
                     "check": m.get("check")})
     for u in ups:  # a perk-gated update's check must say what the locked answer looks like
         if u["perk_gated"] and u["check"] and not u["check"].get("perk_gated"):

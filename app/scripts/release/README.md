@@ -25,6 +25,7 @@ involved on launch day. It is inert until armed.
 - **Alerts are keyed by cause:** one alert, an hourly reminder, one all-clear. A dead-man ping goes out after each pass when `HEALTHCHECK_PING_URL` is set. Public CI on the public main tip is read once per pass when `PUBLIC_CI_API` is set.
 - **Vercel is watched after a web/ release:** with `VERCEL_STATUS_API=https://api.github.com/repos/<owner>/<private repo>` in `paths.conf` (and, for a private repo, `VERCEL_STATUS_TOKEN_FILE`: a file the release user can read holding a fine-grained READ-ONLY token, Commit statuses + Checks read, on that repo only), every pass reads the GitHub commit statuses and check-runs of each released update that changed `web/` and alerts once with `VERCEL DEPLOY FAILED (TUnn)` or, when nothing finished within `VERCEL_WAIT_MINUTES` (default 20), `VERCEL DEPLOY MISSING (TUnn)`. It never blocks a release; empty = off (the sandbox default).
 - **Slots:** `release.py set-times --launch-at <ISO UTC with Z>` writes 72 hourly slots. Local time zones are refused.
+- **Migration order:** `make-schedule` (and `remap`) read `app/drizzle/meta/_journal.json` in every queue tree and refuse when a queued migration's `when` is not above main's and every earlier queued one (Drizzle would skip it silently). Every update that adds a journal entry is marked `migration`, so a held migration keeps the later ones waiting.
 - **A stale `schedule.json`** (tip not equal to the queue branch tip) stops every pass and the preflight with one clear line.
 
 ## Install on the server

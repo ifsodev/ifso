@@ -466,5 +466,51 @@ class LatePoster(unittest.TestCase):
                 pass
 
 
+class MigrationOrder(unittest.TestCase):
+    """B27: make-schedule refuses a queue whose Drizzle journal `when` values are not increasing in queue order (Drizzle would
+    silently skip the later-numbered one with the older `when`), and marks every update that adds a migration."""
+
+    def queue(self, whens):
+        q = tempfile.mkdtemp(prefix="ifso-mig.")
+        g = lambda *a: subprocess.run(["git", "-C", q, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", *a],
+                                      check=True, capture_output=True, text=True).stdout.strip()  # noqa: E731
+        g("init", "-q", "-b", "tu-queue")
+        os.makedirs(os.path.join(q, "app/drizzle/meta"))
+        entries = [{"idx": 0, "when": 1000, "tag": "0000_base"}]
+
+        def write():
+            with open(os.path.join(q, "app/drizzle/meta/_journal.json"), "w") as f:
+                json.dump({"version": "7", "entries": entries}, f)
+            g("add", "-A")
+        write()
+        g("commit", "-q", "-m", "chore: base")
+        base = g("rev-parse", "HEAD")
+        for i, w in enumerate(whens, 1):
+            if w:
+                entries.append({"idx": len(entries), "when": w, "tag": f"{len(entries):04d}_tu{i:02d}"})
+                write()
+            g("commit", "-q", "--allow-empty", "-m", f"feat(tu{i:02d}): update {i}")
+        return q, base
+
+    def test_out_of_order_when_is_refused_and_named(self):
+        q, base = self.queue([2000, None, 1500])
+        with self.assertRaises(SystemExit) as e:
+            R.cmd_make_schedule(["--queue-repo", q, "--base", base, "--count", "3"])
+        msg = str(e.exception)
+        for want in ("not increasing", "TU03", "0002_tu03", "1500", "2000"):
+            self.assertIn(want, msg)
+
+    def test_a_when_not_above_main_is_refused(self):
+        q, base = self.queue([900])
+        with self.assertRaises(SystemExit) as e:
+            R.cmd_make_schedule(["--queue-repo", q, "--base", base, "--count", "1"])
+        self.assertIn("main (the base)", str(e.exception))
+
+    def test_increasing_queue_is_accepted_and_migrations_marked(self):
+        q, base = self.queue([2000, None, 3000])
+        self.assertEqual(R.cmd_make_schedule(["--queue-repo", q, "--base", base, "--count", "3"]), 0)
+        self.assertEqual([u["migration"] for u in R.load(R.SCHEDULE, None)["updates"]], [True, False, True])
+
+
 if __name__ == "__main__":
     unittest.main()
