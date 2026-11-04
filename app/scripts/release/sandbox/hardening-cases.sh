@@ -76,14 +76,18 @@ G -C "$W/repo" remote set-url origin "$W/origin.git"
 
 echo "== L-5: ifso-release-ghrelease publishes only allow-listed files"
 cat >"$W/srv.py" <<'EOS'
-import http.server, json, sys
+import http.server, json, os, sys
 LOG = sys.argv[1]
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _send(self, code, obj):
         b = json.dumps(obj).encode(); self.send_response(code); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
     def _body(self): return self.rfile.read(int(self.headers.get("Content-Length") or 0))
-    def do_GET(self): self._send(404, {})
+    def do_GET(self):  # an existing Release: the file exists-<tag> next to the log holds its assets list (JSON)
+        f = os.path.join(os.path.dirname(LOG), "exists-" + self.path.rsplit("/", 1)[-1])
+        if "/releases/tags/" in self.path and os.path.exists(f):
+            return self._send(200, {"id": 9, "body": "Old notes.", "assets": json.load(open(f))})
+        self._send(404, {})
     def do_PATCH(self): open(LOG, "ab").write(b"PATCH\n" + self._body() + b"\n"); self._send(200, {})
     def do_POST(self):
         b = self._body(); open(LOG, "ab").write(self.command.encode() + b" " + self.path.encode() + b"\n" + b + b"\n")
@@ -120,6 +124,19 @@ no "the secret was never published (non-PNG poster)" grep -q "$SECRET" "$W/api.l
 python3 -c 'import sys; open(sys.argv[1],"wb").write(b"\x89PNG\r\n\x1a\n"+b"0"*64)' "$W/home/posters/update-03.png"
 ok "a real PNG poster is uploaded" GH update-03 t "$W/home/.relnotes-U1.md"
 ok "the upload happened" grep -q '/uploads/' "$W/api.log"
+
+echo "== B25: a poster staged AFTER its Release exists is uploaded on a later run, once"
+: >"$W/api.log"; echo '[]' >"$W/exists-update-04"
+ok "existing Release, no poster staged: exit 0, nothing uploaded" GH update-04 t "$W/home/.relnotes-U1.md"
+ok "  (no upload, no new Release)" bash -c "! grep -qE '/uploads/|^POST /repos' '$W/api.log'"
+python3 -c 'import sys; open(sys.argv[1],"wb").write(b"\x89PNG\r\n\x1a\n"+b"0"*64)' "$W/home/posters/update-04.png"
+GH update-04 t "$W/home/.relnotes-U1.md" >"$W/b25.out" 2>&1
+ok "existing Release + poster staged now: the poster is uploaded as update-04.png" grep -q 'releases/9/assets?name=update-04.png' "$W/api.log"
+ok "  the image line goes on top of the EXISTING notes (PATCH keeps them)" bash -c "grep -A1 '^PATCH' '$W/api.log' | grep -q '!\\[update-04\\](http://x/p.png)' && grep -A1 '^PATCH' '$W/api.log' | grep -q 'Old notes'"
+ok "  the runner is told 'poster attached'" grep -q 'poster attached' "$W/b25.out"
+: >"$W/api.log"; echo '[{"name":"update-04.png"}]' >"$W/exists-update-04"
+GH update-04 t "$W/home/.relnotes-U1.md" >"$W/b25b.out" 2>&1
+ok "a Release that already has update-04.png: nothing is sent again (idempotent)" bash -c "! grep -qE '/uploads/|^PATCH' '$W/api.log' && grep -q 'poster attached' '$W/b25b.out'"
 
 echo "== E6: run-sandbox.sh --linux runs only inside its throwaway container (it rewrites bun, paths.conf, allowed_signers)"
 env -u IFSO_SANDBOX_CONTAINER bash "$HERE/run-sandbox.sh" --linux >"$W/linux1.out" 2>&1; rc1=$?

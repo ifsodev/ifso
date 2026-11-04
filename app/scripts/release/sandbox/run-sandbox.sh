@@ -380,6 +380,13 @@ ok "final: no queue code leaked early (public has no tu03 file at the time TU03 
 ok "GitHub Releases created for update-01, update-02, update-03" bash -c "for t in update-01 update-02 update-03; do grep -Eq \"tag_name[^a-z]+\$t\" '$CTL/requests.jsonl' || exit 1; done"
 ok "GitHub Release update-02 got its poster (asset upload + notes patch)" bash -c "grep -q 'assets?name=update-02.png' '$CTL/requests.jsonl' && grep -q 'PATCH' '$CTL/requests.jsonl'"
 ok "GitHub Release update-01 has no poster and still exists" bash -c "! grep -q 'name=update-01.png' '$CTL/requests.jsonl'"
+# B25: the poster of update-01 is staged only now, after its Release exists: a later pass attaches it, once
+python3 -c 'import sys; open(sys.argv[1],"wb").write(b"\x89PNG\r\n\x1a\n"+b"0"*64)' "$W/home/posters/update-01.png"
+chown "$RUSER" "$W/home/posters/update-01.png" 2>/dev/null || true
+rpass; rpass
+ok "B25: a poster staged after its Release existed is uploaded on a later pass, exactly once" test "$(grep -c 'assets?name=update-01.png' "$CTL/requests.jsonl")" = 1
+ok "B25: the runner records it (no further calls for update-01)" bash -c "python3 -c 'import json,sys; sys.exit(0 if json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU01\"].get(\"poster\") else 1)'"
+ok "B25: update-02's poster (attached at create) is never sent again" test "$(grep -c 'assets?name=update-02.png' "$CTL/requests.jsonl")" = 1
 ok "scan-queue finds no forbidden text in any queue tree" bash -c "rp() { :; }; envs=(); while IFS= read -r l; do envs+=(\"\$l\"); done < <(grep -E '^[A-Z][A-Z0-9_]*=' '$CONF' | tr -d \"'\\\"\"); env \"\${envs[@]}\" python3 '$LIBDIR/lib/release.py' scan-queue"
 ok "queue finished: one 'queue finished' note" tg_has "queue finished"
 as_ops "$SBIN/ifso-release-status" >"$W/status2.out" 2>&1

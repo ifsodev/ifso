@@ -430,5 +430,41 @@ class VercelStatus(unittest.TestCase):
         self.old = (R.run, R.vercel_api_get, R.CFG["vercel_api"], R.CFG["vercel_wait_min"])
 
 
+class LatePoster(unittest.TestCase):
+    """B25: a poster staged after its Release exists is attached on a later pass, once."""
+
+    def test_poster_staged_after_the_release_is_attached_once(self):
+        calls, have = [], {"poster": False}
+        old_run, old_cmd = R.run, R.CFG["ghrelease_cmd"]
+
+        def run(cmd, **k):
+            if cmd[0] == "ghrel":
+                calls.append(cmd[1])
+                return 0, ("release %s already exists: poster attached now" % cmd[1]) if have["poster"] else "release %s created" % cmd[1]
+            return 0, ""
+        R.run, R.CFG["ghrelease_cmd"] = run, "ghrel"
+        try:
+            s = sched72()
+            st = state(s, TU01="released")
+            t = st["updates"]["TU01"]
+            R.github_release(st, s["updates"][0], t, os.path.join(HOME, "gh.log"))  # created, no poster staged yet
+            R.retry_missing_releases(st, s)
+            self.assertEqual(calls, ["update-01"])  # nothing staged: no extra call
+            os.makedirs(os.path.join(HOME, "posters"), exist_ok=True)
+            with open(os.path.join(HOME, "posters", "update-01.png"), "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n")
+            have["poster"] = True
+            R.retry_missing_releases(st, s)  # the later pass: attached
+            R.retry_missing_releases(st, s)  # and never again
+            self.assertEqual(calls, ["update-01", "update-01"])
+            self.assertTrue(t.get("poster"))
+        finally:
+            R.run, R.CFG["ghrelease_cmd"] = old_run, old_cmd
+            try:
+                os.remove(os.path.join(HOME, "posters", "update-01.png"))
+            except OSError:
+                pass
+
+
 if __name__ == "__main__":
     unittest.main()

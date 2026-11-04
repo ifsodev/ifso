@@ -96,11 +96,15 @@ class H(BaseHTTPRequestHandler):
             return self.reply(403, {"message": "Resource not accessible by personal access token"})
         if m:
             d = json.loads(body)
-            r = {"id": len(releases) + 1, "tag_name": d["tag_name"], "body": d.get("body", ""), "draft": bool(d.get("draft"))}
+            r = {"id": len(releases) + 1, "tag_name": d["tag_name"], "body": d.get("body", ""), "draft": bool(d.get("draft")), "assets": []}
             releases[d["tag_name"]] = r
             return self.reply(201, r)
         m = re.fullmatch(r"/uploads/repos/([^/]+/[^/]+)/releases/(\d+)/assets", p)
         if m:
+            name = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("name", ["?"])[0]
+            for r in releases.values():
+                if str(r["id"]) == m.group(2):
+                    r["assets"].append({"name": name})
             return self.reply(201, {"browser_download_url": f"http://127.0.0.1/asset/{m.group(2)}.png"})
         self.reply(404, {"error": "no route"})
 

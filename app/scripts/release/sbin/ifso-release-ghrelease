@@ -7,7 +7,8 @@
 # the top of the notes. Root never opens a path the release user names: the notes must be the runner's own
 # $RELEASE_HOME/.relnotes-<id>.md and the poster exactly $RELEASE_HOME/posters/<tag>.png. Each is opened without following
 # symlinks, must be a regular file under a size limit (notes: UTF-8 text; poster: a PNG by its signature) and is COPIED into a
-# root-owned scratch directory first, so a swap after the check changes nothing and a file like /etc/ifso/db.env can never be published. Best effort: the runner never lets a failure here block a release. Exit 0 also when the Release exists.
+# root-owned scratch directory first, so a swap after the check changes nothing and a file like /etc/ifso/db.env can never be published. Best effort: the runner never lets a failure here block a release. Exit 0 also when the Release exists; a poster staged
+# after that is uploaded then (once: an existing <tag>.png asset is never sent again) and "poster attached" is printed.
 LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
 [[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
 # shellcheck disable=SC1091
@@ -71,27 +72,42 @@ sys.stdout.buffer.write(data)
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/ifso-ghrelease.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 safe_copy "$RELEASE_HOME" "$(basename "$notes")" 65536 text >"$scratch/notes.md" 2>/dev/null || die "cannot read the notes file safely"
-r="$(call GET "$api/repos/$repo/releases/tags/$tag" || true)"
-if [[ "$(status_of "$r")" == 200 ]]; then echo "release $tag already exists"; exit 0; fi
-[[ "$(status_of "$r")" == 404 ]] || { echo "GET release $tag: HTTP $(status_of "$r")"; exit 4; }
-text="$(cat "$scratch/notes.md")"
 poster=""
 if safe_copy "$RELEASE_HOME/posters" "$tag.png" 10485760 png >"$scratch/poster.png" 2>/dev/null; then poster="$scratch/poster.png"; fi
+# attach <release-id> <current body>: upload the poster once as <tag>.png and put its image line on top of the notes once
+attach() {
+  local id="$1" cur="$2" up a url newbody p2
+  up="$(val GITHUB_UPLOAD_BASE)"; up="${up:-https://uploads.github.com}"
+  a="$(call POST "$up/repos/$repo/releases/$id/assets?name=$tag.png" -H 'Content-Type: image/png' --data-binary "@$poster" || true)"
+  if [[ "$(status_of "$a")" != 201 ]]; then echo "poster upload for $tag: HTTP $(status_of "$a") (release kept without the picture)"; return 1; fi
+  url="$(body_of "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["browser_download_url"])')"
+  if [[ "$cur" != *"![$tag]("* ]]; then
+    newbody="$(printf '![%s](%s)\n\n%s' "$tag" "$url" "$cur")"
+    p2="$(python3 -c 'import json,sys; print(json.dumps({"body": sys.argv[1]}))' "$newbody")"
+    call PATCH "$api/repos/$repo/releases/$id" -H 'Content-Type: application/json' --data "$p2" >/dev/null || true
+  fi
+  echo "poster attached"
+}
+r="$(call GET "$api/repos/$repo/releases/tags/$tag" || true)"
+if [[ "$(status_of "$r")" == 200 ]]; then
+  # a poster staged AFTER the Release was made is uploaded on a later pass, once (an existing <tag>.png asset is never re-sent)
+  info="$(body_of "$r" | python3 -c 'import json,sys; d=json.load(sys.stdin); n=sys.argv[1]
+print(int(d["id"])); print("yes" if any(a.get("name") == n for a in d.get("assets") or []) else "no")
+sys.stdout.write(d.get("body") or "")' "$tag.png")" || { echo "GET release $tag: unreadable answer"; exit 4; }
+  id="$(sed -n 1p <<<"$info")"; has="$(sed -n 2p <<<"$info")"; cur="$(sed '1,2d' <<<"$info")"
+  if [[ "$has" == yes ]]; then echo "release $tag already exists (poster attached)"; exit 0; fi
+  if [[ -z "$poster" ]]; then echo "release $tag already exists (no poster staged)"; exit 0; fi
+  if attach "$id" "$cur"; then echo "release $tag already exists: poster attached now"; fi
+  exit 0
+fi
+[[ "$(status_of "$r")" == 404 ]] || { echo "GET release $tag: HTTP $(status_of "$r")"; exit 4; }
+text="$(cat "$scratch/notes.md")"
 payload="$(python3 -c 'import json,sys; print(json.dumps({"tag_name": sys.argv[1], "name": sys.argv[2], "target_commitish": sys.argv[3] or "main", "body": sys.argv[4], "draft": False}))' "$tag" "$title" "$sha" "$text")"
 r="$(call POST "$api/repos/$repo/releases" -H 'Content-Type: application/json' --data "$payload" || true)"
 code="$(status_of "$r")"
 [[ "$code" == 201 ]] || { echo "create release $tag: HTTP $code"; exit 4; }
 if [[ -n "$poster" ]]; then
   id="$(body_of "$r" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
-  up="$(val GITHUB_UPLOAD_BASE)"; up="${up:-https://uploads.github.com}"
-  a="$(call POST "$up/repos/$repo/releases/$id/assets?name=$tag.png" -H 'Content-Type: image/png' --data-binary "@$poster" || true)"
-  if [[ "$(status_of "$a")" == 201 ]]; then
-    url="$(body_of "$a" | python3 -c 'import json,sys; print(json.load(sys.stdin)["browser_download_url"])')"
-    newbody="$(printf '![%s](%s)\n\n%s' "$tag" "$url" "$text")"
-    p2="$(python3 -c 'import json,sys; print(json.dumps({"body": sys.argv[1]}))' "$newbody")"
-    call PATCH "$api/repos/$repo/releases/$id" -H 'Content-Type: application/json' --data "$p2" >/dev/null || true
-  else
-    echo "poster upload for $tag: HTTP $(status_of "$a") (release created without the picture)"
-  fi
+  attach "$id" "$text" || true
 fi
 echo "release $tag created"

@@ -694,6 +694,8 @@ def github_release(st, u, t, log):
         return
     t["releaseTag"] = tag_for(u)
     t.pop("releaseError", None)
+    if "poster attached" in out:
+        t["poster"] = True
     gone = [k for k in list((st.get("alerts") or {})) if k.startswith("ghrelease-")]
     for k in gone:
         st["alerts"].pop(k, None)
@@ -712,10 +714,16 @@ def release_cause(out):
     return "-".join(words) or "unknown"
 
 
+def poster_waiting(u, t):
+    """A released update whose Release has no poster yet while posters/<tag>.png is staged now (staged after the Release)."""
+    return t.get("releaseTag") and not t.get("poster") and os.path.isfile(os.path.join(RELEASE_HOME, "posters", f"{tag_for(u)}.png"))
+
+
 def retry_missing_releases(st, sched):
+    """Missing Releases are created, and a poster staged after its Release existed is attached (the wrapper is idempotent)."""
     for u in sched["updates"]:
         t = st["updates"][u["id"]]
-        if t["status"] == "released" and t.get("releaseError") and CFG["ghrelease_cmd"]:
+        if t["status"] == "released" and (t.get("releaseError") or poster_waiting(u, t)) and CFG["ghrelease_cmd"]:
             github_release(st, u, t, tu_log(u))
 
 
