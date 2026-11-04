@@ -320,6 +320,25 @@ class PublicCI(unittest.TestCase):
             os.environ["PUBLIC_CI_API"] = ""
             importlib.reload(R)
 
+    def test_a_new_red_commit_alerts_at_once(self):
+        sent, runs = [], {"v": []}
+        old_run, old_get, old_api = R.run, R.public_ci_runs, R.CFG["public_ci_api"]
+        R.run = lambda cmd, **k: (sent.append(cmd[1]) or (0, ""))
+        R.public_ci_runs = lambda timeout=15: runs["v"]
+        R.CFG["public_ci_api"] = "http://ci.invalid"
+        try:
+            st = {}
+            runs["v"] = [{"id": 1, "name": "app", "status": "completed", "conclusion": "failure", "head_sha": "a" * 40}]
+            R.public_ci_tick(st)
+            R.public_ci_tick(st)  # same red commit within the hour: no second alert
+            self.assertEqual(len(sent), 1)
+            runs["v"] = [{"id": 2, "name": "web", "status": "completed", "conclusion": "failure", "head_sha": "b" * 40}]
+            R.public_ci_tick(st)  # a NEW red commit: alerted at once, not after the hourly reminder
+            self.assertEqual(len(sent), 2)
+            self.assertIn("bbbbbbbbbb", sent[-1])
+        finally:
+            R.run, R.public_ci_runs, R.CFG["public_ci_api"] = old_run, old_get, old_api
+
     def test_off_by_default_and_errors_never_raise(self):
         R.public_ci_tick({})
         R.CFG["public_ci_api"] = "http://127.0.0.1:9"

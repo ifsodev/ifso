@@ -937,10 +937,14 @@ def public_ci_tick(st):
         sha = runs[0].get("head_sha", "")[:10]
         red = ci_red_jobs(runs)
         if red:
+            if st.get("publicCiRedSha") != sha:  # a NEW red commit is alerted at once, not after the hourly reminder of the old one
+                (st.get("alerts") or {}).pop("public-ci", None)
+                st["publicCiRedSha"] = sha
             notify(st, f"PUBLIC CI RED ({sha})", plain(f"failing jobs on the public main commit {sha}: {', '.join(red)}", "no. The live app is not affected",
                    "nothing is blocked; releases continue", "open the failing run on the public repo and fix it before the next slot (never re-run until green)"),
                    failure=True, key="public-ci", every=3600)
         elif not any(c.get("status") != "completed" for c in runs):
+            st.pop("publicCiRedSha", None)
             clear_alert(st, "public-ci", "public CI green again", f"every check on the public main commit {sha} passes")
     except Exception as e:  # noqa: BLE001
         say(f"public CI check skipped: {type(e).__name__}")
