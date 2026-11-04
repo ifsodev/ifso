@@ -572,5 +572,52 @@ class Remap(unittest.TestCase):
         self.assertEqual([u["sha"] for u in R.load(R.SCHEDULE, None)["updates"]], [self.old[0]] + new)
 
 
+class CatchUp(unittest.TestCase):
+    """E15: after a long outage a pass releases at most MAX_PER_PASS (default 3) overdue updates, minGapMinutes apart; the
+    next pass goes on with the rest."""
+
+    def test_a_long_outage_releases_three_per_pass_with_the_gap(self):
+        s = sched72()
+        s["launchAt"], s["minGapMinutes"] = R.iso(R.now() - dt.timedelta(hours=10)), 2
+        for i, u in enumerate(s["updates"]):
+            u["slot"] = R.iso(R.now() - dt.timedelta(hours=10) + dt.timedelta(hours=i))  # 10 overdue
+        released, sleeps = [], []
+        names = ("schedule", "armed", "queue_alignment_error", "disk_low", "release_one", "public_ci_tick", "ping", "preflight_kick",
+                 "retry_public_pending", "retry_missing_releases", "take_resume_note")
+        saved = {n: getattr(R, n) for n in names}
+        old_sleep, old_gap = R.time.sleep, R.CFG["gap_sleep"]
+
+        def release_one(st, sched, u):
+            st["updates"][u["id"]]["status"] = "released"
+            st["lastReleaseAt"] = R.iso(R.now())
+            released.append(u["id"])
+            return "released"
+        R.schedule, R.armed, R.queue_alignment_error, R.disk_low = (lambda: s), (lambda *a, **k: True), (lambda *a, **k: None), (lambda: None)
+        R.release_one, R.public_ci_tick, R.ping, R.preflight_kick = release_one, (lambda st: None), (lambda *a: None), (lambda: None)
+        R.retry_public_pending = R.retry_missing_releases = lambda st, sched: None
+        R.take_resume_note = lambda: True
+        R.time.sleep, R.CFG["gap_sleep"] = sleeps.append, True
+        try:
+            if os.path.exists(R.STATE):
+                os.remove(R.STATE)
+            if os.path.exists(R.PAUSE):
+                os.remove(R.PAUSE)
+            R._pass()
+            self.assertEqual(released, ["TU01", "TU02", "TU03"])
+            self.assertEqual(len(sleeps), 2)  # the gap between them, each close to minGapMinutes
+            self.assertTrue(all(110 <= x <= 120 for x in sleeps), sleeps)
+            R._pass()
+            self.assertEqual(released[3:], ["TU04", "TU05", "TU06"])
+        finally:
+            for n, f in saved.items():
+                setattr(R, n, f)
+            R.time.sleep, R.CFG["gap_sleep"] = old_sleep, old_gap
+            if os.path.exists(R.STATE):
+                os.remove(R.STATE)
+
+    def test_default_is_three(self):
+        self.assertEqual(R.CFG["max_per_pass"], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -70,7 +70,9 @@ CFG = {
     "preflight_auto": E("PREFLIGHT_AUTO", "1") == "1",
     "sandbox": E("IFSO_SANDBOX", "0") == "1",
     "public_ci_api": "" if "CHANGE_ME" in E("PUBLIC_CI_API", "") else E("PUBLIC_CI_API", "").rstrip("/"),  # https://api.github.com/repos/<owner>/<repo>; empty or the install placeholder = off
-    "max_per_pass": int(E("MAX_PER_PASS", "0")),
+    # at most this many updates per pass: after a long outage the overdue ones go a few per pass (minGapMinutes apart, the timer
+    # starts the next pass 5 minutes later), never a flood that outlives the unit's 3 h timeout. 0 = no limit (tests only).
+    "max_per_pass": int(E("MAX_PER_PASS", "3")),
     # Vercel builds web/ from PRIVATE main. After a release that changes web/, the runner reads the GitHub commit statuses and
     # check-runs of that commit (Vercel posts them) and alerts when the Vercel deploy failed or never finished within
     # VERCEL_WAIT_MINUTES. Never blocks a release. VERCEL_STATUS_API=https://api.github.com/repos/<owner>/<private repo>
