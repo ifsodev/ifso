@@ -409,7 +409,7 @@ runarm() { # runarm [KEY=VALUE...]: the real arm.sh as root (Linux) or under the
 }
 setconf GATE_ANVIL no-such-anvil-here
 as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4-noanvil.out" 2>&1
-ok "no anvil on the server: the update whose test needs it FAILS preflight with a clear reason (not skipped)" bash -c "grep -q 'TU01: FAIL.*anvil' '$W/pf-w4-noanvil.out' && grep -q 'TU02: PASS' '$W/pf-w4-noanvil.out'"
+ok "no anvil on the server: preflight refuses the update whose test needs it, with a clear reason (not skipped)" bash -c "grep -q 'TU01: FAIL.*anvil' '$W/pf-w4-noanvil.out' && grep -q 'TU02: PASS' '$W/pf-w4-noanvil.out'"
 setconf GATE_ANVIL anvil
 as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4a.out" 2>&1
 ok "preflight on the base main: 3 of 3 PASS" grep -q "preflight: 3 of 3 PASS" "$W/home/preflight/status"

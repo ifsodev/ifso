@@ -4,6 +4,8 @@
 #        reachable from the clone's origin) must NOT decide the result of `ifso-deploy-release --validate`.
 #   L-5  ifso-release-ghrelease publishes only the runner's own notes file and posters/<tag>.png: no arbitrary path, no symlink,
 #        no non-PNG poster.
+#   and the release-hardening review: E6 (--linux only in its container), E5 (sync-public.py installed), A1 (the automatic
+#   preflight outlives the oneshot unit), C11 (anvil installed, checksum-verified), C21 (push-queue.sh never overwrites tu-queue).
 # Usage: bash hardening-cases.sh        Needs: git, python3, ssh-keygen, curl. Prints PASS/FAIL lines and a final count; exit 1 on FAIL.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

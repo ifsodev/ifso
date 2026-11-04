@@ -196,7 +196,8 @@ SSH
   echo "  private repo, WRITE deploy key : $(cat "$RHOME/.ssh/id_ed25519_private.pub")"
   echo "  public repo,  WRITE deploy key : $(cat "$RHOME/.ssh/id_ed25519_public.pub")"
   echo "  public account, SIGNING key    : $(cat "$RHOME/.ssh/id_ed25519_signing.pub")"
-  echo "Next: README.md section 'Install on the server' (allowed_signers, clone, queue, release.env, rehearsal), then arm.sh."
+  echo "allowed_signers already has the server signing key; append the owner's keys. Next: README.md 'Install on the server'"
+  echo "(clone through the ssh aliases github-ifso-private / github-ifso-public, queue, release.env, rehearsal), then arm.sh."
 else
   say "installed under $PREFIX (sandbox mode: no users, no systemctl)"
 fi
