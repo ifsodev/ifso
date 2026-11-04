@@ -364,9 +364,11 @@ async function pickMarkets(n: number): Promise<string[]> {
   const ms: any[] = await (await fetch(`https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&order=endDate&ascending=true&end_date_min=${min}&liquidity_num_min=10000&volume_num_min=50000`)).json();
   return ms.filter(yesNo).slice(0, n).map((m) => m.slug as string);
 }
-/** the market's real answer once it closed (1 YES, 2 NO, 0 neither), from the public listing */
+/** the market's real answer once it closed (1 YES, 2 NO, 0 neither), from Gamma */
 async function realAnswer(slug: string): Promise<number | undefined> {
-  const [mk]: any[] = await (await fetch(`https://gamma-api.polymarket.com/markets?slug=${encodeURIComponent(slug)}`)).json();
+  // the single-market endpoint: the list endpoint leaves closed markets out unless closed=true
+  const res = await fetch(`https://gamma-api.polymarket.com/markets/slug/${encodeURIComponent(slug)}`);
+  const mk: any = res.ok ? await res.json() : undefined;
   if (!mk?.closed) return undefined;
   const [y, n] = JSON.parse(mk.outcomePrices).map(Number);
   return y === 1 && n === 0 ? 1 : y === 0 && n === 1 ? 2 : 0;
@@ -437,7 +439,8 @@ async function advanceOutcome(p: PendingCheck): Promise<number> {
     o.stage = "disputed";
     const q = await qinfo(o.qid);
     if (o.role === "panel") {
-      const ans = (await realAnswer(o.slug)) ?? 1;
+      const ans = await realAnswer(o.slug);
+      if (ans === undefined) throw new Error(`panel: Gamma has no closed answer for ${o.slug} yet; the panel never guesses`);
       await assertTestnet();
       onChain(`panel Safe decides ${ans}: ${safeExec(PANEL_SAFE, RESOLVER, encodeFunctionData({ abi: ifsoOutcomeResolverAbi, functionName: "panelResolve", args: [o.qid, ans] }))}`);
       eq(Number((await qinfo(o.qid)).state), QS.FINAL, "final after the panel");

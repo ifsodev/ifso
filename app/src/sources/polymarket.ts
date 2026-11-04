@@ -2,7 +2,7 @@
 //  1. Gamma API (public): closed + umaResolutionStatus + outcomePrices
 //  2. Polygon Conditional Tokens: payoutNumerators / payoutDenominator for the market's conditionId
 // CTF address 0x4D97...6045 verified on Polygon (code present; payouts match Gamma on 20 recorded markets, 2026-10-30).
-import { createPublicClient, http, type Hex } from "viem";
+import { createPublicClient, http, keccak256, toHex, type Hex } from "viem";
 import { polygon } from "viem/chains";
 import { ctfAbi } from "../abi/external";
 import { polymarketOutcome, type SourceReport } from "../core/outcome";
@@ -44,10 +44,16 @@ export function gammaReport(m: GammaMarket | undefined, digest: Hex, fetchedAt: 
   return o === 0 ? { ...base, status: "void" } : { ...base, status: "final", outcome: o };
 }
 
+/** The single-market endpoint: the list endpoint (`/markets?slug=`) leaves closed markets out unless `closed=true`, so a
+ *  RESOLVED market would read as missing (pending forever). This one answers for open and closed markets; 404 = unknown slug. */
 export async function fetchGamma(slug: string): Promise<{ report: SourceReport; market?: GammaMarket }> {
-  const f = await getJson<GammaMarket[]>(`https://gamma-api.polymarket.com/markets?slug=${encodeURIComponent(slug)}`);
-  const m = f.body[0];
-  return { report: gammaReport(m, f.digest, f.fetchedAt), market: m };
+  const url = `https://gamma-api.polymarket.com/markets/slug/${encodeURIComponent(slug)}`;
+  const f = await getJson<GammaMarket>(url).catch((e: Error) => {
+    if (e.message.startsWith("404 ")) return null;
+    throw e;
+  });
+  if (!f) return { report: gammaReport(undefined, keccak256(toHex(`404 ${slug}`)), Math.floor(Date.now() / 1000)) };
+  return { report: gammaReport(f.body, f.digest, f.fetchedAt), market: f.body };
 }
 
 /** CTF payouts -> report. Final only when one side holds the whole denominator; anything else is VOID. */

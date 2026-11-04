@@ -155,12 +155,14 @@ describe("copy rules", () => {
 describe("provider fetchers", () => {
   test("Polymarket Gamma: reads the market by slug and turns it into a report", async () => {
     const m = { slug: "s", question: "q", conditionId: CH, closed: true, umaResolutionStatus: "resolved", outcomes: '["Yes","No"]', outcomePrices: '["1","0"]' };
-    const seen = stubFetch(() => ({ body: [m] }));
+    const seen = stubFetch(() => ({ body: m }));
     const r = await fetchGamma("a b");
-    expect(seen[0]!.url).toContain("slug=a%20b");
+    expect(seen[0]!.url).toContain("/markets/slug/a%20b");
     expect(r.report).toMatchObject({ provider: "polymarket-gamma", status: "final", outcome: 1 });
-    stubFetch(() => ({ body: [] }));
+    stubFetch(() => ({ status: 404, body: { error: "slug not found" } }));
     expect((await fetchGamma("none")).report.status).toBe("pending");
+    stubFetch(() => ({ status: 503, body: "down" }));
+    expect(await fetchGamma("x").catch((e: Error) => e.message)).toContain("503");
   });
 
   test("a provider error status is thrown with the host only, never the key in the URL", async () => {
