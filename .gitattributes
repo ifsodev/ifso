@@ -1,0 +1,2 @@
+# Each queued update adds its own top entry; union keeps both when main moved, so cherry-picks do not conflict.
+CHANGELOG.md merge=union
