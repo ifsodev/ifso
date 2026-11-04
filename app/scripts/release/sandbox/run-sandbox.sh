@@ -53,7 +53,7 @@ if [[ $MODE == linux ]]; then
   getent group ifso-ops >/dev/null || groupadd --system ifso-ops
   id "$OPS" >/dev/null 2>&1 || useradd -m -G ifso-ops "$OPS"
   note "install.sh (real, as root)"
-  SYSTEMCTL="$SYSTEMCTL" SYNC_PUBLIC_SRC="$SYNC_PY" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
+  SYSTEMCTL="$SYSTEMCTL" PUBLIC_GITHUB_REPO=ifsodev/public-sandbox SYNC_PUBLIC_SRC="$SYNC_PY" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
   ok "install.sh ran clean" test $? -eq 0
   ok "sudoers file installed 0440 root" test "$(stat -c '%a %U' /etc/sudoers.d/ifso-release)" = "440 root"
   ok "visudo -c passes on the whole sudo configuration" visudo -c
@@ -65,7 +65,7 @@ if [[ $MODE == linux ]]; then
 else
   PFX="$ROOT/root"; mkdir -p "$PFX"
   note "install.sh (PREFIX mode: no users, no systemctl)"
-  PREFIX="$PFX" SYNC_PUBLIC_SRC="$SYNC_PY" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
+  PREFIX="$PFX" PUBLIC_GITHUB_REPO=ifsodev/public-sandbox SYNC_PUBLIC_SRC="$SYNC_PY" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
   ok "install.sh ran clean" test $? -eq 0
   CONF="$PFX/etc/ifso-release/paths.conf"; LIBDIR="$PFX/usr/local/lib/ifso-release"; SBIN="$PFX/usr/local/sbin"; ETC="$PFX/etc/ifso-release"
   BASE="$ROOT/base"; mkdir -p "$BASE"
@@ -75,6 +75,7 @@ else
 fi
 RGITCFG="$PFX/var/lib/ifso-release/.gitconfig"
 SYNC_INSTALLED="$LIBDIR/lib/sync-public.py"
+ok "paths.conf has PUBLIC_CI_API by default (from PUBLIC_GITHUB_REPO at install)" grep -q '^PUBLIC_CI_API="https://api.github.com/repos/ifsodev/public-sandbox"' "$CONF"
 ok "install.sh installed sync-public.py where paths.conf points (the runner uses that copy)" bash -c "cmp -s '$SYNC_PY' '$SYNC_INSTALLED' && test \"\$(sed -n 's/^SYNC_PUBLIC_PY=//p' '$CONF' | tr -d '\"')\" = '$SYNC_INSTALLED'"
 ok "install.sh set the release user's git identity (name, email, no guessing)" bash -c "test \"\$(git config --file '$RGITCFG' user.email)\" = '$GIT_EMAIL' && test \"\$(git config --file '$RGITCFG' user.name)\" = '$GIT_NAME' && test \"\$(git config --file '$RGITCFG' user.useConfigOnly)\" = true"
 ok "wrappers installed and executable" test -x "$SBIN/ifso-deploy-release" -a -x "$SBIN/ifso-release-notify" -a -x "$SBIN/ifso-release-status" -a -x "$SBIN/ifso-release-ghrelease"
@@ -148,6 +149,7 @@ new_world() { # new_world <name>
   setconf PUBLIC_SYNC_STATE "$W/home/public-sync.json"; setconf API_URL "http://127.0.0.1:$PORT"
   setconf ALLOW_FILE "$W/ALLOW_REAL_DEPLOY"; setconf RELEASE_ENV "$W/release.env"; setconf DEPLOY_LOCK "$W/deploy.lock"
   setconf FORBIDDEN_FILE "$ETC/forbidden.txt"
+  setconf PUBLIC_CI_API ""   # the CI watcher stays off in the passes (world 4 points it at the fake GitHub for arm.sh)
   setconf INFRA_RETRY_S 0; setconf VERIFY_TRIES 2; setconf VERIFY_RETRY_S 0; setconf GAP_SLEEP 0; setconf PREFLIGHT_AUTO 0
   setconf FETCH_WAIT 0; setconf TRANSIENT_MAX_PASSES 6; setconf IFSO_SANDBOX 1; setconf DISK_MIN_GB 0
   # Linux: no *_CMD lines, so the runner uses its built-in `sudo -n /usr/local/sbin/...` defaults, exactly as on the server
@@ -411,7 +413,26 @@ PY
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh refuses preflight results of another schedule" bash -c "test $ARC -ne 0 && grep -q 'another schedule' '$W/arm.out'"
 cp "$W/pf-good.json" "$W/home/preflight/results.json"
+# public CI on the public main tip (anonymous API; here the fake GitHub) and the release token are arming preconditions
+setconf PUBLIC_CI_API ""
 runarm ARM_TEST=1; ARC=$?
+ok "arm.sh refuses while PUBLIC_CI_API is not set (the CI watcher would be off)" bash -c "test $ARC -ne 0 && grep -q 'PUBLIC_CI_API' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
+setconf PUBLIC_CI_API "http://127.0.0.1:$PORT/repos/ifsodev/public-sandbox"
+printf '[{"id":1,"name":"app","status":"completed","conclusion":"success","head_sha":"%s"},{"id":2,"name":"contracts","status":"completed","conclusion":"failure","head_sha":"%s"}]' "$M0" "$M0" >"$CTL/ci.json"
+runarm ARM_TEST=1; ARC=$?
+ok "arm.sh refuses a red public CI on the public main tip (names the job)" bash -c "test $ARC -ne 0 && grep -q 'public CI' '$W/arm.out' && grep -q 'contracts' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
+printf '[{"id":1,"name":"app","status":"in_progress","conclusion":null,"head_sha":"%s"}]' "$M0" >"$CTL/ci.json"
+runarm ARM_TEST=1; ARC=$?
+ok "arm.sh refuses a public CI that is still running (0 non-success means finished and green)" bash -c "test $ARC -ne 0 && grep -q 'public CI' '$W/arm.out'"
+rm -f "$CTL/ci.json"
+touch "$CTL/gh-token-bad"
+runarm ARM_TEST=1; ARC=$?
+ok "arm.sh refuses when the release token cannot create and delete a draft Release" bash -c "test $ARC -ne 0 && grep -q 'release token' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
+runarm ALLOW_NO_RELEASE_TOKEN=1; ARC=$?
+ok "ALLOW_NO_RELEASE_TOKEN=1: arms anyway with a loud warning" bash -c "test $ARC -eq 0 && grep -q 'WARNING' '$W/arm.out' && test -e '$W/ALLOW_REAL_DEPLOY'"
+rm -f "$W/ALLOW_REAL_DEPLOY" "$CTL/gh-token-bad"
+runarm ARM_TEST=1; ARC=$?
+ok "arm.sh: public CI green (0 non-success) and the token made and deleted a draft" bash -c "grep -q 'public CI: 0 non-success' '$W/arm.out' && grep -q 'draft Release created and deleted' '$W/arm.out' && grep -q 'DELETE' '$CTL/requests.jsonl'"
 ok "arm.sh arms on a preflight of the current main and schedule" bash -c "test $ARC -eq 0 && test -e '$W/ALLOW_REAL_DEPLOY' && grep -q ARMED '$W/arm.out'"
 ok "arming wrote LAUNCH_AT and the slots" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/schedule.json\")); sys.exit(0 if s[\"launchAt\"]==\"$FUTURE\" and all(u[\"slot\"] for u in s[\"updates\"]) else 1)'"
 rm -f "$W/ALLOW_REAL_DEPLOY"

@@ -3,7 +3,8 @@
   the server's own API   GET /readyz, /v1/version, /v1/tuNN   (a route exists when the CURRENT release's tree contains
                          app/src/api/routes/tuNN.ts, so a check really passes only after its update was deployed)
   Telegram               POST /bot<token>/sendMessage         (recorded in requests.jsonl)
-  GitHub                 GET/POST/PATCH /repos/<o>/<r>/releases..., POST /uploads/... assets
+  GitHub                 GET/POST/PATCH/DELETE /repos/<o>/<r>/releases..., POST /uploads/... assets, GET .../commits/main/check-runs
+                         (CTL/ci.json = the check-runs; CTL/gh-token-bad = creating a Release answers 403)
 Injected failures are files in the control folder: readyz-down, verify-fail-TUnn (the route answers 500).
 usage: fake_world.py <port-file> <ctl-dir> <repo-dir> <opt-dir>
 """
@@ -62,6 +63,10 @@ class H(BaseHTTPRequestHandler):
             if tree_has(current_sha(), f"app/src/api/routes/tu{m.group(1)}.perk"):  # perk-gated: ON, answers locked until the token exists
                 return self.reply(403, {"locked": True, "message": "Hold 100,000 IFSO to unlock"})
             return self.reply(200, {"tu": tu, "ok": True})
+        if re.fullmatch(r"/repos/([^/]+/[^/]+)/commits/main/check-runs", p):  # public CI (anonymous); CTL/ci.json overrides
+            f = os.path.join(CTL, "ci.json")
+            runs = json.load(open(f)) if os.path.exists(f) else [{"id": 1, "name": "app", "status": "completed", "conclusion": "success", "head_sha": "0" * 40}]
+            return self.reply(200, {"total_count": len(runs), "check_runs": runs})
         m = re.fullmatch(r"/repos/([^/]+/[^/]+)/releases/tags/(.+)", p)
         if m:
             r = releases.get(m.group(2))
@@ -77,9 +82,11 @@ class H(BaseHTTPRequestHandler):
         if re.fullmatch(r"/bot[^/]+/sendMessage", p):
             return self.reply(200, {"ok": True, "result": {}})
         m = re.fullmatch(r"/repos/([^/]+/[^/]+)/releases", p)
+        if m and os.path.exists(os.path.join(CTL, "gh-token-bad")):
+            return self.reply(403, {"message": "Resource not accessible by personal access token"})
         if m:
             d = json.loads(body)
-            r = {"id": len(releases) + 1, "tag_name": d["tag_name"], "body": d["body"]}
+            r = {"id": len(releases) + 1, "tag_name": d["tag_name"], "body": d.get("body", ""), "draft": bool(d.get("draft"))}
             releases[d["tag_name"]] = r
             return self.reply(201, r)
         m = re.fullmatch(r"/uploads/repos/([^/]+/[^/]+)/releases/(\d+)/assets", p)
@@ -100,6 +107,20 @@ class H(BaseHTTPRequestHandler):
         self.reply(404, {})
 
 
+def _delete(self):
+    self.rec()
+    m = re.fullmatch(r"/repos/([^/]+/[^/]+)/releases/(\d+)", self.path.split("?")[0])
+    if m:
+        for k, r in list(releases.items()):
+            if str(r["id"]) == m.group(2):
+                releases.pop(k)
+                self.send_response(204)
+                self.end_headers()
+                return
+    self.reply(404, {})
+
+
+H.do_DELETE = _delete
 srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
 open(PORT_FILE, "w").write(str(srv.server_address[1]))
 srv.serve_forever()

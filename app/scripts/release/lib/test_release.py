@@ -152,6 +152,22 @@ class PublicCI(unittest.TestCase):
     def test_in_progress_is_never_red(self):
         self.assertEqual(R.ci_red_jobs([{"id": 1, "name": "app", "conclusion": None, "status": "in_progress"}]), [])
 
+    def test_arming_needs_every_job_finished_and_green(self):
+        ok = [{"id": 1, "name": "app", "status": "completed", "conclusion": "success"},
+              {"id": 2, "name": "docs", "status": "completed", "conclusion": "skipped"}]
+        self.assertEqual(R.ci_not_green(ok), [])
+        self.assertEqual(R.ci_not_green(ok + [{"id": 3, "name": "web", "status": "in_progress", "conclusion": None}]), ["web (in_progress)"])
+        self.assertEqual(R.ci_not_green(ok + [{"id": 4, "name": "slither", "status": "completed", "conclusion": "action_required"}]), ["slither"])
+
+    def test_install_placeholder_keeps_the_watcher_off(self):
+        os.environ["PUBLIC_CI_API"] = "https://api.github.com/repos/CHANGE_ME/CHANGE_ME"
+        try:
+            import importlib
+            self.assertEqual(importlib.reload(R).CFG["public_ci_api"], "")
+        finally:
+            os.environ["PUBLIC_CI_API"] = ""
+            importlib.reload(R)
+
     def test_off_by_default_and_errors_never_raise(self):
         R.public_ci_tick({})
         R.CFG["public_ci_api"] = "http://127.0.0.1:9"

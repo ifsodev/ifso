@@ -8,7 +8,8 @@
     release.py make-schedule --queue-repo P --base SHA [--ref tu-queue] [--manifest F] [--count 72]
     release.py remap --queue-repo P --ref NEWBRANCH [--tag T]   re-point pending AND held updates at a rebuilt queue
     release.py scan-queue             forbidden-word scan of every queue tree (arming precondition)
-    release.py arm-check              arming preconditions: schedule current, preflight of the current main and schedule all PASS
+    release.py arm-check              arming preconditions: schedule current, preflight of the current main and schedule all
+                                      PASS, public CI on the public main tip finished with 0 non-success (anonymous API)
     release.py notify-test            one test alert through the notify wrapper
 
 Everything is driven by $RELEASE_HOME/state.json, written atomically after every step, so a pass that dies anywhere
@@ -59,7 +60,7 @@ CFG = {
     "disk_paths": [x for x in E("DISK_PATHS", "/opt,/var/lib").split(",") if x.strip()],
     "preflight_auto": E("PREFLIGHT_AUTO", "1") == "1",
     "sandbox": E("IFSO_SANDBOX", "0") == "1",
-    "public_ci_api": E("PUBLIC_CI_API", "").rstrip("/"),            # https://api.github.com/repos/<owner>/<repo>; empty = off (sandbox)
+    "public_ci_api": "" if "CHANGE_ME" in E("PUBLIC_CI_API", "") else E("PUBLIC_CI_API", "").rstrip("/"),  # https://api.github.com/repos/<owner>/<repo>; empty or the install placeholder = off
     "max_per_pass": int(E("MAX_PER_PASS", "0")),                   # 0 = no limit; the sandbox uses 1 to stage a crash on a chosen update
 }
 SCHEDULE = os.path.join(RELEASE_HOME, "schedule.json")
@@ -820,6 +821,26 @@ def ci_red_jobs(check_runs):
     return sorted(set(red))
 
 
+def public_ci_runs(timeout=15):
+    """The check-runs of the public main tip, anonymous (one call). Raises on any error."""
+    req = urllib.request.Request(f"{CFG['public_ci_api']}/commits/main/check-runs?per_page=100",
+                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "ifso-release"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r).get("check_runs", [])
+
+
+def ci_not_green(runs):
+    """Arming is stricter than the watcher: every job finished, and nothing but success / skipped / neutral (a cancelled job
+    that a later run of the same job replaced is ignored, as in ci_red_jobs)."""
+    red = set(ci_red_jobs(runs))
+    for c in runs:
+        if c.get("status") != "completed":
+            red.add(f"{c.get('name', '?')} ({c.get('status')})")
+        elif c.get("conclusion") not in ("success", "skipped", "neutral", "cancelled"):
+            red.add(c.get("name", "?"))
+    return sorted(red)
+
+
 def public_ci_tick(st):
     """One anonymous GitHub call per pass: red check-runs on the public main tip raise ONE alert naming the jobs and the commit
     (a reminder every hour while red), one all-clear when green. API errors, rate limits and in-progress runs never alert and
@@ -828,9 +849,7 @@ def public_ci_tick(st):
     if not api:
         return
     try:
-        req = urllib.request.Request(f"{api}/commits/main/check-runs?per_page=100", headers={"Accept": "application/vnd.github+json", "User-Agent": "ifso-release"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            runs = json.load(r).get("check_runs", [])
+        runs = public_ci_runs()
         if not runs:
             return
         sha = runs[0].get("head_sha", "")[:10]
@@ -1010,6 +1029,20 @@ def arm_problems(results_path):
     bad = sorted(k for k in want if k in res and not res[k].get("ok"))
     if bad or r.get("failing"):
         out.append(f"preflight failures: {', '.join(bad or r.get('failing'))}")
+    if not CFG["public_ci_api"]:
+        out.append("PUBLIC_CI_API is not set in paths.conf (https://api.github.com/repos/<public-owner>/<repo>): public CI cannot be "
+                   "checked now or watched during the launch")
+    else:
+        try:
+            runs = public_ci_runs()
+            nz = ci_not_green(runs) if runs else ["no check-runs at all on the public main tip"]
+            if nz:
+                out.append(f"public CI on the public main tip {(runs[0].get('head_sha') or '')[:10] if runs else ''}: "
+                           f"{len(nz)} non-success ({', '.join(nz[:6])}): fix it (never re-run until green)")
+            else:
+                print(f"public CI: 0 non-success of {len(runs)} check-runs on the public main tip {(runs[0].get('head_sha') or '')[:10]}")
+        except Exception as e:  # noqa: BLE001
+            out.append(f"public CI could not be read ({type(e).__name__}): arming needs a green answer")
     return out
 
 
@@ -1018,7 +1051,7 @@ def cmd_arm_check(args):
     for p in probs:
         print(f"REFUSED: {p}")
     if not probs:
-        print("arming checks: schedule current, preflight current and all PASS")
+        print("arming checks: schedule current, preflight current and all PASS, public CI green")
     return 1 if probs else 0
 
 

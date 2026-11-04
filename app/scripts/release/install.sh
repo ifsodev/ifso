@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Installs the Ifso release runner on the server, UNARMED (timer disabled, no flag file). Run ON THE SERVER as root, from a
 # checkout of this folder:
-#   sudo RELEASE_GIT_NAME="<name>" RELEASE_GIT_EMAIL="<email>" SYNC_PUBLIC_SRC=/root/sync-public.py bash install.sh
+#   sudo RELEASE_GIT_NAME="<name>" RELEASE_GIT_EMAIL="<email>" SYNC_PUBLIC_SRC=/root/sync-public.py \
+#        PUBLIC_GITHUB_REPO=<public-owner>/<repo> bash install.sh
+# PUBLIC_GITHUB_REPO: the public repo; paths.conf gets PUBLIC_CI_API (public CI watcher, arming check) and PUBLIC_COMMIT_URL.
 # SYNC_PUBLIC_SRC: the private public-copy tool (docs/tools/sync-public.py, copied over by hand); needed on the first run.
 # RELEASE_GIT_NAME / RELEASE_GIT_EMAIL: the identity of the commits the runner makes itself on private main (cherry-picks,
 # reverts, re-applies). Use an account that is a member of the Vercel team that builds web/ (the owner's GitHub noreply
@@ -84,6 +86,16 @@ API_URL=http://127.0.0.1:8080
 PUBLIC_COMMIT_URL=https://github.com/CHANGE_ME/CHANGE_ME/commit/{sha}
 CONF
   chmod 0644 "$CONF"
+fi
+# ---- the public repo (owner/name): the CI watcher (one anonymous call per pass) and arm.sh read PUBLIC_CI_API. Without
+# PUBLIC_GITHUB_REPO the line is a CHANGE_ME placeholder: the watcher stays off and arm.sh refuses until it is set.
+PUB="${PUBLIC_GITHUB_REPO:-}"
+if [[ -n "$PUB" ]]; then
+  [[ "$PUB" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "PUBLIC_GITHUB_REPO must be owner/name"
+  conf_set PUBLIC_CI_API "https://api.github.com/repos/$PUB"
+  conf_set PUBLIC_COMMIT_URL "https://github.com/$PUB/commit/{sha}"
+elif [[ -z "$(conf_get PUBLIC_CI_API)" ]]; then
+  conf_set PUBLIC_CI_API "https://api.github.com/repos/CHANGE_ME/CHANGE_ME"
 fi
 conf_set RELEASE_GIT_NAME "$GIT_NAME"
 conf_set RELEASE_GIT_EMAIL "$GIT_EMAIL"

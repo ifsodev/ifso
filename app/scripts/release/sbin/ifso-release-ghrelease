@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Root-owned. ifso-release-ghrelease <tag> <title> <notes-file> [public-sha]
+#             ifso-release-ghrelease --check-token      (arm.sh) a DRAFT Release created and deleted through the token
 # Creates (idempotently) the GitHub Release for one update on the PUBLIC repo with its poster on top, through a fine-grained
 # token (public repo only, Contents read/write) kept in /etc/ifso-release/release.env as GITHUB_RELEASE_TOKEN (root, 0600).
 # The poster is posters/<tag>.png under the release home (staged by exact tag); it is uploaded once as an asset and linked at
@@ -12,6 +13,22 @@ LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
 # shellcheck disable=SC1091
 . "$LIB/common.sh"
 val() { [[ -r "$RELEASE_ENV" ]] && sed -n "s/^$1=//p" "$RELEASE_ENV" | tail -1 | tr -d "\"' \\r" || true; }
+if [[ "${1:-}" == --check-token ]]; then
+  # arming precondition (arm.sh): prove the token can write Releases by creating a DRAFT and deleting it (a draft makes no tag)
+  [[ $# == 1 ]] || die "usage: ifso-release-ghrelease --check-token"
+  token="$(val GITHUB_RELEASE_TOKEN)"; repo="$(val PUBLIC_REPO)"; api="$(val GITHUB_API_BASE)"; api="${api:-https://api.github.com}"
+  [[ -n "$token" ]] || { echo "no token (GITHUB_RELEASE_TOKEN missing in $RELEASE_ENV)"; exit 3; }
+  [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "PUBLIC_REPO must be owner/name in $RELEASE_ENV"; exit 3; }
+  hdr() { printf 'url = "%s"\nheader = "Authorization: Bearer %s"\nheader = "Accept: application/vnd.github+json"\n' "$1" "$token"; }
+  r="$(hdr "$api/repos/$repo/releases" | curl -sS -m 60 -X POST -K - -w '\n%{http_code}' -H 'Content-Type: application/json' \
+       --data '{"tag_name":"arming-check-draft","name":"arming check (deleted at once)","draft":true}' || true)"
+  [[ "$(tail -n1 <<<"$r")" == 201 ]] || { echo "draft Release create: HTTP $(tail -n1 <<<"$r") (the token needs Contents read/write on $repo)"; exit 3; }
+  id="$(sed '$d' <<<"$r" | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["id"]))')" || { echo "draft Release create: no id in the answer"; exit 3; }
+  d="$(hdr "$api/repos/$repo/releases/$id" | curl -sS -m 60 -X DELETE -K - -o /dev/null -w '%{http_code}' || true)"
+  [[ "$d" == 204 ]] || { echo "draft Release $id delete: HTTP $d (delete it by hand on GitHub)"; exit 3; }
+  echo "release token: a draft Release created and deleted on $repo"
+  exit 0
+fi
 [[ $# -ge 3 && $# -le 4 ]] || die "usage: ifso-release-ghrelease <tag> <title> <notes-file> [public-sha]"
 tag="$1"; title="$2"; notes="$3"; sha="${4:-}"
 [[ "$tag" =~ ^(update|bonus)-[0-9]{2}$|^fix-[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]{1,60}$ ]] || die "bad tag '$tag'"
