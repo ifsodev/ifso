@@ -154,5 +154,25 @@ ok "a foundry tarball with the wrong sha256 is refused and nothing is installed"
 FOUNDRY_TARBALL="$W/foundry.tar.gz" FOUNDRY_SHA256="$SUM" SYNC_PUBLIC_SRC="$W/sync-public.py" INST "$W/pfx3" >"$W/inst5.out" 2>&1
 ok "the verified tarball installs anvil (only anvil) for the gate" bash -c "test -x '$W/pfx3/usr/local/bin/anvil' && test ! -e '$W/pfx3/usr/local/bin/forge'"
 
+echo "== C21: push-queue.sh pushes a rebuilt queue to a NEW branch and never overwrites tu-queue"
+G init -q --bare -b main "$W/srvqueue.git"
+G clone -q "$W/origin.git" "$W/mac" 2>/dev/null
+G -C "$W/mac" checkout -q -b tu-queue origin/main
+echo q1 >"$W/mac/q"; G -C "$W/mac" add q; G -C "$W/mac" commit -q -m "feat(tu01): one"
+PQ() { (cd "$W/mac" && GIT_CONFIG_GLOBAL=/dev/null QUEUE_URL="$W/srvqueue.git" SKIP_CHOWN=1 bash "$HERE/../push-queue.sh" "$@"); }
+PQ >"$W/pq1.out" 2>&1
+ok "first push creates tu-queue on the server" test "$(G -C "$W/srvqueue.git" rev-parse tu-queue 2>/dev/null)" = "$(G -C "$W/mac" rev-parse tu-queue)"
+OLDQ="$(G -C "$W/srvqueue.git" rev-parse tu-queue)"
+G -C "$W/mac" checkout -q -b queue-r1 origin/main; echo q2 >"$W/mac/q"; G -C "$W/mac" add q; G -C "$W/mac" commit -q -m "feat(tu01): one, rebuilt"
+LOCAL_BRANCH=queue-r1 PQ >"$W/pq2.out" 2>&1; rc=$?
+ok "a rebuilt queue without a new branch name is refused (tu-queue exists) and says what to do" bash -c "[[ $rc != 0 ]] && grep -q 'NEW branch' '$W/pq2.out' && test \"\$(git -C '$W/srvqueue.git' rev-parse tu-queue)\" = '$OLDQ'"
+LOCAL_BRANCH=queue-r1 PQ tu-queue >"$W/pq3.out" 2>&1; rc=$?
+ok "naming tu-queue explicitly is refused too (never overwritten, never forced)" bash -c "[[ $rc != 0 ]] && test \"\$(git -C '$W/srvqueue.git' rev-parse tu-queue)\" = '$OLDQ'"
+LOCAL_BRANCH=queue-r1 PQ queue-r1 >"$W/pq4.out" 2>&1
+ok "the rebuilt queue lands on the NEW branch queue-r1; tu-queue keeps the old tip" bash -c "test \"\$(git -C '$W/srvqueue.git' rev-parse queue-r1)\" = \"\$(git -C '$W/mac' rev-parse queue-r1)\" && test \"\$(git -C '$W/srvqueue.git' rev-parse tu-queue)\" = '$OLDQ'"
+LOCAL_BRANCH=queue-r1 PQ queue-r1 >"$W/pq5.out" 2>&1; rc=$?
+ok "pushing to a branch name that already exists is refused" bash -c "[[ $rc != 0 ]] && grep -q 'already exists' '$W/pq5.out'"
+ok "README has the 'Rebuilt queue' section push-queue.sh points to, with remap and update-ref" bash -c "grep -q '^## Rebuilt queue' '$HERE/../README.md' && grep -q 'release.py remap' '$HERE/../README.md' && grep -q 'update-ref refs/heads/tu-queue' '$HERE/../README.md'"
+
 echo "hardening cases: $PASS passed, $FAIL failed"
 [[ $FAIL == 0 ]]

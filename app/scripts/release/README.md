@@ -12,7 +12,7 @@ involved on launch day. It is inert until armed.
 | `systemd/` | `ifso-release.service` (one pass, `flock`, `nice`, memory limits, 3 h timeout) and the timer (2 min after boot, 5 min after each pass). Installed disabled. |
 | `install.sh` | Makes the user, folders, wrappers, units, sudoers and three ssh keys (private deploy, public deploy, signing) on the server. Safe to run again. |
 | `arm.sh` | The last step: `sudo LAUNCH_AT=2026-11-17T14:00:00Z bash arm.sh`. |
-| `push-queue.sh` | Mac side: ships the local `tu-queue` branch to the server's bare `queue.git` (the queue never goes to GitHub). |
+| `push-queue.sh` | Mac side: ships the local `tu-queue` branch to the server's bare `queue.git` (the queue never goes to GitHub); a rebuilt queue goes to a NEW branch, `tu-queue` is never overwritten (see "Rebuilt queue"). |
 | `sandbox/`, `test-local.sh` | The proof (below). |
 
 ## Rules the code keeps
@@ -46,6 +46,45 @@ lag up to `RPC_MAX_LAG_S` (paths.conf, default 60). Sample on the server, then s
 for i in $(seq 40); do curl -s http://127.0.0.1:8080/readyz; echo; sleep 15; done
 for i in $(seq 40); do echo $(( $(date +%s) - $(cast block latest --field timestamp --rpc-url "$RPC_URL") )); sleep 15; done
 ```
+
+## Rebuilt queue (owner fix on main while updates are queued)
+
+The runner fast-forwards an update whose parent is main and cherry-picks the others; after an owner fix the queue is rebuilt on
+the new main so nothing conflicts at its slot. There is no `queue-rebased` command: the path is `release.py remap` (re-points
+PENDING and HELD updates by subject) plus moving `tu-queue`, which the runner follows (`schedule.json`'s tip must equal it, or
+every pass stops with one STALE line). `push-queue.sh` never overwrites `tu-queue`: a rebuilt queue goes to a NEW branch.
+Best: rebuild and preflight the queue on the Mac BEFORE pushing the owner fix, so the pause lasts minutes.
+
+```bash
+# 0. Server: stop new releases first, and wait until nothing is in progress
+sudo ifso-release-pause "owner fix + queue rebuild"
+sudo ifso-release-status --short            # "in progress 0" before going on (else: sudo ifso-release-abort, wait)
+# 1. Mac (backend checkout): land the owner fix on private main (signed, owner identity), then rebuild the queue on it
+git fetch origin
+OLD=<current queue branch>; NEW=queue-r1; OLDBASE=$(git merge-base origin/main "$OLD")   # OLDBASE = the base in schedule.json
+git switch -c "$NEW" "$OLD"
+git -c commit.gpgsign=true rebase --onto origin/main "$OLDBASE" "$NEW"   # fix each conflict inside the update that hits it
+#    after each fix: the touched tests (cd app && bun test <files> && bunx tsc --noEmit), then git rebase --continue
+diff <(git log --reverse --format=%s "$OLDBASE..$OLD") <(git log --reverse --format=%s "origin/main..$NEW") && echo "subjects match"
+git log --format=%G? "origin/main..$NEW" | sort -u                      # must print only G
+bash .githooks/public-guard.sh
+# 2. Mac: push to a NEW branch on the server's queue repo (never to GitHub); the script refuses an existing name and chowns
+SERVER=root@<ifso-server> LOCAL_BRANCH="$NEW" bash app/scripts/release/push-queue.sh "$NEW"
+# 3. Server, as root: keep the old tip, re-point pending AND held updates (keeps schedule.json.pre-<tag>)
+Q=/var/lib/ifso-release/queue.git
+sudo -u ifso-release git -C "$Q" update-ref refs/heads/tu-queue-pre-r1 refs/heads/tu-queue
+sudo -u ifso-release bash -c 'set -a; . /etc/ifso-release/paths.conf; set +a;
+  python3 /usr/local/lib/ifso-release/lib/release.py remap --queue-repo '"$Q"' --ref queue-r1 --base <new private main sha> --tag r1'
+# 4. Server: the runner follows tu-queue, and the schedule tip must equal it
+sudo -u ifso-release git -C "$Q" update-ref refs/heads/tu-queue refs/heads/queue-r1
+# 5. Server: prove every pending and held update on the new main, then retry the fixed held ones, then resume
+sudo ifso-release-preflight                  # must end "N of N PASS"
+sudo ifso-release-retry TUnn                 # only for held updates the fix covers
+sudo ifso-release-resume
+```
+
+The sandbox runs this path in world 4 (owner fix on main, rebuild, push to `queue-r1`, remap, stale until `tu-queue` moves,
+preflight, arm).
 
 ## Daily commands (group `ifso-ops`)
 

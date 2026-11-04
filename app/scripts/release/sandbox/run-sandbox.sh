@@ -419,6 +419,20 @@ git -C "$S" push -q "$W/private.git" main
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh refuses preflight results from an older main (and says which)" bash -c "test $ARC -ne 0 && grep -q 'preflight ran on main' '$W/arm.out'"
 ok "refused arming left no flag file" test ! -e "$W/ALLOW_REAL_DEPLOY"
+# the queue-rebuild path (README "Rebuilt queue"): rebuild on the new main on the Mac, push to a NEW branch, remap, move tu-queue
+M1="$(git -C "$S" rev-parse main)"
+git -C "$S" checkout -q -b queue-r1 tu-queue
+sg rebase -q --onto main "$M0" queue-r1 >/dev/null 2>&1
+(cd "$S" && QUEUE_URL="$W/queue.git" SKIP_CHOWN=1 LOCAL_BRANCH=queue-r1 bash "$REL/push-queue.sh" queue-r1) >"$W/pq.out" 2>&1
+chown -R "$RUSER" "$W/queue.git" 2>/dev/null || true
+ok "rebuilt queue pushed to the NEW branch queue-r1; tu-queue still the old tip" bash -c "test \"\$(git -C '$W/queue.git' rev-parse queue-r1)\" = \"\$(git -C '$S' rev-parse queue-r1)\" && test \"\$(git -C '$W/queue.git' rev-parse tu-queue)\" = '$QTIP'"
+rp remap --queue-repo "$W/queue.git" --ref queue-r1 --base "$M1" --tag r1 >"$W/remap.out" 2>&1
+ok "remap: every pending update now points at the rebuilt commit with the same subject, in order; the old schedule kept" bash -c "
+  diff <(python3 -c 'import json; [print(u[\"sha\"]) for u in json.load(open(\"$W/home/schedule.json\"))[\"updates\"]]') <(git -C '$W/queue.git' rev-list --reverse '$M1..queue-r1') && test -s '$W/home/schedule.json.pre-r1'"
+rpre run >"$W/pf-stale-r1.out" 2>&1
+ok "before tu-queue moves, the schedule is STALE (one clear line)" grep -q "STALE schedule.json" "$W/pf-stale-r1.out"
+as_rel git -C "$W/queue.git" update-ref refs/heads/tu-queue-pre-r1 refs/heads/tu-queue
+as_rel git -C "$W/queue.git" update-ref refs/heads/tu-queue refs/heads/queue-r1
 as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4b.out" 2>&1
 cp "$W/home/preflight/results.json" "$W/pf-good.json"
 python3 - "$W/home/preflight/results.json" <<'PY'
@@ -448,7 +462,7 @@ ok "ALLOW_NO_RELEASE_TOKEN=1: arms anyway with a loud warning" bash -c "test $AR
 rm -f "$W/ALLOW_REAL_DEPLOY" "$CTL/gh-token-bad"
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh: public CI green (0 non-success) and the token made and deleted a draft" bash -c "grep -q 'public CI: 0 non-success' '$W/arm.out' && grep -q 'draft Release created and deleted' '$W/arm.out' && grep -q 'DELETE' '$CTL/requests.jsonl'"
-ok "arm.sh arms on a preflight of the current main and schedule" bash -c "test $ARC -eq 0 && test -e '$W/ALLOW_REAL_DEPLOY' && grep -q ARMED '$W/arm.out'"
+ok "arm.sh arms on a preflight of the current main and the rebuilt queue's schedule" bash -c "test $ARC -eq 0 && test -e '$W/ALLOW_REAL_DEPLOY' && grep -q ARMED '$W/arm.out'"
 ok "arming wrote LAUNCH_AT and the slots" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/schedule.json\")); sys.exit(0 if s[\"launchAt\"]==\"$FUTURE\" and all(u[\"slot\"] for u in s[\"updates\"]) else 1)'"
 rm -f "$W/ALLOW_REAL_DEPLOY"
 as_rel kill "$(cat "$ROOT/w4.pid")" 2>/dev/null || true
