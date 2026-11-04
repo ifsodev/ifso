@@ -28,8 +28,8 @@ involved on launch day. It is inert until armed.
 
 ## Install on the server
 
-1. `sudo bash install.sh` (copy this folder over first). Register the three printed public keys on GitHub (two write deploy keys, one signing key).
-2. Put the owner's signing keys into `/etc/ifso-release/allowed_signers`, the bot token and chat id into `/etc/ifso-release/release.env` (root, 0600), and the words that must never be published into `forbidden.txt`.
+1. `sudo RELEASE_GIT_NAME="<name>" RELEASE_GIT_EMAIL="<email>" bash install.sh` (copy this folder over first). The name and email are the identity of the commits the runner makes itself on private main (cherry-picks, reverts, re-applies); use an account that is a member of the Vercel team that builds `web/` (the owner's GitHub noreply address), or Vercel skips the build of a rollback. They are kept in `paths.conf`; install.sh refuses without them. Register the three printed public keys on GitHub (two write deploy keys, one signing key).
+2. `install.sh` already put the server's own signing key into `/etc/ifso-release/allowed_signers` (every runner-made commit is signed with it; without it the runner holds its own cherry-picks and the deploy wrapper refuses its reverts). Append the owner's signing keys (`<email> namespaces="git" <key>`), put the bot token and chat id into `/etc/ifso-release/release.env` (root, 0600), and the words that must never be published into `forbidden.txt`.
 3. Clone private main to the release user's `backend/`, add a `public` remote, run the one-time `sync-public.py --init`.
 4. From the Mac: `SERVER=root@<ip> bash push-queue.sh`. On the server: `release.py make-schedule --queue-repo ... --base <main sha> --manifest <file>`.
 5. `sudo ifso-release-preflight` until every update passes, then a rehearsal deploy of the live sha through `ifso-deploy-release`, then `arm.sh`.

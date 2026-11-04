@@ -98,6 +98,22 @@ if [[ ! -e "$(P $RHOME/queue.git)" && -z "$PREFIX" ]]; then
   as_r() { runuser -u "$RUSER" -- "$@"; }
   as_r git init -q --bare "$RHOME/queue.git"
 fi
+# ---- three keys, made HERE (also under PREFIX for the sandbox); GitHub refuses one key as both a deploy key and an account key
+as_owner() { if [[ -z "$PREFIX" ]]; then runuser -u "$RUSER" -- "$@"; else "$@"; fi; }
+for k in private public signing; do
+  [[ -e "$(P $RHOME/.ssh/id_ed25519_$k)" ]] || as_owner ssh-keygen -q -t ed25519 -N '' -C "ifso-release-$k" -f "$(P $RHOME/.ssh/id_ed25519_$k)"
+done
+# every commit the runner makes (cherry-pick, revert, re-apply) is signed with the server's signing key
+as_owner git config --file "$GITCFG" gpg.format ssh
+as_owner git config --file "$GITCFG" user.signingkey "$(P $RHOME/.ssh/id_ed25519_signing.pub)"
+as_owner git config --file "$GITCFG" commit.gpgsign true
+as_owner git config --file "$GITCFG" gpg.ssh.allowedSignersFile "$(P /etc/ifso-release/allowed_signers)"
+as_owner git config --file "$GITCFG" safe.directory '*'
+# ... so that key must be an allowed signer, or the runner holds its own cherry-picks (signature_ok) and the deploy wrapper
+# refuses its reverts (a failed rollback = PAUSE). Added once, as "<release email> <key>"; the owner's keys are added by hand.
+SIGNERS="$(P /etc/ifso-release/allowed_signers)"
+srvkey="$(cut -d' ' -f1,2 "$(P $RHOME/.ssh/id_ed25519_signing.pub)")"
+grep -qF "${srvkey#* }" "$SIGNERS" || printf '%s namespaces="git" %s\n' "$GIT_EMAIL" "$srvkey" >>"$SIGNERS"
 # ---- units and sudoers (the timer is NOT enabled here)
 install -m 0644 "$HERE/systemd/ifso-release.service" "$HERE/systemd/ifso-release.timer" "$(P /etc/systemd/system)/"
 TMP="$(mktemp)"; cp "$HERE/sudoers" "$TMP"
@@ -110,11 +126,7 @@ if [[ -z "$PREFIX" ]]; then
   command -v visudo >/dev/null 2>&1 && visudo -c >/dev/null
   "$SYSTEMCTL" daemon-reload
   "$SYSTEMCTL" disable --now ifso-release.timer >/dev/null 2>&1 || true
-  # ---- three keys, made on the server; GitHub refuses one key as both a deploy key and an account key, hence three
   as_r() { runuser -u "$RUSER" -- "$@"; }
-  for k in private public signing; do
-    [[ -e "$RHOME/.ssh/id_ed25519_$k" ]] || as_r ssh-keygen -q -t ed25519 -N '' -C "ifso-release-$k" -f "$RHOME/.ssh/id_ed25519_$k"
-  done
   if [[ ! -e "$RHOME/.ssh/config" ]]; then
     as_r tee "$RHOME/.ssh/config" >/dev/null <<SSH
 Host github-ifso-private
@@ -130,11 +142,6 @@ Host github-ifso-public
 SSH
     as_r chmod 600 "$RHOME/.ssh/config"
   fi
-  as_r git config --file "$GITCFG" gpg.format ssh
-  as_r git config --file "$GITCFG" user.signingkey "$RHOME/.ssh/id_ed25519_signing.pub"
-  as_r git config --file "$GITCFG" commit.gpgsign true
-  as_r git config --file "$GITCFG" gpg.ssh.allowedSignersFile /etc/ifso-release/allowed_signers
-  as_r git config --file "$GITCFG" safe.directory '*'
   echo
   echo "Installed UNARMED (timer disabled, no flag file). Public keys, to register on GitHub:"
   echo "  private repo, WRITE deploy key : $(cat "$RHOME/.ssh/id_ed25519_private.pub")"

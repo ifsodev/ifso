@@ -82,7 +82,11 @@ if [[ $MODE == linux ]]; then printf '#!/bin/sh
 exec %s/bun "$@"
 ' "$FAKES" >/usr/local/bin/bun; chmod 0755 /usr/local/bin/bun; fi
 KEY="$BASE/key"; ssh-keygen -q -t ed25519 -N '' -f "$KEY" -C sandbox; chmod 600 "$KEY"; chmod 644 "$KEY.pub"; chown "$RUSER" "$KEY" "$KEY.pub" 2>/dev/null || true
-echo "owner@example.invalid $(cat "$KEY.pub")" >"$ETC/allowed_signers"
+# allowed_signers: install.sh already put the SERVER's signing key in (the key every runner-made commit is signed with); the
+# owner's key (the queue commits) is added the way the README says, appended
+SRVKEY="$PFX/var/lib/ifso-release/.ssh/id_ed25519_signing.pub"
+ok "install.sh put the server's own signing key into allowed_signers" bash -c "grep -qF \"\$(cut -d' ' -f2 '$SRVKEY')\" '$ETC/allowed_signers'"
+echo "owner@example.invalid $(cat "$KEY.pub")" >>"$ETC/allowed_signers"
 PUBKEY_LINE="$(cat "$KEY.pub")"; : "$PUBKEY_LINE"
 
 setconf() { # setconf KEY VALUE  (later assignments win, both for the shell wrappers and for systemd's EnvironmentFile)
@@ -114,11 +118,9 @@ new_world() { # new_world <name>
   done
   git -C "$S" push -q "$W/queue.git" tu-queue
   QTIP="$(git -C "$S" rev-parse HEAD)"
-  # the server's clone of private main: signs with the sandbox key (on the real server: the server-made signing key)
+  # the server's clone of private main. No signing or identity settings of its own: the runner signs with the server-made key
+  # and the identity install.sh wrote into the release user's git config, exactly as on the server
   git clone -q "$W/private.git" "$W/backend"
-  for kv in "gpg.format=ssh" "user.signingkey=$KEY" "commit.gpgsign=true" "gpg.ssh.allowedSignersFile=$ETC/allowed_signers"; do
-    git -C "$W/backend" config "${kv%%=*}" "${kv#*=}"
-  done
   git -C "$W/backend" remote add public "$W/public.git"
   chown -R "$RUSER" "$W" 2>/dev/null || true
   # current production = the base
@@ -288,6 +290,7 @@ ok "gate failure: TU01 HELD" test "$(st TU01)" = held
 ok "gate failure: TU01 never reached private main" test "$(main_subjects | grep -c 'TU01')" = 0
 ok "deploy failure: TU02 HELD" test "$(st TU02)" = held
 ok "deploy failure: TU02 reverted on main (signed revert exists)" bash -c "git -C '$W/private.git' log --format=%s main | grep -q '^Revert .*TU02'"
+ok "the revert is signed by the SERVER key (made by install.sh) and the reverted tree deployed" bash -c "test \"\$(git -C '$W/private.git' -c gpg.format=ssh -c gpg.ssh.allowedSignersFile='$ETC/allowed_signers' log -1 --format=%G?%GF --grep='^Revert' main)\" = \"G\$(ssh-keygen -lf '$SRVKEY' | cut -d' ' -f2)\" && python3 -c 'import json,sys; sys.exit(0 if json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU02\"][\"rollbackDeploy\"]==\"ok\" else 1)'"
 ok "the runner's revert carries the release identity from install.sh" bash -c "test \"\$(git -C '$W/private.git' log -1 --format='%an <%ae>' --grep='^Revert' main)\" = '$GIT_NAME <$GIT_EMAIL>'"
 ok "deploy failure: production never keeps the held updates (no TU01 or TU02 route in the live tree; the live tree is not older than the start)" bash -c "! git -C '$W/private.git' cat-file -e '$(prod_sha):app/src/api/routes/tu02.ts' && ! git -C '$W/private.git' cat-file -e '$(prod_sha):app/src/api/routes/tu01.ts' && git -C '$W/private.git' merge-base --is-ancestor '$BEFORE_PROD' '$(prod_sha)'"
 ok "no cascade: TU03 released although TU01 and TU02 are held" test "$(st TU03)" = released
