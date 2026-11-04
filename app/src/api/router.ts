@@ -142,7 +142,11 @@ async function readBudget(ctx: Ctx) {
   if (!(await ctx.limiter.hit(`read:ip:${ipHash}`, ctx.deps.env.READS_PER_IP_PER_HOUR, 3600))) throw tooMany("too many requests from this network, try again later");
 }
 
-/** `feeFor(kind)` changes only by a timelocked owner call: one read per kind per minute is plenty. */
+/**
+ * Audit I-11: `setFees` is an instant owner call (not timelocked), so this cache may show a fee up to a minute old.
+ * It only feeds the batch and payroll planning totals (nothing is signed from it); every create build reads
+ * `feeFor` fresh, so a signed `value` always uses the current fee.
+ */
 const FEE_TTL_MS = 60_000;
 const feeCache = new WeakMap<object, Map<number, { fee: bigint; at: number }>>();
 async function cachedFee(deps: Deps, kind: number): Promise<bigint> {
