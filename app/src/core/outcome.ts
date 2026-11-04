@@ -34,13 +34,25 @@ export function sourcesHash(reports: SourceReport[]): Hex {
   return keccak256(toHex(canonicalEvidence(reports)));
 }
 
-export function agree(reports: SourceReport[], minSources = 2): Agreement {
-  const latest = new Map<string, SourceReport>();
+/**
+ * One read per provider: the latest, except that a later PENDING read never replaces an earlier FINAL one (audit
+ * L-7: The Odds API drops finished games from /scores after 3 days, so "event gone" reads as pending; a result a
+ * provider already reported final stays final). A later final or void read (a real answer) still wins.
+ */
+export function latestPerProvider<R extends Pick<SourceReport, "provider" | "fetchedAt" | "status">>(reports: readonly R[]): R[] {
+  const latest = new Map<string, R>();
   for (const r of reports) {
     const prev = latest.get(r.provider);
-    if (!prev || r.fetchedAt > prev.fetchedAt) latest.set(r.provider, r);
+    if (!prev) latest.set(r.provider, r);
+    else if (prev.status === "final" && r.status === "pending") continue;
+    else if (prev.status === "pending" && r.status === "final") latest.set(r.provider, r);
+    else if (r.fetchedAt > prev.fetchedAt) latest.set(r.provider, r);
   }
-  const rs = [...latest.values()];
+  return [...latest.values()];
+}
+
+export function agree(reports: SourceReport[], minSources = 2): Agreement {
+  const rs = latestPerProvider(reports);
   const base = { sourcesHash: sourcesHash(rs), providers: rs.map((r) => r.provider).sort() };
   if (rs.length < minSources) return { decision: null, reason: `need ${minSources} independent sources, have ${rs.length}`, ...base };
 

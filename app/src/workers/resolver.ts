@@ -267,13 +267,34 @@ export async function gatherReports(deps: Deps, q: typeof questions.$inferSelect
       tasks.push(sources(deps).ctf(deps.env.POLYGON_RPC_URL, refs.conditionId as Hex).catch(() => pending("polygon-ctf")));
     }
   }
-  const reports = await Promise.all(tasks);
-  if (reports.length) {
+  const fresh = await Promise.all(tasks);
+  if (fresh.length) {
     await deps.db.insert(sourceReports).values(
-      reports.map((r) => ({ questionId: q.id, provider: r.provider, fetchedAt: new Date(r.fetchedAt * 1000), status: r.status, outcome: r.outcome, digest: r.digest })),
+      fresh.map((r) => ({ questionId: q.id, provider: r.provider, fetchedAt: new Date(r.fetchedAt * 1000), status: r.status, outcome: r.outcome, digest: r.digest })),
     );
   }
-  return reports;
+  return holdFirstFinals(deps, q.id, fresh);
+}
+
+/**
+ * Audit L-7: a provider's FIRST final read for a question is kept. A later pending read from that provider (The Odds
+ * API's /scores drops a finished game after 3 days, and any outage reads as pending) is replaced by the stored final,
+ * so a met payment is not refunded because a source forgot the game. A later final or void read is a real answer
+ * and is used as read (a contradiction then shows up as a conflict, never as a silent change).
+ */
+async function holdFirstFinals(deps: Deps, questionId: string, fresh: SourceReport[]): Promise<SourceReport[]> {
+  if (!fresh.some((r) => r.status === "pending")) return fresh;
+  const stored = await deps.db
+    .select()
+    .from(sourceReports)
+    .where(and(eq(sourceReports.questionId, questionId), eq(sourceReports.status, "final")))
+    .orderBy(asc(sourceReports.fetchedAt), asc(sourceReports.id));
+  const first = new Map<string, SourceReport>();
+  for (const r of stored) {
+    if (first.has(r.provider) || r.outcome === null) continue;
+    first.set(r.provider, { provider: r.provider, fetchedAt: Math.floor(r.fetchedAt.getTime() / 1000), status: "final", outcome: r.outcome, digest: r.digest as Hex });
+  }
+  return fresh.map((r) => (r.status === "pending" ? (first.get(r.provider) ?? r) : r));
 }
 
 async function ensureBondAllowance(deps: Deps, resolver: Address) {

@@ -9,7 +9,7 @@
 //                  only in the last-call slot (closesAt - lastCall .. closesAt) if still unconfirmed, and only while
 //                  (a) fewer than `budgetCap` last-call disputes are open and (b) one bond stays in the float after it
 //                  (automatic budget = floor(float / bond) - 1). Largest USDG amount first. Over budget: page a human.
-import type { Agreement, SourceReport } from "./outcome";
+import { latestPerProvider, type Agreement, type SourceReport } from "./outcome";
 
 export type SourceVerdict = "confirmed" | "contradicted" | "unconfirmed";
 
@@ -21,12 +21,8 @@ export type SourceVerdict = "confirmed" | "contradicted" | "unconfirmed";
  */
 export function classifyForeign(a: Pick<Agreement, "decision">, proposed: number, reports: Pick<SourceReport, "provider" | "fetchedAt" | "status" | "outcome">[] = []): SourceVerdict {
   if (a.decision !== null && a.decision !== undefined) return a.decision === proposed ? "confirmed" : "contradicted";
-  const latest = new Map<string, (typeof reports)[number]>();
-  for (const r of reports) {
-    const prev = latest.get(r.provider);
-    if (!prev || r.fetchedAt > prev.fetchedAt) latest.set(r.provider, r);
-  }
-  const finals = [...latest.values()].filter((r) => r.status === "final" && r.outcome !== undefined && r.outcome !== null);
+  // audit L-7: a later pending read ("event gone") never downgrades a provider's earlier final read
+  const finals = latestPerProvider(reports).filter((r) => r.status === "final" && r.outcome !== undefined && r.outcome !== null);
   if (finals.length > 0 && finals.every((r) => r.outcome !== proposed)) return "contradicted";
   return "unconfirmed";
 }

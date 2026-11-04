@@ -56,7 +56,7 @@ describe("audit M-2: one-source football questions", () => {
     // the Odds API is final (HOME=1); TheSportsDB is not readable this tick
     const deps = {
       env,
-      db: { insert: () => ({ values: async () => {} }) },
+      db: { insert: () => ({ values: async () => {} }), select: () => ({ from: () => ({ where: () => ({ orderBy: async () => [] }) }) }) }, // no stored finals (audit L-7)
       sources: {
         oddsScore: async () => ({ provider: "theoddsapi", fetchedAt: KICK + 9000, status: "final", outcome: 1, digest: "0x01" }),
         sportsDbEvent: async () => { throw new Error("429"); },
