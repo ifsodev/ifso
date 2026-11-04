@@ -782,21 +782,27 @@ def clear_stale_git_locks():
             os.remove(lock)
 
 
-def ping(problems):
-    """Dead-man's switch through the notify wrapper (the URL is a secret and never sits in this process)."""
+def ping(problems, notes=()):
+    """Dead-man's switch through the notify wrapper (the URL is a secret and never sits in this process). `fail` only for
+    problems that need a human now (paused, stuck, late); held updates were alerted already and ride along as a note."""
     try:
-        run(shlex.split(CFG["notify_cmd"]) + ["--ping", "fail" if problems else "ok", "; ".join(problems)[:200]], timeout=30)
+        text = "; ".join(list(problems) + list(notes))[:200]
+        run(shlex.split(CFG["notify_cmd"]) + ["--ping", "fail" if problems else "ok", text], timeout=30)
     except Exception:  # noqa: BLE001
         pass
 
 
+def health_notes(st):
+    held = [k for k, v in st["updates"].items() if v["status"] == "held"]
+    return [f"held: {','.join(held)}"] if held else []
+
+
 def health_problems(st, sched):
+    """What turns the dead-man check red: paused, an update in progress over 90 min, the next due one over 60 min late. A held
+    update is NOT one (health_notes): it was alerted once, and a check that stays down forever hides the next real silence."""
     out = []
     if os.path.exists(PAUSE):
         out.append("paused")
-    held = [k for k, v in st["updates"].items() if v["status"] == "held"]
-    if held:
-        out.append(f"held: {','.join(held)}")
     for k, v in st["updates"].items():
         if v["status"] == "in_progress" and v.get("startedAt") and (now() - parse(v["startedAt"])).total_seconds() > 90 * 60:
             out.append(f"{k} in progress over 90 min")
@@ -926,7 +932,7 @@ def _pass():
                    "no new release starts; one in progress finishes", f"a planned pause ends with sudo ifso-release-resume; overdue updates then go {sched.get('minGapMinutes', 2)} minutes apart"))
         save(STATE, st)
         say("paused")
-        ping(health_problems(st, sched))
+        ping(health_problems(st, sched), health_notes(st))
         return 0
     if st.pop("pausedSeen", None):
         st.pop("rollbackIncomplete", None)
@@ -971,7 +977,7 @@ def _pass():
             break
     public_ci_tick(st)
     save(STATE, st)
-    ping(health_problems(st, sched))
+    ping(health_problems(st, sched), health_notes(st))
     preflight_kick()
     return 0
 

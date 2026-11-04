@@ -157,6 +157,32 @@ class FetchAfterPush(unittest.TestCase):
             R.run = old
 
 
+class DeadMan(unittest.TestCase):
+    """A held update was already alerted; it must not keep the dead-man check 'down' (a later real silence would be missed)."""
+
+    def test_held_alone_pings_ok_with_a_note(self):
+        s = sched72()
+        st = state(s, TU01="held")
+        calls = []
+        old = R.run
+        R.run = lambda cmd, **k: (calls.append(cmd) or (0, ""))
+        try:
+            R.ping(R.health_problems(st, s), R.health_notes(st))
+        finally:
+            R.run = old
+        self.assertEqual(calls[-1][-3:-1], ["--ping", "ok"])
+        self.assertIn("held: TU01", calls[-1][-1])
+
+    def test_pause_still_pings_fail(self):
+        s = sched72()
+        open(R.PAUSE, "w").close()
+        try:
+            self.assertIn("paused", R.health_problems(state(s, TU01="held"), s))
+            self.assertNotIn("held: TU01", R.health_problems(state(s, TU01="held"), s))
+        finally:
+            os.remove(R.PAUSE)
+
+
 class Resume(unittest.TestCase):
     def test_resume_leaves_one_note_for_the_next_pass(self):
         open(R.PAUSE, "w").close()
