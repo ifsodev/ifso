@@ -53,7 +53,7 @@ if [[ $MODE == linux ]]; then
   getent group ifso-ops >/dev/null || groupadd --system ifso-ops
   id "$OPS" >/dev/null 2>&1 || useradd -m -G ifso-ops "$OPS"
   note "install.sh (real, as root)"
-  SYSTEMCTL="$SYSTEMCTL" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
+  SYSTEMCTL="$SYSTEMCTL" SYNC_PUBLIC_SRC="$SYNC_PY" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
   ok "install.sh ran clean" test $? -eq 0
   ok "sudoers file installed 0440 root" test "$(stat -c '%a %U' /etc/sudoers.d/ifso-release)" = "440 root"
   ok "visudo -c passes on the whole sudo configuration" visudo -c
@@ -65,7 +65,7 @@ if [[ $MODE == linux ]]; then
 else
   PFX="$ROOT/root"; mkdir -p "$PFX"
   note "install.sh (PREFIX mode: no users, no systemctl)"
-  PREFIX="$PFX" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
+  PREFIX="$PFX" SYNC_PUBLIC_SRC="$SYNC_PY" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
   ok "install.sh ran clean" test $? -eq 0
   CONF="$PFX/etc/ifso-release/paths.conf"; LIBDIR="$PFX/usr/local/lib/ifso-release"; SBIN="$PFX/usr/local/sbin"; ETC="$PFX/etc/ifso-release"
   BASE="$ROOT/base"; mkdir -p "$BASE"
@@ -74,6 +74,8 @@ else
   export GIT_CONFIG_GLOBAL="$PFX/var/lib/ifso-release/.gitconfig" GIT_CONFIG_NOSYSTEM=1
 fi
 RGITCFG="$PFX/var/lib/ifso-release/.gitconfig"
+SYNC_INSTALLED="$LIBDIR/lib/sync-public.py"
+ok "install.sh installed sync-public.py where paths.conf points (the runner uses that copy)" bash -c "cmp -s '$SYNC_PY' '$SYNC_INSTALLED' && test \"\$(sed -n 's/^SYNC_PUBLIC_PY=//p' '$CONF' | tr -d '\"')\" = '$SYNC_INSTALLED'"
 ok "install.sh set the release user's git identity (name, email, no guessing)" bash -c "test \"\$(git config --file '$RGITCFG' user.email)\" = '$GIT_EMAIL' && test \"\$(git config --file '$RGITCFG' user.name)\" = '$GIT_NAME' && test \"\$(git config --file '$RGITCFG' user.useConfigOnly)\" = true"
 ok "wrappers installed and executable" test -x "$SBIN/ifso-deploy-release" -a -x "$SBIN/ifso-release-notify" -a -x "$SBIN/ifso-release-status" -a -x "$SBIN/ifso-release-ghrelease"
 ok "paths.conf has no secrets and no token words" bash -c "! grep -qiE 'token|password|secret' '$CONF'"
@@ -143,7 +145,7 @@ new_world() { # new_world <name>
   # server config for this world
   setconf RELEASE_HOME "$W/home"; setconf REPO_DIR "$W/backend"; setconf QUEUE_REPO "$W/queue.git"; setconf GATE_DIR "$W/gate"
   setconf DEPLOY_BIN "$FAKES/ifso-deploy"; setconf OPT_DIR "$W/opt"; setconf ALLOWED_SIGNERS "$ETC/allowed_signers"
-  setconf SYNC_PUBLIC_PY "$SYNC_PY"; setconf PUBLIC_SYNC_STATE "$W/home/public-sync.json"; setconf API_URL "http://127.0.0.1:$PORT"
+  setconf PUBLIC_SYNC_STATE "$W/home/public-sync.json"; setconf API_URL "http://127.0.0.1:$PORT"
   setconf ALLOW_FILE "$W/ALLOW_REAL_DEPLOY"; setconf RELEASE_ENV "$W/release.env"; setconf DEPLOY_LOCK "$W/deploy.lock"
   setconf FORBIDDEN_FILE "$ETC/forbidden.txt"
   setconf INFRA_RETRY_S 0; setconf VERIFY_TRIES 2; setconf VERIFY_RETRY_S 0; setconf GAP_SLEEP 0; setconf PREFLIGHT_AUTO 0
@@ -162,7 +164,7 @@ new_world() { # new_world <name>
 EOF
   chown -R "$RUSER" "$W" 2>/dev/null || true
   as_rel git -C "$W/backend" -c safe.directory='*' fetch -q origin
-  as_rel bash -c "cd '$W/backend' && python3 '$SYNC_PY' '$W/home/public-sync.json' --init && python3 '$SYNC_PY' '$W/home/public-sync.json'" >"$W/syncinit.log" 2>&1
+  as_rel bash -c "cd '$W/backend' && python3 '$SYNC_INSTALLED' '$W/home/public-sync.json' --init && python3 '$SYNC_INSTALLED' '$W/home/public-sync.json'" >"$W/syncinit.log" 2>&1
   # the schedule: 3 updates from the queue branch
   cat >"$W/manifest.json" <<'EOF'
 {"TU03": {"perk_gated": true, "check": {"path": "/v1/tu03", "perk_gated": true, "locked_contains": "Hold 100,000"}},

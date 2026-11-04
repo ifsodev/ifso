@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs the Ifso release runner on the server, UNARMED (timer disabled, no flag file). Run ON THE SERVER as root, from a
 # checkout of this folder:
-#   sudo RELEASE_GIT_NAME="<name>" RELEASE_GIT_EMAIL="<email>" bash install.sh
+#   sudo RELEASE_GIT_NAME="<name>" RELEASE_GIT_EMAIL="<email>" SYNC_PUBLIC_SRC=/root/sync-public.py bash install.sh
+# SYNC_PUBLIC_SRC: the private public-copy tool (docs/tools/sync-public.py, copied over by hand); needed on the first run.
 # RELEASE_GIT_NAME / RELEASE_GIT_EMAIL: the identity of the commits the runner makes itself on private main (cherry-picks,
 # reverts, re-applies). Use an account that is a member of the Vercel team that builds web/ (the owner's GitHub noreply
 # address), or Vercel skips the build of a rollback. Stored in paths.conf; a later run without them reuses those values.
@@ -52,8 +53,16 @@ for f in "$HERE"/lib/*.py; do [[ "$(basename "$f")" == test_* ]] || install -m 0
 install -m 0644 "$HERE/sbin/common.sh" "$(P /usr/local/lib/ifso-release/common.sh)"
 install -m 0644 "$HERE/README.md" "$(P /usr/local/lib/ifso-release/README.md)"
 for w in "$HERE"/sbin/ifso-*; do install -m 0755 "$w" "$(P /usr/local/sbin)/$(basename "$w")"; done
-# the sync tool is private tooling shipped next to this folder by push-to-server.sh; copy it when present
-[[ -f "$HERE/sync-public.py" ]] && install -m 0644 "$HERE/sync-public.py" "$(P /usr/local/lib/ifso-release/lib)/sync-public.py"
+# the public-copy tool is private tooling (docs/tools/sync-public.py, never in this repo): copied to the server by hand and
+# named at install time (SYNC_PUBLIC_SRC=<path>, or sync-public.py next to this script). A later run keeps the installed copy;
+# without it every public copy would fail forever, so install refuses.
+SYNC_DST="$(P /usr/local/lib/ifso-release/lib)/sync-public.py"
+SYNC_SRC="${SYNC_PUBLIC_SRC:-}"; [[ -z "$SYNC_SRC" && -f "$HERE/sync-public.py" ]] && SYNC_SRC="$HERE/sync-public.py"
+if [[ -n "$SYNC_SRC" ]]; then
+  [[ -f "$SYNC_SRC" ]] || die "SYNC_PUBLIC_SRC=$SYNC_SRC is not a file"
+  install -m 0644 "$SYNC_SRC" "$SYNC_DST"
+fi
+[[ -s "$SYNC_DST" ]] || die "sync-public.py is not installed: copy docs/tools/sync-public.py to the server and run again with SYNC_PUBLIC_SRC=<that path> (README, 'Install on the server')"
 CONF="$(P /etc/ifso-release/paths.conf)"
 if [[ ! -e "$CONF" ]]; then
   cat >"$CONF" <<CONF

@@ -130,5 +130,16 @@ else
 fi
 ok "README never tells anyone to run the --linux sandbox on a real server" bash -c "! grep -qE 'bash sandbox/run-sandbox.sh --linux' '$HERE/../README.md' && grep -q 'never on a real server' '$HERE/../README.md'"
 
+echo "== E5: install.sh installs sync-public.py from the path given at install time (no public copy works without it)"
+INST() { PREFIX="$1" RELEASE_GIT_NAME="Ifso Release" RELEASE_GIT_EMAIL=release@example.invalid bash "$HERE/../install.sh"; }
+INST "$W/pfx1" >"$W/inst1.out" 2>&1; rc=$?
+ok "install.sh without SYNC_PUBLIC_SRC refuses (nothing to copy) and says how" bash -c "[[ $rc != 0 ]] && grep -q 'SYNC_PUBLIC_SRC' '$W/inst1.out'"
+printf '# stand-in for docs/tools/sync-public.py\n' >"$W/sync-public.py"
+SYNC_PUBLIC_SRC="$W/sync-public.py" INST "$W/pfx2" >"$W/inst2.out" 2>&1
+ok "install.sh with SYNC_PUBLIC_SRC installs it where paths.conf points" bash -c "f=\$(sed -n 's/^SYNC_PUBLIC_PY=//p' '$W/pfx2/etc/ifso-release/paths.conf' | tr -d '\"'); cmp -s '$W/sync-public.py' \"\$f\""
+INST "$W/pfx2" >"$W/inst3.out" 2>&1
+ok "a second install.sh run keeps the installed copy (no SYNC_PUBLIC_SRC needed again)" grep -q 'stand-in' "$W/pfx2/usr/local/lib/ifso-release/lib/sync-public.py"
+ok "no reference to the missing server push script" bash -c "! grep -rq 'push-to-server[.]sh' '$HERE/..'"
+
 echo "hardening cases: $PASS passed, $FAIL failed"
 [[ $FAIL == 0 ]]
