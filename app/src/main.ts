@@ -11,7 +11,7 @@ import { createApp } from "./api/app";
 import { RateLimiter } from "./api/rateLimit";
 import { createBot, telegramSender } from "./bot/bot";
 import { consoleLog, type Deps } from "./workers/deps";
-import { QUEUES, makeQueue, makeWorker, redisConnection, scheduleTicks } from "./workers/queues";
+import { QUEUES, alertClaimConnection, makeQueue, makeWorker, redisConnection, scheduleTicks } from "./workers/queues";
 import { keeperTick } from "./workers/keeper";
 import { priceWatchTick } from "./workers/priceWatcher";
 import { resolverTick } from "./workers/resolver";
@@ -29,7 +29,8 @@ let clients: ReturnType<typeof makeClients>;
 let alert: ReturnType<typeof alertFromEnv>;
 try {
   env = loadEnv(process.env, role); // fails fast, names only
-  alert = alertFromEnv(env, log);
+  // api and worker both alert; one Redis SET NX claim per cause keeps them from sending the same cause twice
+  alert = alertFromEnv(env, log, {}, role === "bot" ? undefined : alertClaimConnection(env.REDIS_URL));
   clients = makeClients(env, { onFailover: (i) => void alert("rpc-failover", `primary RPC failing, using a backup (${i.from})`) });
 } catch (e) {
   if (e instanceof EnvError || e instanceof KeyError) {

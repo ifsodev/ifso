@@ -14,6 +14,11 @@ export function redisConnection(url: string) {
   return new IORedis(url, { maxRetriesPerRequest: null });
 }
 
+/** Connection for the shared alert dedupe: fails fast while Redis is down (no offline queue) so alerts fall back to memory. */
+export function alertClaimConnection(url: string) {
+  return new IORedis(url, { maxRetriesPerRequest: 1, enableOfflineQueue: false });
+}
+
 export function makeQueue(name: string, connection: IORedis) {
   return new Queue(name, { connection, defaultJobOptions: { removeOnComplete: 1000, removeOnFail: 5000, attempts: 3, backoff: { type: "exponential", delay: 5000 } } });
 }

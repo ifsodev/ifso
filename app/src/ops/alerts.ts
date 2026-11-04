@@ -17,6 +17,19 @@ export const LOG_ONLY_CAUSES: ReadonlySet<string> = new Set(["rpc-failover", "in
  */
 export type AlertFn = (cause: string, text: string) => Promise<boolean>;
 
+/** The one Redis command the shared claim needs (ioredis `set(key, value, "PX", ms, "NX")`). */
+export interface ClaimStore {
+  set(key: string, value: string, px: "PX", ttlMs: number, nx: "NX"): Promise<string | null>;
+}
+export const ALERT_CLAIM_PREFIX = "ifso:alert:";
+const CLAIM_TIMEOUT_MS = 2_000;
+
+/** Cross-process dedupe: the first process to SET NX the cause's key sends; the key expires after the window. */
+export const redisClaim =
+  (store: ClaimStore) =>
+  async (cause: string, ttlMs: number): Promise<boolean> =>
+    (await store.set(ALERT_CLAIM_PREFIX + cause, "1", "PX", ttlMs, "NX")) === "OK";
+
 export interface AlertOptions {
   armed: boolean;
   token?: string;
@@ -31,14 +44,28 @@ export interface AlertOptions {
 export function makeAlert(o: AlertOptions): AlertFn {
   const now = o.now ?? Date.now;
   const seen = new Map<string, number>();
-  const claim =
-    o.claim ??
-    (async (cause: string, ttl: number) => {
-      const last = seen.get(cause);
-      if (last !== undefined && now() - last < ttl) return false;
-      seen.set(cause, now());
-      return true;
-    });
+  const memory = async (cause: string, ttl: number) => {
+    const last = seen.get(cause);
+    if (last !== undefined && now() - last < ttl) return false;
+    seen.set(cause, now());
+    return true;
+  };
+  const shared = o.claim;
+  // A failing or slow shared store must not swallow an alert: fall back to this process's memory (worst case a repeat).
+  const claim = !shared
+    ? memory
+    : async (cause: string, ttl: number) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const timeout = new Promise<never>((_, rej) => (timer = setTimeout(() => rej(new Error("claim timeout")), CLAIM_TIMEOUT_MS)));
+          return await Promise.race([shared(cause, ttl), timeout]);
+        } catch (e) {
+          o.log("alert claim failed; using memory dedupe", { cause, error: String((e as Error)?.message ?? e) });
+          return memory(cause, ttl);
+        } finally {
+          clearTimeout(timer);
+        }
+      };
   return async (cause, text) => {
     if (LOG_ONLY_CAUSES.has(cause)) {
       o.log("alert (log-only: self-healing)", { cause, length: text.length, text });
@@ -64,5 +91,6 @@ export function makeAlert(o: AlertOptions): AlertFn {
   };
 }
 
-export const alertFromEnv = (env: Env, log: AlertOptions["log"], extra: Partial<AlertOptions> = {}): AlertFn =>
-  makeAlert({ armed: env.ALERTS_ARMED === "1", token: env.OPS_BOT_TOKEN ?? env.TELEGRAM_BOT_TOKEN, chatId: env.OPS_CHAT_ID, log, ...extra });
+/** The alert for one process. With a store (Redis), api and worker share one dedupe; without (tests, bot), memory. */
+export const alertFromEnv = (env: Env, log: AlertOptions["log"], extra: Partial<AlertOptions> = {}, store?: ClaimStore): AlertFn =>
+  makeAlert({ armed: env.ALERTS_ARMED === "1", token: env.OPS_BOT_TOKEN ?? env.TELEGRAM_BOT_TOKEN, chatId: env.OPS_CHAT_ID, log, ...(store ? { claim: redisClaim(store) } : {}), ...extra });

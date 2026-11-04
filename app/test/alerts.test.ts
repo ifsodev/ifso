@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { ALERT_DEDUPE_MS, LOG_ONLY_CAUSES, makeAlert } from "../src/ops/alerts";
+import { ALERT_CLAIM_PREFIX, ALERT_DEDUPE_MS, LOG_ONLY_CAUSES, alertFromEnv, makeAlert, redisClaim, type ClaimStore } from "../src/ops/alerts";
+import { loadEnv } from "../src/config/env";
 import { indexerBehind, keeperLagged, lowBalance } from "../src/ops/monitors";
 
 function setup(armed: boolean) {
@@ -50,6 +51,78 @@ describe("alerts (R6)", () => {
     const alert = makeAlert({ armed: true, token: "TOKEN", chatId: "1", log: (m, x) => logs.push(m + JSON.stringify(x ?? {})), fetchImpl: (async () => { throw new Error("boom TOKEN"); }) as never });
     expect(await alert("c", "t")).toBe(false);
     expect(logs.join("")).not.toContain("TOKEN");
+  });
+});
+
+/** In-memory stand-in for Redis `SET key value PX ttl NX`, with a test clock. One instance = one shared Redis. */
+function fakeRedis(clock: () => number) {
+  const keys = new Map<string, number>(); // key -> expiry
+  const calls: string[] = [];
+  const store: ClaimStore = {
+    async set(key, _v, px, ttl, nx) {
+      calls.push(`${key} ${px} ${ttl} ${nx}`);
+      const exp = keys.get(key);
+      if (exp !== undefined && exp > clock()) return null;
+      keys.set(key, clock() + ttl);
+      return "OK";
+    },
+  };
+  return { store, calls };
+}
+
+describe("shared alert dedupe across processes", () => {
+  const env = loadEnv({ ESCROW_ADDRESS: "0x00000000000000000000000000000000000e5c20", ALERTS_ARMED: "1", OPS_BOT_TOKEN: "TOKEN", OPS_CHAT_ID: "-100" });
+  function twoProcesses(store?: ClaimStore) {
+    let t = 5_000_000;
+    const sent: string[] = [];
+    const logs: string[] = [];
+    const fetchImpl = (async (_u: string, init: { body: string }) => (sent.push(JSON.parse(init.body).text), { ok: true, status: 200 })) as never;
+    const mk = () => alertFromEnv(env, (m) => logs.push(m), { fetchImpl, now: () => t }, store);
+    return { api: mk(), worker: mk(), sent, logs, advance: (ms: number) => (t += ms), now: () => t };
+  }
+
+  test("api and worker sharing one Redis claim send a cause once per 30 minutes between them", async () => {
+    let clock = 0;
+    const redis = fakeRedis(() => clock);
+    const { api, worker, sent } = twoProcesses(redis.store);
+    expect(await api("keeper-lag", "from api")).toBe(true);
+    expect(await worker("keeper-lag", "from worker")).toBe(false); // claimed by the api process
+    expect(sent).toEqual(["[ifso ops] keeper-lag: from api"]);
+    expect(redis.calls[0]).toBe(`${ALERT_CLAIM_PREFIX}keeper-lag PX ${ALERT_DEDUPE_MS} NX`);
+    expect(await worker("low-balance", "w")).toBe(true); // a different cause is its own claim
+    clock += ALERT_DEDUPE_MS + 1; //                       the key expired in Redis
+    expect(await worker("keeper-lag", "again")).toBe(true);
+    expect(sent.length).toBe(3);
+  });
+
+  test("without a store (tests, the bot role) each process dedupes in its own memory", async () => {
+    const { api, worker, sent } = twoProcesses();
+    expect(await api("keeper-lag", "a")).toBe(true);
+    expect(await worker("keeper-lag", "b")).toBe(true);
+    expect(sent.length).toBe(2);
+  });
+
+  test("a failing Redis never swallows an alert: it falls back to memory dedupe", async () => {
+    const broken: ClaimStore = { set: async () => { throw new Error("ECONNREFUSED"); } };
+    const { api, sent, logs } = twoProcesses(broken);
+    expect(await api("keeper-lag", "a")).toBe(true);
+    expect(await api("keeper-lag", "b")).toBe(false); // memory still dedupes within the process
+    expect(sent.length).toBe(1);
+    expect(logs.some((l) => l.includes("claim failed"))).toBe(true);
+  });
+
+  test("a hung Redis falls back after the claim timeout", async () => {
+    const hung: ClaimStore = { set: () => new Promise(() => {}) };
+    const { api, sent } = twoProcesses(hung);
+    expect(await api("keeper-lag", "a")).toBe(true);
+    expect(sent.length).toBe(1);
+  });
+
+  test("redisClaim maps SET NX to a boolean", async () => {
+    const r = fakeRedis(() => 0);
+    const claim = redisClaim(r.store);
+    expect(await claim("x", 1000)).toBe(true);
+    expect(await claim("x", 1000)).toBe(false);
   });
 });
 
