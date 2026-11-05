@@ -924,12 +924,26 @@ def banned_hits(text):
 def public_release_body(note):
     """The PUBLIC part of notes/TUnn.md for the GitHub Release: the title line plus What changes / How to see it / Activation
     (and Under the hood only when it names no file). Never ## Integration (the integrator's file list), never the Post copy."""
-    out, keep = [], True
+    out, keep, fence, titled = [], True, None, False
     for ln in note.splitlines():
-        m = _SECTION.match(ln.strip())
-        if ln.startswith("# "):
-            keep = True
+        st = ln.strip()
+        f = re.match(r"^(`{3,}|~{3,})", st)
+        if fence:   # inside a fenced code block nothing is a heading (audit I-22): `# apply` is text, kept or dropped with its section
+            if f and f.group(1)[0] == fence[0] and len(f.group(1)) >= len(fence) and not st[len(f.group(1)):].strip():
+                fence = None
+            if keep:
+                out.append(ln)
+            continue
+        if f:
+            fence = f.group(1)
+            if keep:
+                out.append(ln)
+            continue
+        m = _SECTION.match(st)
+        if ln.startswith("# ") and not titled:   # only the FIRST `# ` line, before any section, is the title; a later one never
+            keep, titled = True, True            # re-opens a section
         elif m:
+            titled = True
             name = (m.group("h") or m.group("b") or "").strip().rstrip(".:").lower()
             keep = name in PUBLIC_SECTIONS or (name == "under the hood" and not _FILE_REF.search(ln))
         if keep:

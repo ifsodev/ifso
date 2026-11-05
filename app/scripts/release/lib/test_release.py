@@ -259,6 +259,27 @@ class ReleaseBody(unittest.TestCase):
         self.assertEqual(sent, [], "a clean note raises no alert")
         self.assertEqual(t.get("releaseTag"), "update-05")
 
+    def test_a_heading_line_inside_a_code_block_never_reopens_a_private_section(self):
+        # audit I-22: a shell comment `# apply` in a fenced block under ## Integration used to count as the title line,
+        # turn `keep` back on and publish the rest of the integrator notes
+        note = self.NOTE + ("\n```bash\n# apply\nbun run app/src/secret_path.ts\n```\n"
+                            "~~~\n# heading in a tilde fence\nsee app/src/other_secret.ts\n~~~\nAfter the fences: app/src/tail.ts\n")
+        body = R.public_release_body(note)
+        for gone in ("# apply", "secret_path", "other_secret", "tail.ts", "Integration", "```", "~~~"):
+            self.assertNotIn(gone, body)
+        self.assertTrue(body.startswith("# TU05: Plain receipts"))
+        self.assertIn("**Activation.**", body)
+        _sent, bodies, _t = self.run_release(note)
+        self.assertNotIn("secret_path", bodies[0])
+
+    def test_a_code_block_in_a_public_section_stays_and_its_heading_lines_are_text(self):
+        note = ("# TU06: Shell tip\n\n**What changes.** A new command.\n\n```bash\n# run it\nifso help\n```\n\n"
+                "## Integration\nFiles: `app/src/tip.ts`.\n")
+        body = R.public_release_body(note)
+        self.assertIn("# run it", body)
+        self.assertIn("ifso help", body)
+        self.assertNotIn("tip.ts", body)
+
     def test_a_banned_word_in_the_public_part_skips_the_body_and_alerts_but_keeps_the_release(self):
         sent, bodies, t = self.run_release(self.NOTE.replace("Every payment gets", "A safe way: every payment gets"))
         self.assertEqual(len(bodies), 1, "the GitHub Release is still made")
