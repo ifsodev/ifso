@@ -126,7 +126,11 @@ new_world() { # new_world <name>
   echo "// banned words scan placeholder" >"$S/app/test/bannedWords.test.ts"
   # the real repo carries its own pattern files; the scan must not flag them (install.sh seeds forbidden.txt from the example)
   mkdir -p "$S/app/scripts/release" "$S/.githooks"; cp "$REL/forbidden.txt.example" "$S/app/scripts/release/forbidden.txt.example"
-  cp "$ETC/forbidden.txt" "$S/.githooks/public-guard.denylist"
+  # the backend denylist (shaped like the real one: private phrases and handles, one regex per line). The real public-sync.json
+  # reads it as extra forbidden words, drops it from every public tree (it matches itself) and scrubs an owner handle in a test
+  # fixture: the sandbox repo and state carry the same shape, so the publish step and its dry run meet real dropPaths/scrubFiles
+  printf '# private phrases (sandbox)\nsandbox private phrase\n\\bsboxowner\\b\n' >"$S/.githooks/public-guard.denylist"
+  printf 'const user = { username: "sboxowner" };\n' >"$S/app/test/botStore.pg.test.ts"
   sg add -A; sg commit -q -m "chore: base of the sandbox"
   M0="$(git -C "$S" rev-parse HEAD)"
   git -C "$S" push -q "$W/private.git" main
@@ -181,7 +185,9 @@ new_world() { # new_world <name>
   [[ $MODE == linux ]] && cp "$W/release.env" "$ETC/release.env.world" && chmod 600 "$ETC/release.env.world"
   # public sync state + the one-time bootstrap
   cat >"$W/home/public-sync.json" <<EOF
-{"privateSha":"","publicSha":"","name":"Ifso Dev","email":"dev@example.invalid","signingKey":"$KEY","publicRemote":"public","branch":"main"}
+{"privateSha":"","publicSha":"","name":"Ifso Dev","email":"dev@example.invalid","signingKey":"$KEY","publicRemote":"public","branch":"main",
+ "denylist":".githooks/public-guard.denylist","dropPaths":[".githooks/public-guard.denylist"],
+ "scrubFiles":{"app/test/botStore.pg.test.ts":[["username: \"sboxowner\"","username: \"sam\""]]}}
 EOF
   chown -R "$RUSER" "$W" 2>/dev/null || true
   as_rel git -C "$W/backend" -c safe.directory='*' fetch -q origin
@@ -225,7 +231,15 @@ prod_sha() { basename "$(readlink "$W/opt/current")"; }
 stale_lock() { as_rel mkdir -p "$(dirname "$1")"; : >"$1"; chown "$RUSER" "$1" 2>/dev/null || true; python3 -c 'import os,sys,time; t=time.time()-1200; os.utime(sys.argv[1],(t,t))' "$1"; }
 prod_subject() { git -C "$W/private.git" log -1 --format=%s "$(prod_sha)"; }
 all_signed() { ! git -C "$W/private.git" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$ALLSIGNERS" log --format=%G? "$M0..main" | grep -qv '^G$'; }
-public_equals_private() { [[ "$(git -C "$W/public.git" rev-parse 'main^{tree}')" == "$(git -C "$W/private.git" rev-parse 'main^{tree}')" ]]; }
+# public tree == private tree with the state's dropPaths removed and scrubFiles applied (and nothing else changed)
+public_equals_private() {
+  local pub priv
+  pub="$(git -C "$W/public.git" ls-tree -r main | grep -v $'\t.githooks/public-guard.denylist$' | grep -v $'\tapp/test/botStore.pg.test.ts$')"
+  priv="$(git -C "$W/private.git" ls-tree -r main | grep -v $'\t.githooks/public-guard.denylist$' | grep -v $'\tapp/test/botStore.pg.test.ts$')"
+  [[ -n "$pub" && "$pub" == "$priv" ]] || return 1
+  ! git -C "$W/public.git" cat-file -e main:.githooks/public-guard.denylist 2>/dev/null || return 1
+  [[ "$(git -C "$W/public.git" show main:app/test/botStore.pg.test.ts)" == 'const user = { username: "sam" };' ]]
+}
 one_public_author() { [[ "$(git -C "$W/public.git" log --format='%an <%ae>' main | sort -u | wc -l | tr -d ' ')" == 1 ]]; }
 public_signed() { ! git -C "$W/public.git" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$W/pub-signers" log --format=%G? main | grep -qv '^G$'; }
 
@@ -510,7 +524,7 @@ cp "$W/home/public-sync.json" "$W/sync-state.good"
 python3 -c 'import json,sys; p=sys.argv[1]; s=json.load(open(p)); s["forbidden"]="sandbox update 02"; json.dump(s, open(p,"w"))' "$W/home/public-sync.json"
 runarm ARM_TEST=1; ARC=$?
 cp "$W/sync-state.good" "$W/home/public-sync.json"; chown "$RUSER" "$W/home/public-sync.json" 2>/dev/null || true
-ok "39: arm.sh step 1 runs sync-public.py --dry-run at the queue tip and refuses on its hit (a queued commit message)" bash -c "test $ARC -ne 0 && grep -q 'sync-public dry run' '$W/arm.out' && grep -qi 'forbidden' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
+ok "39: arm.sh step 1 runs sync-public.py --dry-run at the queue tip and refuses on its hit (a queued commit message)" bash -c "test $ARC -ne 0 && grep -q 'sync-public dry run' '$W/arm.out' && grep -q 'the message of private commit' '$W/arm.out' && ! grep -q 'still in file' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
 ok "39: the dry run pushed nothing and left the release clone and the state as they were" bash -c "cmp -s '$W/sync-state.good' '$W/home/public-sync.json' && test \"\$(git -C '$W/public.git' rev-parse main)\" = \"\$(python3 -c 'import json; print(json.load(open(\"$W/home/public-sync.json\"))[\"publicSha\"])')\""
 runarm ARM_TEST=1; ARC=$?
 ok "48: arm.sh refuses while the server runs an older release than private main (and names both)" bash -c "test $ARC -ne 0 && grep -q 'the server runs' '$W/arm.out' && grep -q '${M1:0:12}' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
