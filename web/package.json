@@ -10,7 +10,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "sync:client": "bash scripts/sync-client.sh"
+    "sync:client": "bash scripts/sync-client.sh",
+    "sync:deployments": "bash scripts/sync-deployments.sh"
   },
   "dependencies": {
     "@react-spring/web": "10.1.2",

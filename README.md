@@ -106,10 +106,11 @@ Follow `SECURITY.md`. Please do not open a public issue for a vulnerability and 
 | Network | Chain id | Status |
 |---|---|---|
 | Robinhood Chain | 4663 | not deployed |
-| Robinhood Chain testnet | 46630 | not deployed |
+| Robinhood Chain testnet | 46630 | rehearsal deployment, escrow `0x7FFf1cE34532f76A6aFEb53E503891e671f891d6` (Sourcify match on all 4 contracts; test tokens only, to be redeployed after a contract fix) |
 
 Addresses, deploy block, transaction hashes, constructor arguments and the commit of every deployment are recorded
-in `contracts/deployments/<chainid>.json`. The deploy script reads no private key (it signs with
+in `contracts/deployments/<chainid>.json` (today only `46630.json`, the testnet; the site keeps an equal copy in
+`web/src/config/deployments/`, made by `bash web/scripts/sync-deployments.sh` and checked by a test). The deploy script reads no private key (it signs with
 `forge script --account <keystore>` or `--ledger`), refuses to run on 4663 or 46630 unless `IFSO_ARMED=1` and
 `contracts/.armed-<chainid>` both exist, hands every contract to the owner multisig and asserts the result.
 After a deploy: `forge script script/PostDeployCheck.s.sol --rpc-url <rpc>` re-checks it and
@@ -120,8 +121,9 @@ After a deploy: `forge script script/PostDeployCheck.s.sol --rpc-url <rpc>` re-c
 
 The contracts do not depend on the website, the Telegram bot or any Ifso server. If those are gone, your money is still
 in the escrow contract and you can get it out yourself. You need your payment number (the id) and a wallet that holds a
-little ETH for gas on Robinhood Chain. The escrow address for each network is in `contracts/deployments/<chainid>.json`
-(chain 4663 is Robinhood Chain), and its verified source is on Sourcify and the block explorer.
+little ETH for gas on Robinhood Chain. The escrow address for each deployed network is in `contracts/deployments/<chainid>.json`
+and in the Deployment table above (chain 4663 is Robinhood Chain; it has no file until it is deployed), and its verified
+source is on Sourcify and the block explorer.
 
 Which function to call:
 

@@ -1,4 +1,80 @@
 {
   "chainId": 46630,
-  "contracts": {}
+  "commit": "24cb593ab1261ac3465f8a72ed52dcb3411856ff",
+  "deployer": "0x4d5395EAA992D1bd629821337147CC3dDf8303C0",
+  "deployBlockAtSimulation": 12044279,
+  "contracts": {
+    "IfsoConditionEvaluator": {
+      "address": "0xaEF6be289a5fea08F756CcEf56477aFf362401dD",
+      "constructorArgs": [
+        "0x4d5395EAA992D1bd629821337147CC3dDf8303C0",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ]
+    },
+    "IfsoOutcomeResolver": {
+      "address": "0x26dB66f4AA5D4Ca365464bfc2425b27805F34A98",
+      "constructorArgs": [
+        "0x4d5395EAA992D1bd629821337147CC3dDf8303C0",
+        "0x857315614841c5d537a5F395f020fc5bCa0fdaC6",
+        7200,
+        259200,
+        100000000,
+        "0x56A07C4571859278996BE577c82785cD6943e2cd"
+      ]
+    },
+    "FeeRouter": {
+      "address": "0x4B65A233b5915C61A25f72498257650a6A783B50",
+      "constructorArgs": [
+        "0x4d5395EAA992D1bd629821337147CC3dDf8303C0",
+        "0x857315614841c5d537a5F395f020fc5bCa0fdaC6",
+        "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+        "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+        "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+        "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995"
+      ]
+    },
+    "IfsoEscrow": {
+      "address": "0x7FFf1cE34532f76A6aFEb53E503891e671f891d6",
+      "constructorArgs": [
+        "0x4d5395EAA992D1bd629821337147CC3dDf8303C0",
+        "0x857315614841c5d537a5F395f020fc5bCa0fdaC6",
+        "0xaEF6be289a5fea08F756CcEf56477aFf362401dD",
+        "0x4B65A233b5915C61A25f72498257650a6A783B50",
+        250000,
+        500000
+      ]
+    }
+  },
+  "config": {
+    "ownerMultisig": "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+    "panelMultisig": "0x56A07C4571859278996BE577c82785cD6943e2cd",
+    "resolverCreator": "0x8aB1F0895B2012Db89Caf62e5b67E81137853ad0",
+    "usdg": "0x857315614841c5d537a5F395f020fc5bCa0fdaC6",
+    "pyth": "0x0000000000000000000000000000000000000000",
+    "sequencerUptimeFeed": "0x0000000000000000000000000000000000000000",
+    "feeWork": "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+    "feeTreasury": "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+    "feePerks": "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+    "feeBurn": "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+    "creationFee": 250000,
+    "resolverFee": 500000,
+    "resolverBond": 100000000,
+    "maxAmount": 1000000000,
+    "disputeWindow": 7200,
+    "panelWindow": 259200,
+    "feeds": [
+      "0x6ba540c3638cac8047599dA9fB09c03BE834b725"
+    ],
+    "feedStockTokens": [
+      "0x0000000000000000000000000000000000000000"
+    ]
+  },
+  "txs": [],
+  "notes": [
+    "Testnet rehearsal deployment. The contracts will be redeployed after a contract fix; then replace this file and run `bash web/scripts/sync-deployments.sh` (the web copy must stay equal, a test checks it) and update the README Deployment row.",
+    "config.resolverCreator is the LIVE question creator, the relayer 0x8aB1F0895B2012Db89Caf62e5b67E81137853ad0, so PostDeployCheck passes against the chain. At deploy time it was the resolver key 0x773B7Bc00Ec82753FCca6AF3C051b7Ddf2c7451b; on 2026-11-02 the owner multisig called setCreator(relayer, true) (tx 0x5e7ecaf4...804920a) and setCreator(resolver key, false) (tx 0x9b3e604f...9d284f67).",
+    "Testnet only: the owner multisig and the panel multisig have the same 3 signers (2 of 3). The mainnet panel multisig will have different signers.",
+    "2026-11-04: Sourcify verified all 4 contracts against commit 24cb593 sources (contracts/script/verify-sourcify.sh 46630 from a clean checkout of that commit, creation tx hashes from the testnet explorer, each confirmed from the deployer by cast receipt). GET /v2/contract/46630/<addr>: match=match, creationMatch=match, runtimeMatch=match for IfsoConditionEvaluator 0xaEF6be28 (creation tx 0x4ca8a2e7...0a17), IfsoOutcomeResolver 0x26dB66f4 (0xbfbf6ba3...2421), FeeRouter 0x4B65A233 (0x95d350b2...3bd3), IfsoEscrow 0x7FFf1cE3 (0xff897fc3...972c). exact_match is not reachable: foundry.toml sets bytecode_hash = \"none\", so the bytecode carries no metadata hash; 'match' is the best Sourcify result for this build config."
+  ]
 }
