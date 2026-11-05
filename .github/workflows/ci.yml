@@ -2,18 +2,49 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One group per event and ref: a newer push cancels the older push run on the same ref (and a PR update the older PR
+# run), but a scheduled or manual run sits in its own group and is never cancelled (a CANCELLED run reads as red).
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 # Every action is pinned by full commit sha (tag in the comment), checked by .github/scripts/pins-check.sh. Foundry is
 # pinned to v1.8.4; python packages are hash-locked; the gitleaks binary is pinned by sha256.
+#
+# Path filters: the `changes` job (.github/scripts/ci-changes.sh) decides which groups a push needs; contract jobs run
+# only for contracts/, app for app/ (and contracts/), web for web/ (and the app code it vendors), docs for the public
+# root docs. PRs, manual runs, first pushes, rewritten branches and any .github/ change run everything. gitleaks,
+# semgrep and ci-summary always run; ci-summary is the single required check (green when every job that ran passed).
+# The same commands run locally, with no filter, through .github/scripts/ci-local.sh before every public sync.
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      contracts: ${{ steps.f.outputs.contracts }}
+      app: ${{ steps.f.outputs.app }}
+      web: ${{ steps.f.outputs.web }}
+      docs: ${{ steps.f.outputs.docs }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false, fetch-depth: 0 }
+      - name: which parts changed
+        id: f
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          REF: ${{ github.ref }}
+          HEAD_SHA: ${{ github.sha }}
+        run: bash .github/scripts/ci-changes.sh
+
   contracts:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults: { run: { working-directory: contracts } }
@@ -22,6 +53,13 @@ jobs:
         with: { persist-credentials: false }
       - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with: { version: v1.8.4 }
+      - name: cache contract artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            contracts/out
+            contracts/cache
+          key: forge-out-${{ runner.os }}-v1.8.4-${{ hashFiles('contracts/src/**', 'contracts/test/**', 'contracts/script/**', 'contracts/foundry.toml') }}
       - name: format
         run: forge fmt --check
       - name: build and size gate (24,576 B runtime)
@@ -50,6 +88,8 @@ jobs:
           kill $A
 
   invariants:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults: { run: { working-directory: contracts } }
@@ -58,10 +98,19 @@ jobs:
         with: { persist-credentials: false }
       - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with: { version: v1.8.4 }
+      - name: cache contract artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            contracts/out
+            contracts/cache
+          key: forge-out-${{ runner.os }}-v1.8.4-${{ hashFiles('contracts/src/**', 'contracts/test/**', 'contracts/script/**', 'contracts/foundry.toml') }}
       - name: invariants (10,000 runs x depth 50)
         run: FOUNDRY_PROFILE=invariant forge test --match-test invariant -vv
 
   slither:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -104,6 +153,8 @@ jobs:
         run: python3 .github/scripts/semgrep-gate.py "$RUNNER_TEMP/semgrep-report.json" .github/semgrep/semgrep.allow .
 
   app:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     # audit I-14: Foundry (anvil + forge) is installed so the anvil-gated app tests run here too; Postgres 16 ships with
     # the runner image. The contract artifacts are cached on the contract sources, so forge build is a no-op on a hit.
     runs-on: ubuntu-latest
@@ -114,6 +165,12 @@ jobs:
         with: { persist-credentials: false }
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with: { bun-version: 1.4.4 }
+      - name: cache bun installs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-1.4.4-app-${{ hashFiles('app/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-1.4.4-app-
       - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with: { version: v1.8.4, cache: false }
       - name: cache contract artifacts
@@ -122,7 +179,7 @@ jobs:
           path: |
             contracts/out
             contracts/cache
-          key: forge-out-${{ runner.os }}-v1.8.4-${{ hashFiles('contracts/src/**', 'contracts/foundry.toml') }}
+          key: forge-out-${{ runner.os }}-v1.8.4-${{ hashFiles('contracts/src/**', 'contracts/test/**', 'contracts/script/**', 'contracts/foundry.toml') }}
       - name: build the contracts the anvil tests deploy
         working-directory: contracts
         run: forge build
@@ -133,6 +190,8 @@ jobs:
       - run: bun test # includes the banned-words gate, TS<->Solidity parity vectors and the anvil + Postgres suites
 
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     # the website: type check, shared-client copy in sync, production build, then the tests (they read the build output)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -141,6 +200,12 @@ jobs:
         with: { persist-credentials: false }
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with: { bun-version: 1.4.4 }
+      - name: cache bun installs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-1.4.4-web-${{ hashFiles('app/bun.lock', 'web/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-1.4.4-web-
       - name: app dependencies (the web tests run the real API router)
         working-directory: app
         run: bun install --frozen-lockfile
@@ -161,6 +226,8 @@ jobs:
         run: bun run test
 
   halmos:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     # symbolic proofs of the comparison, threshold, fee and cap arithmetic (contracts/test/halmos)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -179,6 +246,8 @@ jobs:
           PATH="$RUNNER_TEMP/halmos-venv/bin:$PATH" bash tools/halmos.sh
 
   coverage:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults: { run: { working-directory: contracts } }
@@ -193,6 +262,8 @@ jobs:
         with: { name: coverage, path: "${{ runner.temp }}/coverage.md" }
 
   mutation:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     # hand mutants, one per round-1 finding plus operator and boundary mutants; fails below 90% or on a stale mutant
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -221,3 +292,61 @@ jobs:
           echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" detect --source . --config .github/gitleaks.toml --redact --no-banner --exit-code 1
+
+  docs:
+    # the public root docs changed: the app copy tests that read them (banned words, FRONTEND.md coverage, example slugs,
+    # CHANGELOG union merge, accepted advisories in SECURITY.md) and the README/owner-powers checks. The app and
+    # contracts jobs run the same checks when their own files change.
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults: { run: { working-directory: app } }
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with: { bun-version: 1.4.4 }
+      - name: cache bun installs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-1.4.4-app-${{ hashFiles('app/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-1.4.4-app-
+      - run: bun install --frozen-lockfile
+      - name: copy tests that read the root docs and web/src
+        run: bun test test/bannedWords.test.ts test/frontendDoc.test.ts test/copyExamples.test.ts test/changelog.union.test.ts test/deps.advisories.test.ts
+      - name: README deployment table matches deployments/
+        working-directory: contracts
+        run: bash tools/readme-deploy-check.sh
+      - name: every onlyOwner function is listed in SECURITY.md
+        working-directory: contracts
+        run: bash tools/owner-powers-check.sh
+
+  ci-summary:
+    # the single required check: fails when any job that ran failed or was cancelled, when an always-on job did not
+    # pass, or when a job whose files changed was skipped. Skipped jobs (files untouched) are fine.
+    needs: [changes, contracts, invariants, slither, semgrep, app, web, halmos, coverage, mutation, gitleaks, docs]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every job that ran passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad="$(echo "$NEEDS" | jq -r '
+            .changes.outputs as $o
+            | [ to_entries[]
+                | .key as $k | .value.result as $r
+                | select(
+                    ($r != "success" and $r != "skipped")
+                    or ($r == "skipped" and ($k == "changes" or $k == "semgrep" or $k == "gitleaks"))
+                    or ($r == "skipped" and ($k | IN("contracts","invariants","slither","halmos","coverage","mutation")) and $o.contracts == "true")
+                    or ($r == "skipped" and $k == "app" and $o.app == "true")
+                    or ($r == "skipped" and $k == "web" and $o.web == "true")
+                    or ($r == "skipped" and $k == "docs" and $o.docs == "true"))
+                | "\($k)=\($r)" ] | join(" ")')"
+          if [ -n "$bad" ]; then echo "::error::ci-summary: $bad"; exit 1; fi
+          echo "ci-summary: every job that ran passed"

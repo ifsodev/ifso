@@ -112,17 +112,28 @@ function run(seed: number) {
 }
 
 describe("R3-H1 property: foreign-dispute policy over random proposals, sources and floats", () => {
-  test("1,000 random runs: P1-P5 hold on every tick", () => {
-    let disputes = 0;
-    let honestSpared = 0;
-    for (let seed = 1; seed <= 1000; seed++) {
-      const qs = run(seed);
-      disputes += qs.filter((q) => q.disputed).length;
-      honestSpared += qs.filter((q) => q.proposed === q.truth && !q.disputed).length;
-    }
-    // the runs actually exercise both sides
-    expect(disputes).toBeGreaterThan(500);
-    expect(honestSpared).toBeGreaterThan(500);
+  // The same 1,000 fixed seeds run on every pass, in 20 tests of 50 seeds each with an explicit 120 s hang-detector
+  // timeout. One 1,000-seed test ran past bun's 5 s default at load average 76 (8.7 s); at load ~140 under
+  // `taskpolicy -c background` the whole file took 412 s, so ~21 s per 50-seed chunk. Nothing here measures time.
+  // The exercise check below adds up all the chunks, so the coverage bar is unchanged.
+  const SEEDS = 1000;
+  const CHUNK = 50;
+  const totals = { chunks: 0, disputes: 0, honestSpared: 0 };
+  for (let from = 1; from <= SEEDS; from += CHUNK) {
+    const to = from + CHUNK - 1;
+    test(`random runs, seeds ${from}-${to}: P1-P5 hold on every tick`, () => {
+      for (let seed = from; seed <= to; seed++) {
+        const qs = run(seed);
+        totals.disputes += qs.filter((q) => q.disputed).length;
+        totals.honestSpared += qs.filter((q) => q.proposed === q.truth && !q.disputed).length;
+      }
+      totals.chunks += 1;
+    }, 120_000);
+  }
+  test("the 1,000 runs actually exercise both sides", () => {
+    expect(totals.chunks).toBe(SEEDS / CHUNK); // every chunk ran (run the whole file, not one chunk, for this check)
+    expect(totals.disputes).toBeGreaterThan(500);
+    expect(totals.honestSpared).toBeGreaterThan(500);
   });
 
   test("float of exactly one bond: unconfirmed proposals page a human, a contradicted one still gets the bond", () => {
