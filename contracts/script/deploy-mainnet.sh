@@ -8,6 +8,8 @@
 # (2) fold-txs.sh writes every tx hash into deployments/4663.json and proves each creation tx on chain,
 # (3) PostDeployCheck with the operator pins EXPECT_* (see PostDeployCheck.s.sol). After the owner Safe has called
 # acceptOwnership() on all four contracts, run the check again with REQUIRE_HANDED_OVER=1.
+# The owner runs this in a fresh Terminal where ~/.foundry/bin may not be on PATH yet (forge, cast, anvil).
+export PATH="$HOME/.foundry/bin:$PATH"
 set -euo pipefail
 rpc="${1:?usage: deploy-mainnet.sh <rpc> --account <name> | --ledger}"
 shift

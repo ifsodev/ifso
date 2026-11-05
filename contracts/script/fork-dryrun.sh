@@ -14,6 +14,8 @@
 # real. Output: deployments/4663-fork.json (gitignored) with tx hashes, gas used and the fork block.
 # After the deploy it runs PostDeployCheck four ways: ownership pending (pass), handed-over mode while pending (must
 # fail), a tampered FeeRouter runtime (must fail), and handed-over mode after the owner Safe accepted (pass).
+# The owner runs this in a fresh Terminal where ~/.foundry/bin may not be on PATH yet (forge, cast, anvil).
+export PATH="$HOME/.foundry/bin:$PATH"
 set -euo pipefail
 port="${1:?usage: fork-dryrun.sh <anvil port>}"
 rpc="http://127.0.0.1:${port}"
