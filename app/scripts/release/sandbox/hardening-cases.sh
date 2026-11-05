@@ -324,7 +324,7 @@ ok "preflight TU01 passes the wrapper's check and reaches the preflight" bash -c
 rm -f "$W/release.py" "$W/preflight.py" "$W"/*.py.called
 
 echo "== A4: no check fetches the website (ifso.tech sits behind Vercel's Security Checkpoint: scripted requests get a 403 page)"
-SITE_HITS="$(grep -rnE 'https?://(www\.)?ifso\.tech' "$HERE/../lib" "$HERE/../sbin" "$HERE/../arm.sh" "$HERE/../install.sh" "$HERE/../push-queue.sh" "$HERE/../../server" 2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#' || true)"
+SITE_HITS="$(grep -rnE 'https?://(www\.)?ifso\.tech' "$HERE/../lib" "$HERE/../sbin" "$HERE/../arm.sh" "$HERE/../install.sh" "$HERE/../push-queue.sh" "$HERE/../../server" 2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#' | grep -vE ':[0-9]+:[[:space:]]*[A-Z_]*ORIGINS=' || true)"  # an allowed-origin (CORS) list names the site; it is not a request
 ok "no runner, wrapper or server script requests https://ifso.tech (api.ifso.tech is Cloudflare, not Vercel)" test -z "$SITE_HITS"
 [[ -z "$SITE_HITS" ]] || printf '        %s\n' "$SITE_HITS"
 ok "the frontend-live check is Vercel's state of the exact sha (DECISIONS 49), not page content" bash -c "grep -q 'def wait_vercel_ready' '$HERE/../lib/release.py' && grep -q 'step(\"frontend\", s_frontend)' '$HERE/../lib/release.py'"
