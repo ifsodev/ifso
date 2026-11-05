@@ -63,6 +63,26 @@ root_repo_init() {
 }
 # root_fetch_local <release-user repo path> <refspec...>
 root_fetch_local() { local src="$1"; shift; sgit fetch -q --no-tags --no-write-fetch-head --upload-pack "$(rel_upload_pack)" "$src" "$@"; }
+# root_fetch_main: root's own copy of private main (audit L-12), fetched by root from PRIVATE_URL (paths.conf, root-owned) into
+# $ROOT_REPO refs/heads/main. Over ssh with ROOT_SSH_KEY (a read-only deploy key, root 0600) and GitHub's host key pinned in
+# ROOT_KNOWN_HOSTS; a local path (the sandbox's stand-in origin) is read with the release user's upload-pack. The release user's
+# clone, its config and its refs never decide what "on private main" means. Prints the main sha.
+ROOT_SSH_KEY="${ROOT_SSH_KEY:-$ETC_DIR/root_deploy_key}"
+ROOT_KNOWN_HOSTS="${ROOT_KNOWN_HOSTS:-$ETC_DIR/github_known_hosts}"
+root_fetch_main() {
+  local url="${PRIVATE_URL:-}"
+  [[ -n "$url" && "$url" != *CHANGE_ME* ]] || { echo "PRIVATE_URL is not set in paths.conf (install.sh PRIVATE_GITHUB_REPO=<owner>/<repo>)"; return 1; }
+  root_repo_init || return 1
+  if [[ -d "$url" ]]; then
+    sgit fetch -q --no-tags --no-write-fetch-head --upload-pack "$(rel_upload_pack)" "$url" "+refs/heads/main:refs/heads/main" || { echo "fetch of main from $url failed"; return 1; }
+  else
+    [[ "$url" =~ ^git@github\.com:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git$ ]] || { echo "PRIVATE_URL must be git@github.com:<owner>/<repo>.git"; return 1; }
+    [[ -r "$ROOT_SSH_KEY" && -r "$ROOT_KNOWN_HOSTS" ]] || { echo "no $ROOT_SSH_KEY or $ROOT_KNOWN_HOSTS (install.sh makes them)"; return 1; }
+    GIT_SSH_COMMAND="ssh -F /dev/null -i $ROOT_SSH_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$ROOT_KNOWN_HOSTS" \
+      sgit fetch -q --no-tags --no-write-fetch-head "$url" "+refs/heads/main:refs/heads/main" || { echo "fetch of main from $url failed"; return 1; }
+  fi
+  sgit rev-parse --verify refs/heads/main
+}
 # ensure_commit <sha>: the commit is in root's repo, fetched from the queue repo when it is a queued commit not on main yet
 ensure_commit() {
   sgit cat-file -e "$1^{commit}" 2>/dev/null && return 0

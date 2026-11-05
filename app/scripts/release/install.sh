@@ -5,6 +5,8 @@
 #        PUBLIC_GITHUB_REPO=<public-owner>/<repo> bash install.sh
 # FOUNDRY_VERSION or FOUNDRY_TARBALL, with FOUNDRY_SHA256: installs anvil for the gate (checksum-verified; see below).
 # PUBLIC_GITHUB_REPO: the public repo; paths.conf gets PUBLIC_CI_API (public CI watcher, arming check) and PUBLIC_COMMIT_URL.
+# PRIVATE_GITHUB_REPO: the private repo (owner/name); paths.conf gets PRIVATE_URL, from which ROOT fetches private main itself with
+# its own read-only deploy key (/etc/ifso-release/root_deploy_key, made here, root 0600) to decide what is on main (audit L-12).
 # SYNC_PUBLIC_SRC: the private public-copy tool (docs/tools/sync-public.py, copied over by hand); needed on the first run.
 # RELEASE_GIT_NAME / RELEASE_GIT_EMAIL: the identity of the commits the runner makes itself on private main (cherry-picks,
 # reverts, re-applies). Use an account that is a member of the Vercel team that builds web/ (the owner's GitHub noreply
@@ -110,6 +112,22 @@ if [[ -n "$PUB" ]]; then
 elif [[ -z "$(conf_get PUBLIC_CI_API)" ]]; then
   conf_set PUBLIC_CI_API "https://api.github.com/repos/CHANGE_ME/CHANGE_ME"
 fi
+# ---- the private repo, for root's own fetch of main (audit L-12). Without it the deploy wrapper refuses every deploy (exit 75).
+PRIV="${PRIVATE_GITHUB_REPO:-}"
+if [[ -n "$PRIV" ]]; then
+  [[ "$PRIV" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "PRIVATE_GITHUB_REPO must be owner/name"
+  conf_set PRIVATE_URL "git@github.com:$PRIV.git"
+elif [[ -z "$(conf_get PRIVATE_URL)" ]]; then
+  conf_set PRIVATE_URL "git@github.com:CHANGE_ME/CHANGE_ME.git"
+fi
+# root's read-only deploy key and GitHub's host key, pinned (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints:
+# ED25519 SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU); root only, never readable by the release user
+[[ -e "$(P /etc/ifso-release/root_deploy_key)" ]] || ssh-keygen -q -t ed25519 -N '' -C ifso-release-root-readonly -f "$(P /etc/ifso-release/root_deploy_key)"
+chmod 0600 "$(P /etc/ifso-release/root_deploy_key)"
+printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >"$(P /etc/ifso-release/github_known_hosts)"
+chmod 0644 "$(P /etc/ifso-release/github_known_hosts)"
+conf_set ROOT_SSH_KEY "$(P /etc/ifso-release/root_deploy_key)"
+conf_set ROOT_KNOWN_HOSTS "$(P /etc/ifso-release/github_known_hosts)"
 # the gate runs as ifso-gate in its own home (an older paths.conf had GATE_DIR in the release user's home: moved)
 if [[ -z "$PREFIX" ]]; then
   conf_set GATE_USER "$GUSER"; conf_set GATE_HOME "$GHOME"; conf_set GATE_DIR "$GHOME/release"; conf_set PREFLIGHT_GATE_DIR "$GHOME/preflight"
@@ -216,6 +234,7 @@ SSH
   echo "  private repo, WRITE deploy key : $(cat "$RHOME/.ssh/id_ed25519_private.pub")"
   echo "  public repo,  WRITE deploy key : $(cat "$RHOME/.ssh/id_ed25519_public.pub")"
   echo "  public account, SIGNING key    : $(cat "$RHOME/.ssh/id_ed25519_signing.pub")"
+  echo "  private repo, READ-ONLY deploy key (root's own fetch of main): $(cat /etc/ifso-release/root_deploy_key.pub)"
   echo "allowed_signers holds OWNER keys only (never the server key above): append the owner's keys. Next: README.md 'Install on the server'"
   echo "(clone through the ssh aliases github-ifso-private / github-ifso-public, queue, release.env, rehearsal), then arm.sh."
 else

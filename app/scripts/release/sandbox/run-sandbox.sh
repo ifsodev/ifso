@@ -84,6 +84,7 @@ ok "install.sh installed sync-public.py where paths.conf points (the runner uses
 ok "install.sh set the release user's git identity (name, email, no guessing)" bash -c "test \"\$(git config --file '$RGITCFG' user.email)\" = '$GIT_EMAIL' && test \"\$(git config --file '$RGITCFG' user.name)\" = '$GIT_NAME' && test \"\$(git config --file '$RGITCFG' user.useConfigOnly)\" = true"
 ok "wrappers installed and executable" test -x "$SBIN/ifso-deploy-release" -a -x "$SBIN/ifso-release-notify" -a -x "$SBIN/ifso-release-status" -a -x "$SBIN/ifso-release-ghrelease"
 ok "paths.conf has no secrets and no token words" bash -c "! grep -qiE 'token|password|secret' '$CONF'"
+ok "L-12: root's read-only deploy key is root's, 0600, and GitHub's host key is pinned" bash -c "test \"\$(stat -c '%a' '$ETC/root_deploy_key' 2>/dev/null || stat -f '%Lp' '$ETC/root_deploy_key')\" = 600 && grep -q '^github.com ssh-ed25519 ' '$ETC/github_known_hosts'"
 ok "release.env is mode 0600" test "$(stat -c '%a' "$ETC/release.env" 2>/dev/null || stat -f '%Lp' "$ETC/release.env")" = 600
 
 FAKES="$BASE/fakes"; mkdir -p "$FAKES"; cp "$HERE"/fakes/* "$FAKES/"; chmod +x "$FAKES"/*
@@ -164,6 +165,7 @@ new_world() { # new_world <name>
   # root's own repository (audit M-2): created by the deploy wrapper itself, root-owned and 0700 on Linux
   if [[ $MODE == linux ]]; then setconf ROOT_REPO "/var/lib/ifso-release-root/$1.git"; else setconf ROOT_REPO "$W/root.git"; fi
   setconf PREFLIGHT_GATE_DIR "$W/pfgate"
+  setconf PRIVATE_URL "$W/private.git"   # root fetches private main itself from here (audit L-12; GitHub over ssh on the server)
   setconf GATE_WEB_RUNTIME node
   setconf PUBLIC_CI_API ""   # the CI watcher stays off in the passes (world 4 points it at the fake GitHub for arm.sh)
   setconf VERCEL_STATUS_API ""   # the Vercel watcher stays off unless a world turns it on (worlds 1 to 3, at the fake GitHub)

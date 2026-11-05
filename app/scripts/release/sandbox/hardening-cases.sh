@@ -30,8 +30,8 @@ BASE="$(G -C "$W/repo" rev-parse HEAD)"
 G -C "$W/repo" push -q origin main
 mkdir -p "$W/opt/releases/$BASE" "$W/home/posters"; ln -s "$W/opt/releases/$BASE" "$W/opt/current"
 G init -q --bare -b main "$W/queue.git"
-printf 'RELEASE_USER=%s\nRELEASE_HOME=%s\nREPO_DIR=%s\nQUEUE_REPO=%s\nROOT_REPO=%s\nDEPLOY_BIN=/bin/false\nOPT_DIR=%s\nALLOWED_SIGNERS=%s\nRUNNER_LIB=%s\nFETCH_WAIT=0\n' \
-  "$(id -un)" "$W/home" "$W/repo" "$W/queue.git" "$W/root.git" "$W/opt" "$W/allowed_signers" "$W" >"$W/paths.conf"
+printf 'RELEASE_USER=%s\nRELEASE_HOME=%s\nREPO_DIR=%s\nQUEUE_REPO=%s\nROOT_REPO=%s\nPRIVATE_URL=%s\nDEPLOY_BIN=/bin/false\nOPT_DIR=%s\nALLOWED_SIGNERS=%s\nRUNNER_LIB=%s\nFETCH_WAIT=0\n' \
+  "$(id -un)" "$W/home" "$W/repo" "$W/queue.git" "$W/root.git" "$W/origin.git" "$W/opt" "$W/allowed_signers" "$W" >"$W/paths.conf"
 export IFSO_RELEASE_CONF="$W/paths.conf" IFSO_RELEASE_LIB="$SBIN"
 unset SUDO_UID
 
@@ -112,6 +112,25 @@ G -C "$W/repo" reset -q --hard "$C2"; G -C "$W/repo" -c gpg.format=ssh -c "user.
 G -C "$W/repo" -c gpg.format=ssh -c "user.signingkey=$W/srvkey" -c commit.gpgsign=true revert --no-edit "$C6" >/dev/null; C7="$(G -C "$W/repo" rev-parse HEAD)"; onmain "$C7"
 ok "a runner revert (inverse patch) and its re-apply validate" bash "$SBIN/ifso-deploy-release" --validate "$C7"
 onmain "$GOOD"; G -C "$W/repo" reset -q --hard "$GOOD"
+
+echo "== L-12: root fetches private main itself, from the URL pinned in paths.conf; the release clone's refs never count"
+# an OWNER-signed commit that is a clean descendant of the running revision but lives on another branch, not on main
+G -C "$W/repo" checkout -q -b side "$GOOD"; echo s >"$W/repo/side"; G -C "$W/repo" add side; sign -m "feat: owner work in progress, not on main"
+SIDE="$(G -C "$W/repo" rev-parse HEAD)"; G -C "$W/repo" push -q origin side; G -C "$W/repo" checkout -q main
+# the planted remap: every plain `git fetch origin` (the runner's own fetch_all) now writes the side branch to origin/main
+G -C "$W/repo" config --replace-all remote.origin.fetch '+refs/heads/side:refs/remotes/origin/main'
+G -C "$W/repo" fetch -q origin
+ok "  (the plant works: the release clone's origin/main is the side commit)" test "$(G -C "$W/repo" rev-parse refs/remotes/origin/main)" = "$SIDE"
+no "an owner-signed commit off main is refused although the release clone's origin/main says otherwise" bash "$SBIN/ifso-deploy-release" --validate "$SIDE"
+G -C "$W/repo" update-ref refs/remotes/origin/main "$SIDE"
+no "  ... and after update-ref refs/remotes/origin/main in the release clone" bash "$SBIN/ifso-deploy-release" --validate "$SIDE"
+G -C "$W/repo" config --replace-all remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'; G -C "$W/repo" fetch -q origin
+ok "control: the same wrapper validates a commit that IS on main" bash "$SBIN/ifso-deploy-release" --validate "$GOOD"
+ok "root's copy of main is in root's own repository (refs/heads/main = the pinned URL's main)" test "$(G --git-dir="$W/root.git" rev-parse refs/heads/main 2>/dev/null)" = "$GOOD"
+sed -i.bak '/^PRIVATE_URL=/d' "$W/paths.conf" && rm -f "$W/paths.conf.bak"
+bash "$SBIN/ifso-deploy-release" --validate "$GOOD" >"$W/l12.out" 2>&1; rc=$?
+ok "without PRIVATE_URL in paths.conf nothing is deployed (exit 75, says why)" bash -c "[[ $rc == 75 ]] && grep -q PRIVATE_URL '$W/l12.out'"
+printf 'PRIVATE_URL=%s\n' "$W/origin.git" >>"$W/paths.conf"
 
 echo "== L-5: ifso-release-ghrelease publishes only allow-listed files"
 cat >"$W/srv.py" <<'EOS'
