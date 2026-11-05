@@ -275,6 +275,8 @@ async function applyEscrowEvent(deps: Deps, name: string, id: string, args: Reco
   }
 }
 
+// Audit M-1: BondForfeited (questionId, amount) and ForfeitsForwarded (feeRouter, amount) change no row; they are kept
+// in chain_events like every resolver log (the forfeit trail for the usage report and ops), and the keeper forwards.
 async function applyResolverEvent(deps: Deps, name: string, qid: string, args: Record<string, unknown>) {
   if (name === "Proposed") await deps.db.update(questions).set({ state: 2, proposedOutcome: Number(args.outcome), proposer: String(args.proposer) }).where(eq(questions.id, qid));
   else if (name === "Disputed") await deps.db.update(questions).set({ state: 3 }).where(eq(questions.id, qid));

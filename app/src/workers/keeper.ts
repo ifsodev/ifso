@@ -50,7 +50,7 @@ export async function chainNow(deps: Deps): Promise<bigint> {
 }
 
 export interface Plan {
-  meta: { kind: string; escrowId: string };
+  meta: { kind: string; escrowId?: string };
   call: ContractCall;
   /** The keeper expects this call to succeed. false: a probe, only executed in shadow mode to compare with eth_call. */
   send: boolean;
@@ -68,7 +68,7 @@ const BACKOFF_MAX_MS = 6 * 3600_000;
 // Audit L-4: waits (nothing to send yet) and failures (a send that reverted or errored) keep separate counters, so a row
 // that waited through a long hold window is retried after BACKOFF_BASE_MS on its first real failure, not after the cap.
 const backoff = new Map<string, { fails: number; waits: number; until: number }>();
-export const resetKeeperBackoff = () => (backoff.clear(), resetOutcomeWaits());
+export const resetKeeperBackoff = () => (backoff.clear(), resetOutcomeWaits(), (lastForfeitCheck = 0));
 const bkey = (pass: string, id: string) => `${pass}:${id}`;
 const skipping = (pass: string, id: string, nowMs: number) => (backoff.get(bkey(pass, id))?.until ?? 0) > nowMs;
 const skippedIds = (pass: string, nowMs: number) => [...backoff].filter(([k, v]) => k.startsWith(`${pass}:`) && v.until > nowMs).length;
@@ -102,7 +102,7 @@ export async function keeperTick(deps: Deps) {
   const nowTs = await chainNow(deps);
   const now = new Date(Number(nowTs) * 1000);
   for (const [k, v] of backoff) if (v.until < Date.now() - BACKOFF_MAX_MS) backoff.delete(k); // settled long ago
-  for (const pass of [settleTime, settlePrice, settleOutcome, refundExpired, payOwedVoids]) {
+  for (const pass of [settleTime, settlePrice, settleOutcome, refundExpired, payOwedVoids, forwardForfeits]) {
     try {
       await pass(deps, now, nowTs);
     } catch (e) {
@@ -374,6 +374,24 @@ async function payOwedVoids(deps: Deps) {
       })) sends++;
     }
   }
+}
+
+// ---------------------------------------------------------------------------------------------------- FORFEITS
+// Audit M-1: the resolver accrues forfeited bond halves in `forfeited` (no external call on the resolution path);
+// anyone forwards them to the FeeRouter with forwardForfeits(). Checked at most every FORFEIT_CHECK_MS, sent only
+// when forfeited() > 0, through the same simulate / estimate / send path and backoff as every keeper call.
+export const FORFEIT_CHECK_MS = 10 * 60_000;
+let lastForfeitCheck = 0;
+export const resetForfeitCheck = () => void (lastForfeitCheck = 0);
+async function forwardForfeits(deps: Deps) {
+  const resolver = deps.clients.resolverContract;
+  if (!resolver || Date.now() - lastForfeitCheck < FORFEIT_CHECK_MS || skipping("forfeits", resolver, Date.now())) return;
+  lastForfeitCheck = Date.now();
+  const amount = (await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "forfeited" })) as bigint;
+  if (amount === 0n) return;
+  await guarded(deps, "forfeits", resolver, () =>
+    execute(deps, { meta: { kind: "forward-forfeits" }, call: { address: resolver, abi: ifsoOutcomeResolverAbi as never, functionName: "forwardForfeits", args: [] }, send: true, reason: `${amount} forfeited bond units for the FeeRouter` }),
+  );
 }
 
 /**

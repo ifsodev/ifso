@@ -443,7 +443,7 @@ async function panelSilentCost(deps: Deps, id: string, o: { proposer: string; di
   await raiseOnce(deps, `resolver-panel-silent:${id}`, `the panel did not answer the dispute on question ${id} in its window, so it is VOID and the payments on it refund; the service got only half its bond back and the float shrank by ${lost} USDG units (forfeited to the FeeRouter). Check the panel signers`);
 }
 
-/** Last-call disputes the panel settled: one the panel upheld cost the float a bond, so say so. */
+/** Last-call disputes the panel settled: one the panel upheld cost the float a bond (half to the proposer, half to the FeeRouter), so say so. */
 async function lastCallResults(deps: Deps, resolver: Address) {
   const rows = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.disputeKind, "last-call")).limit(200);
   for (const { id } of rows) {
@@ -452,7 +452,7 @@ async function lastCallResults(deps: Deps, resolver: Address) {
     if (state < 4) continue;
     if (state === 5) await panelSilentCost(deps, id, o, deps.clients.resolver?.account?.address?.toLowerCase()); // voided by anyone
     if (state === 4 && o.finalOutcome === o.proposed) {
-      await raiseOnce(deps, `resolver-last-call-lost:${id}`, `the panel upheld the proposal (outcome ${o.proposed}) on question ${id} that the service disputed at last call; the bond went to the proposer and the float shrank by one bond`);
+      await raiseOnce(deps, `resolver-last-call-lost:${id}`, `the panel upheld the proposal (outcome ${o.proposed}) on question ${id} that the service disputed at last call; the float shrank by one bond (audit M-1: half of it went to the proposer, the other half to the FeeRouter)`);
     }
     await deps.db.update(questions).set({ disputeKind: "last-call-done" }).where(and(eq(questions.id, id), eq(questions.disputeKind, "last-call")));
   }

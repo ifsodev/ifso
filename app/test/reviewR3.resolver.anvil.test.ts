@@ -107,7 +107,10 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R3-H1: honest early proposals 
     expect(Number((await questionOnchain(env, q.id)).state)).toBe(3);
     await env.chain.write(env.chain.deployer, env.chain.resolver, ifsoOutcomeResolverAbi as Abi, "panelResolve", [q.id, truth]);
     await resolverTick(env.deps);
-    expect(env.alerts.some(([c]) => c === `resolver-last-call-lost:${q.id}`)).toBe(true);
+    const lost = env.alerts.find(([c]) => c === `resolver-last-call-lost:${q.id}`);
+    expect(lost).toBeDefined();
+    expect(lost![1]).toContain("half of it went to the proposer, the other half to the FeeRouter"); // audit M-1
+    expect(lost![1]).not.toContain("the bond went to the proposer");
     env.setSources();
   });
 });
