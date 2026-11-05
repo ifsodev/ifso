@@ -9,6 +9,10 @@ import {DeployBase} from "../script/DeployBase.sol";
 ///         carries the guard, and a local run passes the post-deploy assertions with the launch values.
 /// @notice Exposes the deploy assertions that review round 1 added.
 contract DeployChecksProbe is DeployBase {
+    function signers(Expect memory x) external view {
+        _checkSigners(x);
+    }
+
     function cap(uint96 m) external view {
         _checkLaunchCap(m);
     }
@@ -44,7 +48,7 @@ contract DeployTest is TestBase {
         for (uint256 i; i < 2; ++i) {
             assertFalse(vm.exists(string.concat(".armed-", vm.toString(ids[i]))), "arming file must not exist here");
             vm.chainId(ids[i]);
-            Deploy d = new Deploy();
+            Deploy d = Deploy(_deployArtifact("Deploy.s.sol:Deploy"));
             // env flag missing
             vm.setEnv("IFSO_ARMED", "0");
             vm.expectRevert(abi.encodeWithSelector(DeployBase.NotArmed.selector, ids[i]));
@@ -103,7 +107,7 @@ contract DeployTest is TestBase {
         p.pythOff(address(0));
         vm.chainId(31337);
         _setEnv();
-        Deploy.Deployed memory d = new Deploy().run();
+        Deploy.Deployed memory d = Deploy(_deployArtifact("Deploy.s.sol:Deploy")).run();
         assertEq(address(d.evaluator.pyth()), address(0), "deploy default: no Pyth");
     }
 
@@ -150,7 +154,7 @@ contract DeployTest is TestBase {
     function test_Deploy_LocalRunPassesAssertions() public {
         _setEnv();
         vm.chainId(31337);
-        Deploy.Deployed memory d = new Deploy().run();
+        Deploy.Deployed memory d = Deploy(_deployArtifact("Deploy.s.sol:Deploy")).run();
         assertEq(uint256(d.escrow.maxAmount()), 1_000e6, "launch cap");
         assertEq(uint256(d.escrow.creationFee()), 250_000, "creation fee");
         assertEq(d.escrow.pendingOwner(), address(0x0A11), "escrow pending owner = multisig");
@@ -183,6 +187,120 @@ contract DeployTest is TestBase {
             if (a[a.length - b.length + i] != b[i]) return false;
         }
         return true;
+    }
+}
+
+/// @dev Only the Safe owner list, for the signer-separation checks.
+contract OwnersSafe {
+    address[] internal owners;
+
+    constructor(address[] memory o) {
+        owners = o;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return owners;
+    }
+}
+
+/// @notice Signer separation: on 4663 (and any chain but 46630 / 31337) the owner Safe and the panel Safe must not
+///         share a signer and no hot key may sign either; testnet 46630 only warns (its Safes share signers by design).
+contract SignerSeparationTest is TestBase {
+    DeployChecksProbe internal p;
+
+    function setUp() public {
+        p = new DeployChecksProbe();
+    }
+
+    function _safe(address a, address b, address c) internal returns (address) {
+        address[] memory o = new address[](3);
+        (o[0], o[1], o[2]) = (a, b, c);
+        return address(new OwnersSafe(o));
+    }
+
+    function _x(address owner_, address panel_) internal pure returns (DeployBase.Expect memory x) {
+        x.ownerMultisig = owner_;
+        x.panel = panel_;
+        x.deployer = address(0xD0);
+        x.creator = address(0xC0);
+    }
+
+    function test_Signers_DisjointPasses() public {
+        DeployBase.Expect memory x =
+            _x(_safe(address(1), address(2), address(3)), _safe(address(4), address(5), address(6)));
+        vm.chainId(4663);
+        p.signers(x);
+        vm.chainId(10); // any other chain the armed guard lets through is held to the same rule
+        p.signers(x);
+    }
+
+    function test_Signers_OverlapRefused() public {
+        DeployBase.Expect memory x =
+            _x(_safe(address(1), address(2), address(3)), _safe(address(4), address(3), address(6)));
+        vm.chainId(4663);
+        vm.expectRevert(
+            abi.encodeWithSelector(DeployBase.CheckFailed.selector, "signers: owner and panel multisigs share a signer")
+        );
+        p.signers(x);
+    }
+
+    function test_Signers_DeployerAsOwnerRefused() public {
+        DeployBase.Expect memory x =
+            _x(_safe(address(1), address(0xD0), address(3)), _safe(address(4), address(5), address(6)));
+        vm.chainId(4663);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeployBase.CheckFailed.selector, "signers: the deployer is a signer of the owner multisig"
+            )
+        );
+        p.signers(x);
+        x = _x(_safe(address(1), address(2), address(3)), _safe(address(4), address(0xD0), address(6)));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeployBase.CheckFailed.selector, "signers: the deployer is a signer of the panel multisig"
+            )
+        );
+        p.signers(x);
+    }
+
+    function test_Signers_HotWalletsAsOwnerRefused() public {
+        DeployBase.Expect memory x =
+            _x(_safe(address(1), address(0xC0), address(3)), _safe(address(4), address(5), address(6)));
+        vm.chainId(4663);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeployBase.CheckFailed.selector,
+                "signers: the resolver creator (relayer) is a signer of the owner multisig"
+            )
+        );
+        p.signers(x);
+        x = _x(_safe(address(1), address(2), address(3)), _safe(address(4), address(0xEE), address(6)));
+        vm.setEnv("KEEPER_ADDRESS", vm.toString(address(0xEE)));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeployBase.CheckFailed.selector, "signers: the keeper is a signer of the panel multisig"
+            )
+        );
+        p.signers(x);
+        vm.setEnv("KEEPER_ADDRESS", vm.toString(address(0)));
+    }
+
+    function test_Signers_UnreadableOwnersRefused() public {
+        DeployBase.Expect memory x = _x(address(new LookAlikeSafe()), _safe(address(4), address(5), address(6)));
+        vm.chainId(4663);
+        vm.expectRevert(
+            abi.encodeWithSelector(DeployBase.CheckFailed.selector, "signers: cannot read the owner multisig owners")
+        );
+        p.signers(x);
+    }
+
+    function test_Signers_TestnetOnlyWarns() public {
+        address shared = _safe(address(1), address(0xD0), address(3));
+        DeployBase.Expect memory x = _x(shared, _safe(address(1), address(0xD0), address(3)));
+        vm.chainId(46630);
+        p.signers(x); // shared signers and the deployer as a signer: warnings only
+        vm.chainId(31337);
+        p.signers(_x(address(0x0A11), address(0x0A12))); // local: not applied (EOAs stand in for the Safes)
     }
 }
 

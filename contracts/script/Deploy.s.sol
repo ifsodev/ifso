@@ -144,8 +144,13 @@ contract Deploy is DeployBase {
 
     // ------------------------------------------------------------------ deployment record
     function _write(Deployed memory d, Expect memory x) internal {
-        string memory path = _deploymentPath();
-        string memory json = string.concat(
+        vm.writeFile(_deploymentPath(), _record(d, x));
+    }
+
+    /// @dev The deployment record as JSON. Every constructorArgs list must match the constructor exactly:
+    ///      PostDeployCheck compares it with the build ABI and the deployed wiring.
+    function _record(Deployed memory d, Expect memory x) internal view returns (string memory) {
+        return string.concat(
             "{\n",
             _kv("chainId", vm.toString(block.chainid), false),
             _kv("commit", vm.envOr("GIT_COMMIT", string("unknown")), true),
@@ -157,7 +162,6 @@ contract Deploy is DeployBase {
             _config(x),
             '  "txs": []\n}\n'
         );
-        vm.writeFile(path, json);
     }
 
     function _contracts(Deployed memory d, Expect memory x) internal pure returns (string memory) {
@@ -182,7 +186,9 @@ contract Deploy is DeployBase {
                     ", ",
                     _n(x.bond),
                     ", ",
-                    _q(x.panel)
+                    _q(x.panel),
+                    ", ",
+                    _q(address(d.router))
                 ),
                 false
             )

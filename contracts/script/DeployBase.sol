@@ -43,6 +43,8 @@ abstract contract DeployBase {
     /// @dev The Safe transaction guard slot.
     bytes32 internal constant SAFE_GUARD_SLOT = keccak256("guard_manager.guard.address");
     address internal constant SAFE_SENTINEL = address(0x1);
+    /// @dev forge's console.log address (prints from view code in scripts and tests).
+    address internal constant CONSOLE = 0x000000000000000000636F6e736F6c652e6c6f67;
 
     // ------------------------------------------------------------------ Robinhood Chain mainnet launch values
     // Hard-coded so PostDeployCheck never takes its expectations from the JSON the deploy itself wrote (audit Info).
@@ -181,6 +183,59 @@ abstract contract DeployBase {
         _check(vm.load(a, SAFE_GUARD_SLOT) == bytes32(0), string.concat(name, ": a Safe guard is set"));
     }
 
+    /// @notice Signer separation (owner Safe vs panel Safe vs hot keys). On every chain except testnet 46630 and a
+    ///         local chain (31337) the deploy and PostDeployCheck REFUSE when the owner Safe and the panel Safe share a
+    ///         signer, or when the deployer, the resolver creator (relayer) or a hot wallet named in KEEPER_ADDRESS /
+    ///         RESOLVER_ADDRESS is a signer of either Safe. A Safe whose owners cannot be read is refused. Testnet 46630
+    ///         is allowed (its two Safes share signers by design) and gets a printed warning instead.
+    function _checkSigners(Expect memory x) internal view {
+        if (block.chainid == 31337) return;
+        bool testnet = block.chainid == RHC_TESTNET;
+        address[] memory own = _safeOwners(x.ownerMultisig, "owner multisig");
+        address[] memory pan = _safeOwners(x.panel, "panel multisig");
+        for (uint256 i; i < own.length; ++i) {
+            for (uint256 j; j < pan.length; ++j) {
+                if (own[i] == pan[j]) {
+                    if (!testnet) revert CheckFailed("signers: owner and panel multisigs share a signer");
+                    _warn(string.concat("owner and panel multisigs share signer ", vm.toString(own[i])));
+                }
+            }
+        }
+        address[4] memory hot =
+            [x.deployer, x.creator, vm.envOr("KEEPER_ADDRESS", address(0)), vm.envOr("RESOLVER_ADDRESS", address(0))];
+        string[4] memory hotName = ["deployer", "resolver creator (relayer)", "keeper", "resolver hot wallet"];
+        for (uint256 h; h < 4; ++h) {
+            if (hot[h] == address(0)) continue;
+            bool inOwner = _contains(own, hot[h]);
+            bool inPanel = _contains(pan, hot[h]);
+            if (!inOwner && !inPanel) continue;
+            string memory what = string.concat(
+                "signers: the ", hotName[h], " is a signer of the ", inOwner ? "owner multisig" : "panel multisig"
+            );
+            if (!testnet) revert CheckFailed(what);
+            _warn(what);
+        }
+    }
+
+    function _safeOwners(address safe, string memory name) internal view returns (address[] memory owners) {
+        (bool ok, bytes memory ret) = safe.staticcall(abi.encodeWithSelector(ISafeLike.getOwners.selector));
+        _check(ok && ret.length >= 64, string.concat("signers: cannot read the ", name, " owners"));
+        owners = abi.decode(ret, (address[]));
+    }
+
+    function _contains(address[] memory list, address a) internal pure returns (bool) {
+        for (uint256 i; i < list.length; ++i) {
+            if (list[i] == a) return true;
+        }
+        return false;
+    }
+
+    /// @dev Prints "WARNING: ..." through forge's console (works from view code); never stops the run.
+    function _warn(string memory what) internal view {
+        (bool ok,) = CONSOLE.staticcall(abi.encodeWithSignature("log(string)", string.concat("WARNING: ", what)));
+        if (ok) return;
+    }
+
     function _checkPythOff(address pyth) internal view {
         _check(!_isRealChain() || pyth == address(0), "Pyth must be off (pyth = 0) on RHC in v1");
     }
@@ -245,6 +300,86 @@ abstract contract DeployBase {
         _check(keccak256(live) == keccak256(built), string.concat(name, ": runtime code differs from the build"));
     }
 
+    /// @notice The deployment record's `constructorArgs` for the four contracts are exactly what was deployed: one
+    ///         value per constructor input (count taken from the build ABI, so a new constructor argument without a
+    ///         matching record value fails), each equal to the deployed wiring. `x` must already be tied to the chain
+    ///         by `_assertDeployment`, and `a` holds evaluator, resolver, router, escrow.
+    function _checkConstructorArgs(string memory json, address[4] memory a, Expect memory x) internal view {
+        uint256[] memory e = new uint256[](3);
+        e[0] = uint160(x.deployer);
+        e[1] = uint160(x.pyth);
+        e[2] = uint160(x.seqFeed);
+        _checkArgs(json, "IfsoConditionEvaluator", e);
+        _checkArgs(json, "IfsoOutcomeResolver", _resolverArgs(x, a[2]));
+        e = new uint256[](6);
+        e[0] = uint160(x.deployer);
+        e[1] = uint160(x.usdg);
+        for (uint256 i; i < 4; ++i) {
+            e[2 + i] = uint160(x.feeRecipients[i]);
+        }
+        _checkArgs(json, "FeeRouter", e);
+        e = new uint256[](6);
+        e[0] = uint160(x.deployer);
+        e[1] = uint160(x.usdg);
+        e[2] = uint160(a[0]);
+        e[3] = uint160(a[2]);
+        e[4] = x.creationFee;
+        e[5] = x.resolverFee;
+        _checkArgs(json, "IfsoEscrow", e);
+    }
+
+    /// @dev IfsoOutcomeResolver(owner, bondToken, disputeWindow, panelWindow, bond, panel, feeRouter).
+    function _resolverArgs(Expect memory x, address router) internal pure returns (uint256[] memory e) {
+        e = new uint256[](7);
+        e[0] = uint160(x.deployer);
+        e[1] = uint160(x.usdg);
+        e[2] = x.disputeWindow;
+        e[3] = x.panelWindow;
+        e[4] = x.bond;
+        e[5] = uint160(x.panel);
+        e[6] = uint160(router);
+    }
+
+    /// @dev Compares `.contracts.<name>.constructorArgs` with `expected`, typed by the constructor inputs in the build
+    ///      ABI (`out/<name>.sol/<name>.json`): address inputs are parsed as addresses, the rest as uints.
+    function _checkArgs(string memory json, string memory name, uint256[] memory expected) internal view {
+        string memory art = vm.readFile(string.concat("out/", name, ".sol/", name, ".json"));
+        string memory ctor;
+        for (uint256 i;; ++i) {
+            string memory k = string.concat(".abi[", vm.toString(i), "]");
+            _check(vm.keyExistsJson(art, k), string.concat(name, ": no constructor in the build ABI"));
+            if (keccak256(bytes(vm.parseJsonString(art, string.concat(k, ".type")))) == keccak256("constructor")) {
+                ctor = k;
+                break;
+            }
+        }
+        _check(
+            !vm.keyExistsJson(art, string.concat(ctor, ".inputs[", vm.toString(expected.length), "]"))
+                && vm.keyExistsJson(art, string.concat(ctor, ".inputs[", vm.toString(expected.length - 1), "]")),
+            string.concat(name, ": the constructor's input count changed, update _checkConstructorArgs")
+        );
+        string memory base = string.concat(".contracts.", name, ".constructorArgs[");
+        for (uint256 j; j < expected.length; ++j) {
+            string memory key = string.concat(base, vm.toString(j), "]");
+            _check(
+                vm.keyExistsJson(json, key),
+                string.concat(name, ": constructorArgs[", vm.toString(j), "] missing from the record")
+            );
+            string memory t = vm.parseJsonString(art, string.concat(ctor, ".inputs[", vm.toString(j), "].type"));
+            uint256 v = keccak256(bytes(t)) == keccak256("address")
+                ? uint160(vm.parseJsonAddress(json, key))
+                : vm.parseJsonUint(json, key);
+            _check(
+                v == expected[j],
+                string.concat(name, ": constructorArgs[", vm.toString(j), "] differs from the deployment")
+            );
+        }
+        _check(
+            !vm.keyExistsJson(json, string.concat(base, vm.toString(expected.length), "]")),
+            string.concat(name, ": constructorArgs has more values than the constructor")
+        );
+    }
+
     /// @notice "Handed over" (REQUIRE_HANDED_OVER=1): the multisig has accepted ownership of every contract (no
     ///         pending owner left) and the deployer key holds no role anywhere: not owner, not pending owner, not
     ///         question creator, not panel or pending panel, not a registered resolver, not a fee recipient.
@@ -286,6 +421,7 @@ abstract contract DeployBase {
         _checkMultisig(x.ownerMultisig, "owner multisig");
         _checkMultisig(x.panel, "panel multisig");
         _check(x.ownerMultisig != x.panel, "owner and panel must be different signer sets");
+        _checkSigners(x);
 
         _checkOwner(address(evaluator), x, "evaluator");
         _checkOwner(address(resolver), x, "resolver");

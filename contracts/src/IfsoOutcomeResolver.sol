@@ -96,7 +96,9 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
         address panel_,
         address feeRouter_
     ) Owned2Step(owner_) {
-        if (bondToken_ == address(0) || panel_ == address(0) || feeRouter_ == address(0)) revert ZeroAddress();
+        if (bondToken_ == address(0) || panel_ == address(0) || feeRouter_ == address(0)) {
+            revert ZeroAddress();
+        }
         if (disputeWindow_ < 30 minutes || disputeWindow_ > 7 days) revert BadQuestion();
         if (panelWindow_ < 1 days || panelWindow_ > 14 days) revert BadQuestion();
         if (bond_ < MIN_BOND || bond_ > MAX_BOND) revert BondOutOfBounds();

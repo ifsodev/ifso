@@ -32,6 +32,23 @@ contract PostDeployProbe is DeployBase {
     }
 }
 
+/// @notice Exposes the deployment record exactly as Deploy.s.sol writes it (without touching the file).
+contract DeployRecordProbe is Deploy {
+    function record(Deployed memory d, Expect memory x) external view returns (string memory) {
+        return _record(d, x);
+    }
+
+    function resolverArgs(string memory json, Deploy.Deployed memory d, Expect memory x) external view {
+        _checkArgs(json, "IfsoOutcomeResolver", _resolverArgs(x, address(d.router)));
+    }
+
+    function constructorArgs(string memory json, Deploy.Deployed memory d, Expect memory x) external view {
+        _checkConstructorArgs(
+            json, [address(d.evaluator), address(d.resolver), address(d.router), address(d.escrow)], x
+        );
+    }
+}
+
 /// @notice PostDeployCheck readiness: hard-coded 4663 launch values, runtime bytecode against the build, and the
 ///         "handed over" mode. The full script runs against a local anvil fork in script/fork-dryrun.sh.
 contract PostDeployCheckTest is TestBase {
@@ -51,7 +68,7 @@ contract PostDeployCheckTest is TestBase {
     function test_PostDeploy_RuntimeCodeMatchesBuild() public {
         _setEnv();
         vm.chainId(31337);
-        Deploy.Deployed memory d = new Deploy().run();
+        Deploy.Deployed memory d = Deploy(_deployArtifact("Deploy.s.sol:Deploy")).run();
         PostDeployProbe p = new PostDeployProbe();
         p.runtimeCode(address(d.evaluator), "IfsoConditionEvaluator");
         p.runtimeCode(address(d.resolver), "IfsoOutcomeResolver");
@@ -103,7 +120,7 @@ contract PostDeployCheckTest is TestBase {
     function test_PostDeploy_HandedOverMode() public {
         _setEnv();
         vm.chainId(31337);
-        Deploy.Deployed memory d = new Deploy().run();
+        Deploy.Deployed memory d = Deploy(_deployArtifact("Deploy.s.sol:Deploy")).run();
         PostDeployProbe p = new PostDeployProbe();
         DeployBase.Expect memory x;
         x.deployer = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38; // forge's default broadcaster in tests
@@ -137,5 +154,109 @@ contract PostDeployCheckTest is TestBase {
         d.router.acceptOwnership();
         d.escrow.acceptOwnership();
         vm.stopPrank();
+    }
+}
+
+/// @notice The deployment record against the deployed constructor arguments (own contract: the test contract that
+///         embeds the full deploy twice would pass the code size limit).
+contract DeployRecordTest is TestBase {
+    function _setEnv() internal {
+        vm.setEnv("OWNER_MULTISIG", vm.toString(address(0x0A11)));
+        vm.setEnv("PANEL_MULTISIG", vm.toString(address(0x0A12)));
+        vm.setEnv("RESOLVER_CREATOR", vm.toString(address(0x0A13)));
+        vm.setEnv("FEE_WORK", vm.toString(address(0xF1)));
+        vm.setEnv("FEE_TREASURY", vm.toString(address(0xF2)));
+        vm.setEnv("FEE_PERKS", vm.toString(address(0xF3)));
+        vm.setEnv("FEE_BURN", vm.toString(address(0xF4)));
+        vm.setEnv("IFSO_WRITE_DEPLOYMENT", "0");
+    }
+
+    /// @notice The record Deploy.s.sol writes carries every constructor argument of every contract (the resolver's
+    ///         7th, feeRouter, was missing in the 2026-11-05 testnet record), and PostDeployCheck compares each one
+    ///         against the constructor ABI and the deployed wiring: a missing, extra or wrong value fails.
+    function test_PostDeploy_RecordConstructorArgsMatchDeployment() public {
+        _setEnv();
+        vm.chainId(31337);
+        DeployRecordProbe r = new DeployRecordProbe();
+        Deploy.Deployed memory d = r.run();
+        DeployBase.Expect memory x = _localExpect(d);
+        DeployRecordProbe p = r;
+        string memory json = r.record(d, x);
+        assertEq(
+            vm.parseJsonAddress(json, ".contracts.IfsoOutcomeResolver.constructorArgs[6]"),
+            address(d.router),
+            "resolver arg 7 = feeRouter"
+        );
+        p.constructorArgs(json, d, x);
+
+        // a record whose resolver entry has only 6 values (the old writer) fails
+        string memory six = string.concat(
+            '{"contracts": {"IfsoOutcomeResolver": {"constructorArgs": [',
+            '"',
+            vm.toString(x.deployer),
+            '", "',
+            vm.toString(x.usdg),
+            '", 7200, 259200, ',
+            vm.toString(uint256(x.bond)),
+            ', "',
+            vm.toString(x.panel),
+            '"]}}}'
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeployBase.CheckFailed.selector, "IfsoOutcomeResolver: constructorArgs[6] missing from the record"
+            )
+        );
+        p.resolverArgs(six, d, x);
+
+        // a recorded value that differs from the deployment fails
+        DeployBase.Expect memory y = _localExpect(d);
+        y.panel = address(0xBAD);
+        string memory wrong = r.record(d, y);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeployBase.CheckFailed.selector, "IfsoOutcomeResolver: constructorArgs[5] differs from the deployment"
+            )
+        );
+        p.constructorArgs(wrong, d, x);
+
+        // an extra value fails
+        string memory eight = string.concat(
+            '{"contracts": {"IfsoOutcomeResolver": {"constructorArgs": [',
+            '"',
+            vm.toString(x.deployer),
+            '", "',
+            vm.toString(x.usdg),
+            '", 7200, 259200, ',
+            vm.toString(uint256(x.bond)),
+            ', "',
+            vm.toString(x.panel),
+            '", "',
+            vm.toString(address(d.router)),
+            '", 1]}}}'
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DeployBase.CheckFailed.selector,
+                "IfsoOutcomeResolver: constructorArgs has more values than the constructor"
+            )
+        );
+        p.resolverArgs(eight, d, x);
+    }
+
+    /// @dev What Deploy.s.sol builds internally for the local run in `_setEnv`.
+    function _localExpect(Deploy.Deployed memory d) internal view returns (DeployBase.Expect memory x) {
+        x.deployer = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38; // forge's default broadcaster in tests
+        x.ownerMultisig = address(0x0A11);
+        x.panel = address(0x0A12);
+        x.creator = address(0x0A13);
+        x.usdg = address(d.escrow.usdg());
+        x.feeRecipients = [address(0xF1), address(0xF2), address(0xF3), address(0xF4)];
+        x.creationFee = d.escrow.creationFee();
+        x.resolverFee = d.escrow.resolverFee();
+        x.bond = d.resolver.bondAmount();
+        x.maxAmount = d.escrow.maxAmount();
+        x.disputeWindow = d.resolver.disputeWindow();
+        x.panelWindow = d.resolver.panelWindow();
     }
 }

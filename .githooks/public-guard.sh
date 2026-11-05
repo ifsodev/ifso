@@ -47,12 +47,49 @@ while IFS= read -r f; do
 done <<< "$files"
 
 text_files=$(echo "$files" | grep -vE '\.(png|jpg|jpeg|webp|gif|ico|lock|lockb)$' | grep -vxF "${deny_rel:-//none//}" || true)
-if [ -n "$text_files" ]; then
+# Deployment records (contracts/deployments/<chainId>.json and the site's byte-for-byte copy) must carry public
+# transaction hashes, and JSON has no comment for a marker. They get a structural check instead of the line grep:
+# a 64-hex value is accepted ONLY as an exact 0x + 64 hex string under a key that names a tx or block hash
+# (creationTx, hash, txHash, transactionHash, blockHash, <name>Tx, <name>TxHash, <name>BlockHash) or as an entry of
+# a "txs" array/object, and never under a key that sounds like a secret (key, secret, priv, mnemonic, seed, pass,
+# sign). Any other 64-hex run in those files (other keys, bare hex, notes text, object keys) fails, as does a record
+# that is not valid JSON or a machine without jq.
+deploy_re='^(contracts/deployments|web/src/config/deployments)/[^/]+\.json$'
+deploy_files=$(echo "$text_files" | grep -E "$deploy_re" || true)
+hex_files=$(echo "$text_files" | grep -vE "$deploy_re" || true)
+if [ -n "$deploy_files" ]; then
+  if ! command -v jq >/dev/null 2>&1; then
+    flag "jq not found: cannot check the deployment records for private-key-shaped values"
+  else
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      bad=$(jq -r '
+        def hex64: test("[0-9a-fA-F]{64}");
+        def txkey: type == "string"
+          and test("^(creationTx|hash|txHash|transactionHash|blockHash|[A-Za-z]+(Tx|TxHash|TransactionHash|BlockHash))$")
+          and (test("key|secret|priv|mnemonic|seed|pass|sign"; "i") | not);
+        def allowed($p): ($p[-1] | txkey)
+          or ($p | length >= 2 and .[-2] == "txs"
+              and (($p[-1] | type) == "number" or ($p[-1] | test("key|secret|priv|mnemonic|seed|pass|sign"; "i") | not)));
+        ( paths(type == "string") as $p | getpath($p) as $v | select($v | hex64)
+          | select((($v | test("^0x[0-9a-fA-F]{64}$")) and allowed($p)) | not)
+          | "value at ." + ($p | map(tostring) | join(".")) ),
+        ( [paths[] | strings | select(hex64)] | unique[] | "object key " + . )' "$f" 2>/dev/null) \
+        || { flag "$f: deployment record is not valid JSON (cannot check it for private keys)"; continue; }
+      while IFS= read -r b; do
+        [ -n "$b" ] && flag "possible private key in deployment record $f: $b"
+      done <<< "$bad"
+    done <<< "$deploy_files"
+  fi
+fi
+if [ -n "$hex_files" ]; then
   tmp=$(mktemp "${TMPDIR:-/tmp}/public-guard.XXXXXX")
   # 32-byte hex = possible private key. Allowed only with a marker on the same line.
-  echo "$text_files" | tr '\n' '\0' | xargs -0 grep -nIE '0x[0-9a-fA-F]{64}' 2>/dev/null \
+  echo "$hex_files" | tr '\n' '\0' | xargs -0 grep -nIE '0x[0-9a-fA-F]{64}' 2>/dev/null \
     | grep -vE '// (test-key|not-a-key)|# (test-key|not-a-key)' | while IFS= read -r l; do echo "public-guard: possible private key: $l"; done > "$tmp"
   if [ -s "$tmp" ]; then cat "$tmp"; hits=$((hits+$(wc -l < "$tmp"))); fi; rm -f "$tmp"
+fi
+if [ -n "$text_files" ]; then
   while IFS= read -r pat; do
     [ -z "$pat" ] && continue
     m=$(echo "$text_files" | tr '\n' '\0' | xargs -0 grep -nIiE -- "$pat" 2>/dev/null | head -5)

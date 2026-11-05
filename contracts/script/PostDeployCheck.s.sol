@@ -18,6 +18,8 @@ import {FeeRouter} from "../src/FeeRouter.sol";
 ///     EXPECT_OWNER_MULTISIG, EXPECT_PANEL_MULTISIG, EXPECT_RESOLVER_CREATOR and EXPECT_FEE_WORK / _TREASURY /
 ///     _PERKS / _BURN; the JSON must agree with each pin.
 ///   - Runtime bytecode of all four contracts equals the build output, immutables masked.
+///   - Every contract's recorded constructorArgs match the constructor (input count from the build ABI) and the
+///     deployed wiring, so the record can be used to verify source and to rebuild the deploy.
 ///   - On 4663 the deployment record carries the creation tx hash of every contract.
 ///   - REQUIRE_HANDED_OVER=1: the multisig accepted ownership everywhere and the deployer holds no role. Without the
 ///     flag the check passes both before and after the multisig accepts.
@@ -42,6 +44,7 @@ contract PostDeployCheck is DeployBase {
             }
         }
         _assertDeployment(IfsoConditionEvaluator(a[0]), IfsoOutcomeResolver(a[1]), FeeRouter(a[2]), IfsoEscrow(a[3]), x);
+        _checkConstructorArgs(json, a, x);
         if (keccak256(bytes(vm.envOr("REQUIRE_HANDED_OVER", string("0")))) == keccak256("1")) {
             _checkHandedOver(
                 IfsoConditionEvaluator(a[0]), IfsoOutcomeResolver(a[1]), FeeRouter(a[2]), IfsoEscrow(a[3]), x

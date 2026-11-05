@@ -20,7 +20,7 @@ contract AuditI16StrictTimesTest is IfsoFixture {
         resolver.createQuestion(keccak256("same-second"), kickoff, kickoff, 3, "");
         bytes32 qid = resolver.createQuestion(keccak256("next-second"), kickoff, kickoff + 1, 3, "");
         vm.stopPrank();
-        (, , uint64 closeTime, uint64 earliest) = resolver.questionInfo(qid);
+        (,, uint64 closeTime, uint64 earliest) = resolver.questionInfo(qid);
         assertTrue(earliest > closeTime, "earliestResolve strictly after closeTime");
     }
 

@@ -158,9 +158,8 @@ contract FeeRouterInvariantsTest is TestBase {
         stray = new MockUSDG();
         router = new FeeRouter(OWNER, address(usdg), pool[0], pool[1], pool[2], pool[3]);
         handler = new FeeRouterHandler(router, usdg, stray, OWNER, pool);
-        IfsoOutcomeResolver resolver = new IfsoOutcomeResolver(
-            OWNER, address(usdg), 2 hours, 72 hours, 100e6, handler.R_PANEL(), address(router)
-        );
+        IfsoOutcomeResolver resolver =
+            new IfsoOutcomeResolver(OWNER, address(usdg), 2 hours, 72 hours, 100e6, handler.R_PANEL(), address(router));
         address rCreator = handler.R_CREATOR();
         vm.prank(OWNER);
         resolver.setCreator(rCreator, true);

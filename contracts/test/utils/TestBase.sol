@@ -81,6 +81,16 @@ abstract contract TestBase {
 
     error AssertionFailed(string what);
 
+    /// @dev Deploys a contract from its build artifact (e.g. "Deploy.s.sol:Deploy"), so the calling test contract does
+    ///      not embed that contract's creation code (the full deploy script is ~80 KB; two of them pass the size limit).
+    function _deployArtifact(string memory artifact) internal returns (address a) {
+        bytes memory code = vm.getCode(artifact);
+        assembly {
+            a := create(0, add(code, 0x20), mload(code))
+        }
+        if (a == address(0)) revert AssertionFailed(string.concat("deploy failed: ", artifact));
+    }
+
     function fail(string memory what) internal pure {
         revert AssertionFailed(what);
     }

@@ -1,14 +1,17 @@
 // Periodic checks that raise ops alerts. Thresholds are exported so tests can assert them.
-import { and, eq, gt, gte, inArray, lt, lte, sql, type SQL } from "drizzle-orm";
-import { formatEther, formatUnits, type Address } from "viem";
+import { and, asc, eq, gt, gte, inArray, lt, lte, sql, type SQL } from "drizzle-orm";
+import { formatEther, formatUnits, type Address, type Hex } from "viem";
 import { erc20Abi } from "viem";
 import { aggregatorV3Abi } from "../abi/external";
 import { SEED_FEEDS, type FeedInfo } from "../config/chain";
 import type { Env } from "../config/env";
 import { escrows, questions, cursors, chainEvents } from "../db/schema";
 import { isStockFeedSession, stockFeedOpenSeconds } from "../core/price";
-import { Kind, PRICE_TOUCH, Status } from "../core/types";
+import { Kind, PRICE_AT_DEADLINE, PRICE_TOUCH, SRC_PYTH, Status, Verdict, type Condition } from "../core/types";
+import { ifsoOutcomeResolverAbi } from "../abi";
 import type { Deps } from "../workers/deps";
+import { conditionFromJson } from "../workers/keeper";
+import { chainSource, decideAtDeadline } from "../workers/rounds";
 import type { AlertFn } from "./alerts";
 
 export const KEEPER_LAG_MS = 10 * 60 * 1000;
@@ -28,14 +31,87 @@ export const indexerBehind = (head: bigint, cursor: bigint) => head - cursor > I
  */
 export const keeperShouldHaveSettled = (row: { kind: number; condition: unknown }) =>
   !(row.kind === Kind.PRICE && Number((row.condition as { mode?: unknown } | null)?.mode) === PRICE_TOUCH);
+/** What keeper-lag needs to know about an open row past its deadline. */
+export interface LagRow {
+  id: string;
+  kind: number;
+  condition: unknown;
+  questionId: string | null;
+  twoSided: boolean;
+  accepted: boolean;
+  activeFrom: Date;
+}
+/** Read-only answers keeper-lag asks before counting a row (injected in tests). */
+export interface LagProbe {
+  /** The verdict the evaluator would give an AT_DEADLINE price now (the keeper's own off-chain mirror). */
+  priceVerdict(c: Condition, createdAt: bigint, now: bigint): Promise<Verdict>;
+  /** IfsoOutcomeResolver state of a question (4 FINAL, 5 VOID). */
+  outcomeState(resolver: Address, questionId: Hex): Promise<number>;
+}
+const RESOLVER_FINAL = 4;
+const RESOLVER_VOID = 5;
+
+/**
+ * Testnet run 2026-11-05 (step 70): an open row past its deadline is lagging only if the keeper could settle it NOW.
+ * Undecidable by design, so not counted: an untouched TOUCH (see above); an AT_DEADLINE price whose evaluator verdict is
+ * still PENDING (stale at the deadline and waiting for the first print inside holdWindow, or the next round not readable
+ * yet); an OUTCOME whose question is not FINAL or VOID, or that has no question; an unaccepted challenge (it only refunds
+ * at expiry). Once the print lands, or the hold window ends (VOID), the row counts again. A probe that fails counts the
+ * row: a broken read must raise the alert, not hide it.
+ */
+export async function keeperCanSettleNow(row: LagRow, now: bigint, probe: LagProbe): Promise<boolean> {
+  if (!keeperShouldHaveSettled(row)) return false;
+  if (row.twoSided && !row.accepted) return false;
+  try {
+    if (row.kind === Kind.PRICE) {
+      const c = conditionFromJson(row.condition as Record<string, unknown>);
+      if (c.mode !== PRICE_AT_DEADLINE || c.source === SRC_PYTH) return true;
+      const createdAt = BigInt(Math.floor(row.activeFrom.getTime() / 1000));
+      return (await probe.priceVerdict(c, createdAt, now)) !== Verdict.PENDING;
+    }
+    if (row.kind === Kind.OUTCOME) {
+      if (!row.questionId) return false;
+      const resolver = conditionFromJson(row.condition as Record<string, unknown>).target;
+      const state = await probe.outcomeState(resolver, row.questionId as Hex);
+      return state === RESOLVER_FINAL || state === RESOLVER_VOID;
+    }
+  } catch {
+    return true;
+  }
+  return true;
+}
+
+/** The probe against the chain: feed rounds read directly (no price_rounds cache write) and the resolver's outcomeOf. */
+export const chainLagProbe = (deps: Deps): LagProbe => ({
+  // the multiplier only turns TRUE/FALSE into VOID, never PENDING into decidable, so the snapshot stands in for it
+  priceVerdict: async (c, createdAt, now) =>
+    (await decideAtDeadline(chainSource(deps, c.target), c, { now, createdAt, currentMultiplier: c.multiplier })).verdict,
+  outcomeState: async (resolver, questionId) => {
+    const [state] = await deps.clients.publicClient.readContract({ address: resolver, abi: ifsoOutcomeResolverAbi, functionName: "outcomeOf", args: [questionId] });
+    return Number(state);
+  },
+});
+const LAG_SCAN = 50; // open rows past the cutoff looked at per run (oldest deadline first)
+
 export const lowBalance = (wei: bigint, minEth: number) => Number(formatEther(wei)) < minEth;
 
 export async function runMonitors(deps: Deps, alert: AlertFn, now = new Date()) {
   const { db, clients, env } = deps;
   // keeper lag: an escrow whose deadline passed more than 10 minutes ago is still open
   const cutoff = new Date(now.getTime() - KEEPER_LAG_MS);
-  const lagging = (await db.select({ id: escrows.id, kind: escrows.kind, condition: escrows.condition }).from(escrows).where(and(eq(escrows.status, Status.OPEN), lt(escrows.deadline, cutoff), sql`not (${escrows.kind} = ${Kind.PRICE} and ${escrows.condition}->>'mode' = ${String(PRICE_TOUCH)})`)).limit(5))
-    .filter(keeperShouldHaveSettled); // same rule as the SQL above, kept as the unit-tested definition
+  const candidates = await db
+    .select({ id: escrows.id, kind: escrows.kind, condition: escrows.condition, questionId: escrows.questionId, twoSided: escrows.twoSided, accepted: escrows.accepted, activeFrom: escrows.activeFrom })
+    .from(escrows)
+    .where(and(eq(escrows.status, Status.OPEN), lt(escrows.deadline, cutoff), sql`not (${escrows.kind} = ${Kind.PRICE} and ${escrows.condition}->>'mode' = ${String(PRICE_TOUCH)})`))
+    .orderBy(asc(escrows.deadline))
+    .limit(LAG_SCAN);
+  const probe = chainLagProbe(deps);
+  const nowSec = BigInt(Math.floor(now.getTime() / 1000));
+  const lagging: LagRow[] = [];
+  for (const r of candidates) {
+    if (lagging.length >= 5) break;
+    if (await keeperCanSettleNow(r, nowSec, probe)) lagging.push(r); // includes keeperShouldHaveSettled (SQL above)
+  }
   if (lagging.length) await alert("keeper-lag", `escrows decidable for over 10 minutes and not settled: ${lagging.map((r) => r.id).join(", ")}`);
 
   const earliest = new Date(now.getTime() - RESOLVER_UNPROPOSED_MS);

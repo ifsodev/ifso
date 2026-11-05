@@ -9,7 +9,8 @@
         "0x4d5395EAA992D1bd629821337147CC3dDf8303C0",
         "0x0000000000000000000000000000000000000000",
         "0x0000000000000000000000000000000000000000"
-      ]
+      ],
+      "creationTx": "0xbc2283b2e431cdc82286403a4b87387213b91e2c1cb7065cdf23f117fbaa95cf"
     },
     "IfsoOutcomeResolver": {
       "address": "0x566f2CF9745De48D7A75e10840B877344a924C96",
@@ -21,7 +22,8 @@
         100000000,
         "0x56A07C4571859278996BE577c82785cD6943e2cd",
         "0xd469C867A8F4331EF143a04DAbA5C03a77cAbE8B"
-      ]
+      ],
+      "creationTx": "0x4b3bf83c366548245b0020c853e05af28b1729bee67bc1848774fb4c078c4107"
     },
     "FeeRouter": {
       "address": "0xd469C867A8F4331EF143a04DAbA5C03a77cAbE8B",
@@ -32,7 +34,8 @@
         "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
         "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
         "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995"
-      ]
+      ],
+      "creationTx": "0xc7bfc35899b21de0acc45a31201629c7a13743939f8fafda7375ef5fb1dcabd9"
     },
     "IfsoEscrow": {
       "address": "0x154Fb83621180f9Dfe80EC3382107C864e79626F",
@@ -43,7 +46,8 @@
         "0xd469C867A8F4331EF143a04DAbA5C03a77cAbE8B",
         250000,
         500000
-      ]
+      ],
+      "creationTx": "0x549dc71116a6b77f407604e8297ce331629461e5ad7069e952fee631af80eb42"
     }
   },
   "config": {
@@ -70,16 +74,109 @@
       "0x0000000000000000000000000000000000000000"
     ]
   },
-  "txs": [],
+  "txs": [
+    {
+      "hash": "0xbc2283b2e431cdc82286403a4b87387213b91e2c1cb7065cdf23f117fbaa95cf",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0xb25c7c279bbc096daa57cecafb231cc5dee9553a",
+      "function": null,
+      "gasUsed": 2860828
+    },
+    {
+      "hash": "0xc7bfc35899b21de0acc45a31201629c7a13743939f8fafda7375ef5fb1dcabd9",
+      "contractName": "FeeRouter",
+      "contractAddress": "0xd469c867a8f4331ef143a04daba5c03a77cabe8b",
+      "function": null,
+      "gasUsed": 734500
+    },
+    {
+      "hash": "0x4b3bf83c366548245b0020c853e05af28b1729bee67bc1848774fb4c078c4107",
+      "contractName": "IfsoOutcomeResolver",
+      "contractAddress": "0x566f2cf9745de48d7a75e10840b877344a924c96",
+      "function": null,
+      "gasUsed": 1945015
+    },
+    {
+      "hash": "0x549dc71116a6b77f407604e8297ce331629461e5ad7069e952fee631af80eb42",
+      "contractName": "IfsoEscrow",
+      "contractAddress": "0x154fb83621180f9dfe80ec3382107c864e79626f",
+      "function": null,
+      "gasUsed": 5331641
+    },
+    {
+      "hash": "0xed5862e48bf8759c6e9282c6b4fcfc373658bd46c84c291beb8e6985f10c70cd",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0xb25c7c279bbc096daa57cecafb231cc5dee9553a",
+      "function": "setFeed(address,bool,address)",
+      "gasUsed": 50642
+    },
+    {
+      "hash": "0x19f7e7b509cfd4b1f1531d2e1a216525ee452c186700eb470407568a44df5879",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0xb25c7c279bbc096daa57cecafb231cc5dee9553a",
+      "function": "setResolver(address,bool)",
+      "gasUsed": 47838
+    },
+    {
+      "hash": "0x57706fda6e3c093b0013466c9ac47a0b70514944e1c2cca14e9e16ecd1bc6dc0",
+      "contractName": "IfsoOutcomeResolver",
+      "contractAddress": "0x566f2cf9745de48d7a75e10840b877344a924c96",
+      "function": "setCreator(address,bool)",
+      "gasUsed": 47838
+    },
+    {
+      "hash": "0xf6cc81b5d461bc234347f1c93854bd6c0ad8684e83adabce5d7c861cca1825d7",
+      "contractName": "IfsoEscrow",
+      "contractAddress": "0x154fb83621180f9dfe80ec3382107c864e79626f",
+      "function": "setMaxAmount(uint96)",
+      "gasUsed": 30035
+    },
+    {
+      "hash": "0xc490dbf8f9cf68467b0ea3e64d2f0c19635c5e9de2d3c898649490cb3a2f9d51",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0xb25c7c279bbc096daa57cecafb231cc5dee9553a",
+      "function": "transferOwnership(address)",
+      "gasUsed": 47763
+    },
+    {
+      "hash": "0xd5c64314b9d735d4d6e321b698c88718db4dfa5c5a4b6a8480cedbc6f72723ae",
+      "contractName": "IfsoOutcomeResolver",
+      "contractAddress": "0x566f2cf9745de48d7a75e10840b877344a924c96",
+      "function": "transferOwnership(address)",
+      "gasUsed": 47803
+    },
+    {
+      "hash": "0xbdebcac99c74b94f3eab9ef70ade4dd729608ac85bd611b5959ab779c833c6cc",
+      "contractName": "FeeRouter",
+      "contractAddress": "0xd469c867a8f4331ef143a04daba5c03a77cabe8b",
+      "function": "transferOwnership(address)",
+      "gasUsed": 47737
+    },
+    {
+      "hash": "0x27396018dc2bd221cb98159cbf36e8dc7ffcc2ddcf9aedcd34a496a858fedbcc",
+      "contractName": "IfsoEscrow",
+      "contractAddress": "0x154fb83621180f9dfe80ec3382107c864e79626f",
+      "function": "transferOwnership(address)",
+      "gasUsed": 30654
+    }
+  ],
   "gasUsedTotal": 11222294,
   "deployBlock": 149079876,
+  "ownershipAccepted": {
+    "by": "0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995",
+    "txs": {
+      "IfsoConditionEvaluator": "0xd5583834559bf37a3f4e3282e508f823764bf5c7c507ea282721bdaaa287e6db",
+      "IfsoOutcomeResolver": "0x0a212e7a81bbcb6e746701d278c61886a075ad19d7f18867b9a9d562fb1fc69e",
+      "FeeRouter": "0x1e4367f51fd3a74570d42c2618e69f8ae05c585cce23c552d9596005f451a890",
+      "IfsoEscrow": "0x57f7d48e385a7f988cdbf4b45acf002e46eaaadc5b7ad46a7561dfa929dcdbb0"
+    }
+  },
   "notes": [
     "Testnet v2, deployed 2026-11-05 from commit 2cd783d (M-1 bond split: the resolver takes the FeeRouter as its 7th constructor argument; I-16 evaluator fix). Replaces the v1 rehearsal deployment of commit 24cb593 (escrow 0x7FFf1cE34532f76A6aFEb53E503891e671f891d6), which stays on chain with test tokens only.",
     "Test token and feed reused from v1: MockUSDG 0x857315614841c5d537a5F395f020fc5bCa0fdaC6 and the mock ETH/USD feed 0x6ba540c3638cac8047599dA9fB09c03BE834b725.",
     "config.resolverCreator is the relayer 0x8aB1F0895B2012Db89Caf62e5b67E81137853ad0 from deploy time (DECISIONS #40).",
     "The owner multisig accepted ownership of all 4 contracts (txs in ownershipAccepted); PostDeployCheck passes in pending and REQUIRE_HANDED_OVER=1 modes.",
     "Testnet only: the owner multisig and the panel multisig have the same 3 signers (2 of 3). The mainnet panel multisig will have different signers.",
-    "Sourcify 2026-11-05 (script/verify-sourcify.sh 46630, creation txs from the broadcast file): match, creationMatch and runtimeMatch = match for all 4. exact_match is not reachable: foundry.toml sets bytecode_hash = \"none\".",
-    "Transaction hashes (creation txs, wiring calls, the Safe acceptOwnership calls) are kept out of this public file (the public guard refuses 64-hex values); they are in the private deployment notes and on the explorer from the deployer 0x4d5395EAA992D1bd629821337147CC3dDf8303C0."
+    "Sourcify 2026-11-05 (script/verify-sourcify.sh 46630, creation txs from the broadcast file): match, creationMatch and runtimeMatch = match for all 4. exact_match is not reachable: foundry.toml sets bytecode_hash = \"none\"."
   ]
 }

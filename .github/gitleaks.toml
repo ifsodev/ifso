@@ -18,3 +18,15 @@ regexes = [
   '''0x[0-9a-fA-F]{64}\b''',
   '''"0x[0-9a-fA-F]{40}"''',
 ]
+
+[[allowlists]]
+description = "public transaction and block hashes in the deployment records (contracts/deployments and the web copy); same keys the public guard accepts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''^(contracts/deployments|web/src/config/deployments)/[^/]+\.json$''',
+]
+regexTarget = "line"
+regexes = [
+  '''^\s*\{?\s*"(creationTx|hash|txHash|transactionHash|blockHash|deployBlockHash|IfsoConditionEvaluator|IfsoOutcomeResolver|FeeRouter|IfsoEscrow)": "0x[0-9a-fA-F]{64}",?\s*\}?,?\s*$''',
+]
