@@ -207,6 +207,23 @@ async function intentForBuild(ctx: Ctx, intentId: string, sender: Address) {
   return it;
 }
 
+/** Audit L-9: writes a verified create into its intent (params, escrowId, txHash). False when `from` is not the owner. */
+async function submitIntent(ctx: Ctx, intentId: string, from: Address, p: CreateParams, txHash: Hex): Promise<boolean> {
+  const me = from.toLowerCase();
+  const [it] = await ctx.deps.db.select({ tgId: intents.tgId, sender: intents.sender }).from(intents).where(eq(intents.id, intentId));
+  if (!it) return false;
+  const [user] = it.tgId == null ? [] : await ctx.deps.db.select({ address: tgUsers.address }).from(tgUsers).where(eq(tgUsers.tgId, it.tgId));
+  const owner = user?.address ?? it.sender;
+  if (!owner || owner.toLowerCase() !== me) return false;
+  const open = and(eq(intents.id, intentId), inArray(intents.state, ["draft", "built"]));
+  const moved = await ctx.deps.db
+    .update(intents)
+    .set({ params: jsonSafe(p), sender: me, escrowId: escrowId(from, p.salt).toString(), state: "submitted", txHash })
+    .where(open)
+    .returning({ id: intents.id });
+  return moved.length > 0;
+}
+
 const buildInput = z.object({
   text: z.string().min(3).max(300).optional(),
   intentId: z.string().uuid().optional(),
@@ -377,9 +394,11 @@ export const appRouter = t.router({
     const nonce = createAuthNonce(input.sender, params);
     const id = escrowId(input.sender, params.salt);
     if (input.intentId) {
+      // audit L-9: the typed sender proves nothing, so build only claims an unclaimed intent for that wallet. Params and
+      // escrowId are written in `submit`, after the signature check, never here.
       const me = input.sender.toLowerCase();
-      const owned = and(eq(intents.id, input.intentId), inArray(intents.state, ["draft", "built"]), or(isNull(intents.sender), eq(intents.sender, me)));
-      await deps.db.update(intents).set({ params: jsonSafe(params), sender: me, escrowId: id.toString(), state: "built" }).where(owned);
+      const unclaimed = and(eq(intents.id, input.intentId), inArray(intents.state, ["draft", "built"]), or(isNull(intents.sender), eq(intents.sender, me)));
+      await deps.db.update(intents).set({ sender: me, state: "built" }).where(unclaimed);
     }
     return jsonSafe({
       id,
@@ -422,10 +441,10 @@ export const appRouter = t.router({
       const r = await sendCall(ctx.deps, ctx.deps.clients.relayer, call as never, { kind: "create", escrowId: escrowId(input.from, p.salt).toString(), ipHash });
       if (!r.ok) throw new TRPCError({ code: "BAD_REQUEST", message: r.error ?? "create failed" });
       if (input.intentId) {
-        // audit L-1: only the intent this sender built for exactly this escrow moves to submitted (and binds notifications)
-        const mine = and(eq(intents.id, input.intentId), eq(intents.state, "built"), eq(intents.sender, input.from.toLowerCase()), eq(intents.escrowId, escrowId(input.from, p.salt).toString()));
-        const moved = await ctx.deps.db.update(intents).set({ state: "submitted", txHash: r.hash }).where(mine).returning({ id: intents.id });
-        if (moved.length) await rememberSender(ctx.deps, input.intentId, input.from).catch(() => {}); // notifications are a convenience: never fail a create over them
+        // audit L-1 / L-9: only the intent's owner (the bot user's linked wallet, else the wallet that claimed it in build)
+        // moves it to submitted, and only here, after the signature check: params and escrowId come from the signed create
+        const moved = await submitIntent(ctx, input.intentId, input.from, p, r.hash as Hex).catch(() => false);
+        if (moved) await rememberSender(ctx.deps, input.intentId, input.from).catch(() => {}); // notifications are a convenience: never fail a create over them
       }
       return { txHash: r.hash, id: escrowId(input.from, p.salt).toString() };
     }),
