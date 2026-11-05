@@ -82,7 +82,8 @@ ROOT_REPO="${ROOT_REPO:-/var/lib/ifso-release-root/private.git}"
 QUEUE_REPO="${QUEUE_REPO:-}"
 sgit() {
   GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -C "$ROOT_REPO" \
-    -c core.fsmonitor= -c core.commitGraph=false -c core.hooksPath=/dev/null -c core.sshCommand= -c core.pager=cat "$@"
+    -c core.fsmonitor= -c core.commitGraph=false -c core.hooksPath=/dev/null -c core.sshCommand= -c core.pager=cat \
+    -c advice.graftFileDeprecated=false "$@"
 }
 rel_upload_pack() { if [[ "$(id -u)" == 0 && "$RELEASE_USER" != "$(id -un)" ]]; then printf 'runuser -u %s -- git upload-pack' "$RELEASE_USER"; else printf 'git upload-pack'; fi; }
 root_repo_init() {

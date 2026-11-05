@@ -38,7 +38,8 @@ fi
 # (common.sh sgit), never in the release user's clone (audit M-2)
 tip=""
 for i in 1 2 3; do
-  if tip="$(root_fetch_main 2>&1)" && is_sha "$tip"; then break; fi
+  tip="$(root_fetch_main 2>&1)" || true; tip="${tip##*$'\n'}"   # the sha is the last line
+  if is_sha "$tip"; then break; fi
   why="$tip"; tip=""
   [[ $i == 3 ]] || { say "root fetch of private main failed (attempt $i of 3: ${why:0:160}); retrying in $((i * ${FETCH_WAIT:-20})) s"; sleep $((i * ${FETCH_WAIT:-20})); }
 done

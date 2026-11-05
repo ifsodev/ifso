@@ -505,15 +505,29 @@ printf '[{"id":1,"name":"app","status":"in_progress","conclusion":null,"head_sha
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh refuses a public CI that is still running (0 non-success means finished and green)" bash -c "test $ARC -ne 0 && grep -q 'public CI' '$W/arm.out'"
 rm -f "$CTL/ci.json"
+runarm ARM_TEST=1; ARC=$?
+ok "48: arm.sh refuses while the server runs an older release than private main (and names both)" bash -c "test $ARC -ne 0 && grep -q 'the server runs' '$W/arm.out' && grep -q '${M1:0:12}' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
+# 47: a stand-in origin left in the release user's git config (an earlier project armed with one)
+git clone -q --bare "$W/private.git" "$W/standin.git"; chown -R "$RUSER" "$W/standin.git" 2>/dev/null || true
+git -C "$W/standin.git" update-ref refs/heads/main "$M0"
+as_rel git config --file "$RGITCFG" "url.$W/standin.git.insteadOf" "$W/private.git"
+runarm ALLOW_NO_RELEASE_TOKEN=1; ARC=$?
+as_rel git config --file "$RGITCFG" --unset "url.$W/standin.git.insteadOf"
+ok "47: arm.sh refuses while the release user's git config has url.*.insteadOf (names it)" bash -c "test $ARC -ne 0 && grep -q 'insteadOf' '$W/arm.out' && grep -q 'standin.git' '$W/arm.out'"
+ok "47: ... and because the clone's origin then resolves to another repo than PRIVATE_URL" grep -q "resolves to $W/standin.git" "$W/arm.out"
+mkdir -p "$W/opt/releases/$M1"; ln -sfn "$W/opt/releases/$M1" "$W/opt/current"   # what `ifso-deploy <main>` does before arming
+git -C "$W/backend" -c safe.directory='*' fetch -q origin 2>/dev/null; chown -R "$RUSER" "$W/backend" 2>/dev/null || true
 touch "$CTL/gh-token-bad"
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh refuses when the release token cannot create and delete a draft Release" bash -c "test $ARC -ne 0 && grep -q 'release token' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
+runarm ALLOW_NO_RELEASE_TOKEN=1; ARC=$?
 runarm ALLOW_NO_RELEASE_TOKEN=1; ARC=$?
 ok "ALLOW_NO_RELEASE_TOKEN=1: arms anyway with a loud warning" bash -c "test $ARC -eq 0 && grep -q 'WARNING' '$W/arm.out' && test -e '$W/ALLOW_REAL_DEPLOY'"
 rm -f "$W/ALLOW_REAL_DEPLOY" "$CTL/gh-token-bad"
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh: public CI green (0 non-success) and the token made and deleted a draft" bash -c "grep -q 'public CI: 0 non-success' '$W/arm.out' && grep -q 'draft Release created and deleted' '$W/arm.out' && grep -q 'DELETE' '$CTL/requests.jsonl'"
 ok "arm.sh arms on a preflight of the current main and the rebuilt queue's schedule" bash -c "test $ARC -eq 0 && test -e '$W/ALLOW_REAL_DEPLOY' && grep -q ARMED '$W/arm.out'"
+ok "47/48: arming said the server runs private main, origin answers it, and root's own fetch of main agrees" bash -c "grep -q 'running release = private main' '$W/arm.out' && grep -q \"root's own fetch of private main\" '$W/arm.out'"
 ok "arming wrote LAUNCH_AT and the slots" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/schedule.json\")); sys.exit(0 if s[\"launchAt\"]==\"$FUTURE\" and all(u[\"slot\"] for u in s[\"updates\"]) else 1)'"
 rm -f "$W/ALLOW_REAL_DEPLOY"
 as_rel kill "$(cat "$ROOT/w4.pid")" 2>/dev/null || true

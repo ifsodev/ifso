@@ -44,6 +44,7 @@ CFG = {
     "api": E("API_URL", "http://127.0.0.1:8080").rstrip("/"),      # the server's own API, for post-release checks
     "public_url": E("PUBLIC_COMMIT_URL", "{sha}"),
     "allow_file": E("ALLOW_FILE", "/etc/ifso-release/ALLOW_REAL_DEPLOY"),
+    "opt_dir": E("OPT_DIR", "/opt/ifso"),                          # /opt/ifso/current -> releases/<sha>: the running revision
     "gate_dir": E("GATE_DIR", f"{HOME}/gate"),
     # The gate runs the queued trees' tests and their dependencies' code. It runs as GATE_USER (install.sh: ifso-gate), a user
     # with no access to the release user's ~/.ssh (deploy and signing keys), through `sudo -n -u ifso-gate`, with a clean
@@ -1365,6 +1366,7 @@ def arm_problems(results_path):
         out.append(f"the last preflight did not run: {r['stale'][:160]}")
     elif r.get("main") != main:
         out.append(f"preflight ran on main {str(r.get('main'))[:12]} but private main is now {main[:12]}: run sudo ifso-release-preflight again")
+    out += remote_problems(main)
     if r.get("sfp") != sched_fp(sched):
         out.append("preflight results belong to another schedule (schedule.json changed since): run sudo ifso-release-preflight again")
     want = [u["id"] for u in sched["updates"] if st["updates"][u["id"]]["status"] in ("pending", "held", "in_progress")]
@@ -1389,6 +1391,52 @@ def arm_problems(results_path):
                 print(f"public CI: 0 non-success of {len(runs)} check-runs on the public main tip {(runs[0].get('head_sha') or '')[:10]}")
         except Exception as e:  # noqa: BLE001
             out.append(f"public CI could not be read ({type(e).__name__}): arming needs a green answer")
+    return out
+
+
+def repo_id(url):
+    """owner/repo of a git URL (ssh alias, scp form or ssh://), or the real path of a local one: two spellings of one repo match."""
+    u = url.strip().rstrip("/")
+    u = u[:-4] if u.endswith(".git") else u
+    if u.startswith(("/", "file://")):
+        return os.path.realpath(u.replace("file://", "", 1))
+    m = re.match(r"^(?:[a-z+]+://)?(?:[^@/]+@)?[^:/]+[:/]/?(.+)$", u)
+    return (m.group(1) if m else u).lower()
+
+
+def remote_problems(main):
+    """Incidents 47 and 48. No url.*.insteadOf / pushInsteadOf in any git config the release user's git reads (a stand-in origin
+    left there means no release reaches GitHub or Vercel); origin really answers the main the clone has; and the server runs
+    exactly that main, so Update 1 ships only Update 1."""
+    out = []
+    for scope, cmd in (("global (~/.gitconfig)", ["git", "config", "--global", "--get-regexp", r"^url\."]),
+                       ("system", ["git", "config", "--system", "--get-regexp", r"^url\."]),
+                       ("the release clone", ["git", "-c", "safe.directory=*", "-C", CFG["repo"], "config", "--local", "--get-regexp", r"^url\."]),
+                       ("the queue repo", ["git", "-c", "safe.directory=*", "-C", CFG["queue_repo"], "config", "--local", "--get-regexp", r"^url\."])):
+        c, o = run(cmd)
+        if c == 0 and o.strip():
+            out.append(f"the release user's git config ({scope}) rewrites remote URLs: {'; '.join(o.strip().splitlines()[:3])[:240]}. "
+                       f"Remove every url.*.insteadOf before arming (incident 47)")
+    want = E("PRIVATE_URL", "")
+    got = (run(["git", "-c", "safe.directory=*", "-C", CFG["repo"], "ls-remote", "--get-url", "origin"])[1] or "").strip()
+    if want and "CHANGE_ME" not in want and repo_id(got) != repo_id(want):
+        out.append(f"the release clone's origin resolves to {got[:120]} (after any insteadOf), not the private repo {want} that root deploys "
+                   f"from: releases would never reach it (incident 47)")
+    c, o = run(["git", "-c", "safe.directory=*", "-C", CFG["repo"], "ls-remote", "origin", "refs/heads/main"], timeout=120)
+    lr = o.split()[0] if c == 0 and o.strip() else ""
+    if not lr:
+        out.append(f"`git ls-remote origin refs/heads/main` in the release clone gave no answer (exit {c}): the real remote must answer (incident 47)")
+    elif lr != main:
+        out.append(f"origin answers main = {lr[:12]} but the clone's origin/main is {main[:12]}: a stand-in or stale remote (incident 47)")
+    try:
+        running = os.path.basename(os.readlink(os.path.join(CFG["opt_dir"], "current")))
+    except OSError:
+        running = ""
+    if running != main:
+        out.append(f"the server runs {running[:12] or 'nothing readable'} but private main is {main[:12]}: deploy current main first "
+                   f"(sudo ifso-deploy {main}), then run the preflight again (incident 48)")
+    else:
+        print(f"running release = private main = origin's main ({main[:12]})")
     return out
 
 
