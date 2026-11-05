@@ -100,6 +100,46 @@ describe("R1-M7: unauthenticated build registers on-chain questions for any Poly
   });
 });
 
+describe("polymarket.com links in build: the market is the last segment; an event alone is looked up", () => {
+  const end = () => new Date(Date.now() + 3 * 86400_000).toISOString();
+  const market = (slug: string, closed = false) => ({ slug, question: `q ${slug}`, groupItemTitle: slug.toUpperCase(), conditionId: "0x" + "11".repeat(32), closed, active: true, outcomes: '["Yes","No"]', outcomePrices: '["0.5","0.5"]', endDate: end(), liquidityNum: 1e6, volumeNum: 1e6 });
+  function stub() {
+    const seen: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      const u = new URL(String(url));
+      seen.push(u.pathname + u.search);
+      if (u.pathname === "/events") {
+        const slug = u.searchParams.get("slug");
+        const body = slug === "btc-nov" ? [{ slug, title: "Bitcoin in November?", closed: false, markets: [market("btc-95k"), market("btc-90k"), market("btc-60k", true)] }] : [];
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      const m = u.pathname.match(/^\/markets\/slug\/(.+)$/);
+      if (m && m[1]!.startsWith("btc-9")) return new Response(JSON.stringify(market(m[1]!)), { status: 200 });
+      return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+    }) as typeof fetch;
+    return seen;
+  }
+  const build = (link: string) =>
+    appRouter.createCaller({ deps: stubDeps().deps, limiter: new RateLimiter(), ip: "203.0.113.9", country: "DE" }).build({ text: `/ifso @sam 10 if ${link} resolves yes`, sender: SENDER, linkKey: "0x000000000000000000000000000000000000c0de" });
+
+  test("/event/<event>/<market> reads the market, never the event slug", async () => {
+    const seen = stub();
+    await build("https://polymarket.com/event/btc-nov/btc-95k").catch(() => {});
+    expect(seen).toContain("/markets/slug/btc-95k"); // fails before: /markets/slug/btc-nov (404, refused)
+    expect(seen).not.toContain("/markets/slug/btc-nov");
+  });
+
+  test("/event/<event> with several open markets answers with the list, reads no market", async () => {
+    const seen = stub();
+    const err = (await build("https://polymarket.com/event/btc-nov").catch((e: Error) => e)) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain("btc-95k");
+    expect(err.message).toContain("btc-90k");
+    expect(err.message).not.toContain("btc-60k");
+    expect(seen.filter((p) => p.startsWith("/markets/"))).toEqual([]);
+  });
+});
+
 describe("R1-M5: relayed decisions / refund redirects have no limit", () => {
   test("one signer cannot make the relayer send 50 transactions in a burst", async () => {
     const { deps, sent } = stubDeps();

@@ -8,6 +8,7 @@ import { parseCommand, replaceCI, type ParseResult, type Question } from "../cor
 import { Status } from "../core/types";
 import { canonicalZone, formatWhen, offsetLabel, zoneOffsetAt, zoneOffsetFor, type Zone } from "../core/tz";
 import type { FixtureMatch } from "../api/fixtures";
+import type { PolymarketRefResult } from "../sources/polymarket";
 import type { BotStore } from "./store";
 
 export type Button = { text: string; url: string } | { text: string; data: string };
@@ -26,6 +27,8 @@ export interface FlowEnv {
   /** stock tickers (New York market clock); the rest are crypto and use the user's zone */
   stockTickers?: ReadonlySet<string>;
   fixtures?: FixtureLookup;
+  /** polymarket.com link -> one market slug or a plain answer (an event with several or no open markets) */
+  polymarket?: (ref: string) => Promise<PolymarketRefResult>;
   now?: () => number;
 }
 
@@ -46,6 +49,10 @@ async function evaluate(e: FlowEnv, text: string, user: { tz: string | null; tzO
 
   const extra: string[] = [];
   const c = r.condition;
+  if (c.kind === "MARKET" && c.venue === "polymarket" && e.polymarket && /^https?:\/\//i.test(c.ref)) {
+    const picked = await e.polymarket(c.ref).catch(() => undefined); // Gamma down: the web build checks again
+    if (picked && !picked.ok) return { t: "error", text: picked.message };
+  }
   if (c.kind === "SPORTS" && e.fixtures) {
     const found = await e.fixtures(c.team, c.opponent, c.on).catch(() => undefined);
     if (found) {

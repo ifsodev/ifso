@@ -22,6 +22,7 @@ import { FootballRefused, PolymarketRefused, planFootballQuestion, planPolymarke
 import { ClaimError, readEscrow, relayAccept, relayClaim } from "./claim";
 import { RateLimiter } from "./rateLimit";
 import { findFixture } from "./fixtures";
+import { resolvePolymarketRef } from "../sources/polymarket";
 import { holderTier, tierConfig } from "./perks";
 import { parseCsv, totals, validateRows } from "./batchPlan";
 import { userStats } from "./stats";
@@ -377,7 +378,10 @@ export const appRouter = t.router({
       bi.outcome = { resolver: required(deps.clients.resolverContract, "RESOLVER_ADDRESS"), questionId: q.id, earliestResolve: q.earliestResolve, teamIsHome: fx.teamIsHome, closeTime: q.closeTime, challengeMargin: DEFAULTS.sportsChallengeMargin, minSpan: await outcomeMinSpan(deps, required(deps.clients.resolverContract, "RESOLVER_ADDRESS")) };
     } else if (d.kind === "MARKET") {
       if (d.venue !== "polymarket") throw new TRPCError({ code: "BAD_REQUEST", message: "Hyperliquid questions arrive in phase 2." });
-      const slug = d.ref.replace(/^https?:\/\/(www\.)?polymarket\.com\/(event|market)\//, "").split(/[/?#]/)[0]!;
+      // /event/<event>/<market> -> the market (last segment); /event/<event> alone -> looked up, never guessed
+      const picked = await resolvePolymarketRef(d.ref);
+      if (!picked.ok) throw new TRPCError({ code: "BAD_REQUEST", message: picked.message });
+      const slug = picked.slug;
       let q;
       try {
         q = await planPolymarketQuestion(deps, slug, questionBudget(ctx, input.sender)); // allow-list: open, binary, liquid, traded, sane end date

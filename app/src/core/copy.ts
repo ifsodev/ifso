@@ -16,6 +16,11 @@ export const copy = {
       "Try: /ifso @jake 20 if polymarket the-market-slug resolves yes · /ifso link 50 on the 1st · /ifso @mia 100 if nvda closes above 200 by friday · /challenge @sam 10 if @ref says so",
     marketPlaceholder:
       "the-market-slug is only a placeholder. Put the market's name in its place: it is the last part of the market's polymarket.com link.",
+    // plain-string arguments only: the banned-words scan renders every template with sample strings
+    marketPickLine: (name: string, slug: string) => `• ${name}: ${slug}`,
+    marketPick: (event: string, lines: string, more: number | string) =>
+      `"${event}" has more than one market. Send the one you mean in place of the link, as polymarket followed by its name (after the colon):\n${lines}${Number(more) > 0 ? `\n…and ${more} more on polymarket.com` : ""}`,
+    marketNoneOpen: (event: string) => `"${event}" has no open market right now, so it can't be used for an if-so payment.`,
     minAmount: "The smallest if-so payment is 1 USDG.",
     counterOnlyForChallenges: "Two amounts only work with /challenge (where both of you chip in).",
     challengeNeedsOutcome: "A challenge needs something to decide it: a price, a result, or a referee.",

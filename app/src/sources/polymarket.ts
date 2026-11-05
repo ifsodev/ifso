@@ -5,6 +5,7 @@
 import { createPublicClient, http, keccak256, toHex, type Hex } from "viem";
 import { polygon } from "viem/chains";
 import { ctfAbi } from "../abi/external";
+import { copy } from "../core/copy";
 import { polymarketOutcome, type SourceReport } from "../core/outcome";
 import { getJson } from "./http";
 
@@ -24,6 +25,16 @@ export interface GammaMarket {
   closedTime?: string; //   set once the market closed (can be BEFORE endDate: early resolution)
   liquidityNum?: number;
   volumeNum?: number;
+  /** the short name polymarket.com shows for one market of a multi-market event (e.g. "↑ 95,000"); "" on single ones */
+  groupItemTitle?: string;
+}
+
+/** Gamma `/events?slug=` row (trimmed to what we read). */
+export interface GammaEvent {
+  slug: string;
+  title?: string;
+  closed?: boolean;
+  markets?: GammaMarket[];
 }
 
 /** Gamma market -> report. Pure, so recorded fixtures replay through the same code. */
@@ -76,4 +87,40 @@ export async function fetchCtf(polygonRpc: string, conditionId: Hex): Promise<So
     client.readContract({ address: POLYGON_CTF, abi: ctfAbi, functionName: "payoutNumerators", args: [conditionId, 1n] }),
   ]);
   return ctfReport(conditionId, den, yes, no, fetchedAt);
+}
+
+/** How many open markets an event answer lists before "and N more". */
+export const EVENT_PICK_MAX = 5;
+
+/** A Polymarket ref (slug or polymarket.com link) -> the market slug, or the event slug when the link names only an event.
+ *  /event/<event>/<market> and /market/<market> name the market in the LAST segment; /event/<event> names only the event. */
+export function parsePolymarketLink(ref: string): { market: string } | { event: string } {
+  const m = ref.match(/^https?:\/\/(?:www\.)?polymarket\.com\/([^?#]*)/i);
+  if (!m) return { market: ref };
+  const parts = m[1]!.split("/").filter(Boolean).map((p) => decodeURIComponent(p));
+  if (parts[0] === "event" && parts.length === 2) return { event: parts[1]! };
+  return { market: parts[parts.length - 1] ?? "" };
+}
+
+export async function fetchGammaEvent(slug: string): Promise<GammaEvent | undefined> {
+  const f = await getJson<GammaEvent[]>(`https://gamma-api.polymarket.com/events?slug=${encodeURIComponent(slug)}`);
+  return Array.isArray(f.body) ? f.body.find((e) => e.slug === slug) : undefined;
+}
+
+export type PolymarketRefResult = { ok: true; slug: string } | { ok: false; message: string };
+
+/** Turns what the user typed into one market slug, never guessing: an event link with one open market becomes that
+ *  market; several open markets -> a short list to pick from; none -> a plain answer. A slug Gamma does not know as an
+ *  event is tried as a market (single-market pages use the same slug), where the allow-list answers for it. */
+export async function resolvePolymarketRef(ref: string, getEvent: (slug: string) => Promise<GammaEvent | undefined> = fetchGammaEvent): Promise<PolymarketRefResult> {
+  const p = parsePolymarketLink(ref);
+  if ("market" in p) return { ok: true, slug: p.market };
+  const ev = await getEvent(p.event);
+  if (!ev || !Array.isArray(ev.markets)) return { ok: true, slug: p.event };
+  const open = ev.markets.filter((m) => !m.closed && m.active !== false);
+  const title = ev.title || ev.slug;
+  if (open.length === 1) return { ok: true, slug: open[0]!.slug };
+  if (!open.length) return { ok: false, message: copy.parse.marketNoneOpen(title) };
+  const shown = open.slice(0, EVENT_PICK_MAX).map((m) => copy.parse.marketPickLine(m.groupItemTitle || m.question, m.slug));
+  return { ok: false, message: copy.parse.marketPick(title, shown.join("\n"), open.length - shown.length) };
 }

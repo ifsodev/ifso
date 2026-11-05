@@ -7,6 +7,7 @@ import type { UserFromGetMe } from "grammy/types";
 import { copy } from "../core/copy";
 import { SEED_FEEDS } from "../config/chain";
 import { listFixtureMatches } from "../api/fixtures";
+import { resolvePolymarketRef } from "../sources/polymarket";
 import type { Deps } from "../workers/deps";
 import { handleAnswer, handleCommand, handleLink, handleMine, handleTz, type FixtureLookup, type FlowEnv, type Reply } from "./flow";
 import { drizzleBotStore, type BotStore } from "./store";
@@ -40,6 +41,7 @@ export function createBot(deps: Deps, opts: BotOptions = {}): Bot | undefined {
     tickers: new Set(SEED_FEEDS.map((f) => f.ticker)),
     stockTickers: new Set(SEED_FEEDS.filter((f) => f.isStock).map((f) => f.ticker)),
     fixtures: opts.fixtures ?? ((team, opp, on) => listFixtureMatches(deps, team, opp, on)),
+    polymarket: (ref) => resolvePolymarketRef(ref),
     now: opts.now,
   };
 
