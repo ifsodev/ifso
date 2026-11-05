@@ -1726,9 +1726,11 @@ def cmd_scan_queue():
 
 def cmd_sync_dry_run():
     """Incident 39: the REAL publish step (sync-public.py with every scan: built-in words, the state's forbidden regex, the
-    backend denylist, AI-credit lines, skip paths) over every queued tree and commit message, before arming. Runs in a scratch
-    bare clone of the runner's clone, never in the release checkout: privateRef = the queue tip, the public remote = the URL the
-    runner pushes to (fetched only). Passes only on 'dry run: not pushed'; the real state file is never written."""
+    backend denylist, AI-credit lines, skip paths, dropPaths, scrubFiles) over every queued tree and commit message, before
+    arming. Runs in a scratch NON-bare clone of the runner's clone (no checkout), never in the release checkout: sync-public.py
+    runs in a work tree in real releases (cwd = the release clone) and its dropPaths need one (`git update-index --force-remove`
+    refuses in a bare repo). privateRef = the queue tip, the public remote = the URL the runner pushes to (fetched only). Every
+    git step must succeed; passes only on exit 0 AND 'dry run: not pushed'; the real state file is never written."""
     sched = schedule()
     tip = sched["updates"][-1]["sha"] if sched["updates"] else ""
     if not tip:
@@ -1739,14 +1741,22 @@ def cmd_sync_dry_run():
     work = tempfile.mkdtemp(prefix=".sync-dry-run.", dir=RELEASE_HOME)
     try:
         r = os.path.join(work, "repo")
-        must(["git", "-c", "safe.directory=*", "clone", "-q", "--bare", "--no-local", CFG["repo"], r], "scratch clone of the release clone")
-        run(["git", "-C", r, "fetch", "-q", CFG["repo"], "+refs/replace/*:refs/replace/*"])  # the bootstrap grafts, when any
-        must(["git", "-C", r, "fetch", "-q", CFG["queue_repo"], "+refs/heads/*:refs/queue/*"], "fetch of the queue")
+        # a work tree, as in a real release (cwd = the release clone); --no-checkout: sync-public reads objects only
+        must(["git", "-c", "safe.directory=*", "clone", "-q", "--no-local", "--no-checkout", CFG["repo"], r], "scratch clone of the release clone")
+        if must(["git", "-C", r, "rev-parse", "--is-bare-repository"], "work-tree check of the scratch clone") != "false":
+            raise Fail("the scratch clone is bare: sync-public.py needs a work tree (dropPaths)")
+        must(["git", "-c", "safe.directory=*", "-C", r, "fetch", "-q", CFG["repo"], "+refs/replace/*:refs/replace/*"],
+             "fetch of the bootstrap grafts (refs/replace)")
+        must(["git", "-c", "safe.directory=*", "-C", r, "fetch", "-q", CFG["queue_repo"], "+refs/heads/*:refs/queue/*"], "fetch of the queue")
+        must(["git", "-C", r, "cat-file", "-e", f"{tip}^{{commit}}"], f"queue tip {tip[:10]} in the scratch clone")
         url = git("remote", "get-url", st.get("publicRemote") or "public")
         must(["git", "-C", r, "remote", "add", "public", url], "public remote in the scratch clone")
         state = os.path.join(work, "state.json")
         save(state, dict(st, privateRef=tip, publicRemote="public"))
         code, out = run([sys.executable, CFG["sync_py"], state, "--dry-run"], cwd=r, timeout=3600)
+    except Fail as e:
+        print(f"REFUSED: sync-public dry run at the queue tip {tip[:10]} could not be set up: {e}")
+        return 1
     finally:
         shutil.rmtree(work, ignore_errors=True)
     lines = [x for x in out.strip().splitlines() if x.strip()]

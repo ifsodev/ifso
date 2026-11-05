@@ -526,6 +526,13 @@ runarm ARM_TEST=1; ARC=$?
 cp "$W/sync-state.good" "$W/home/public-sync.json"; chown "$RUSER" "$W/home/public-sync.json" 2>/dev/null || true
 ok "39: arm.sh step 1 runs sync-public.py --dry-run at the queue tip and refuses on its hit (a queued commit message)" bash -c "test $ARC -ne 0 && grep -q 'sync-public dry run' '$W/arm.out' && grep -q 'the message of private commit' '$W/arm.out' && ! grep -q 'still in file' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
 ok "39: the dry run pushed nothing and left the release clone and the state as they were" bash -c "cmp -s '$W/sync-state.good' '$W/home/public-sync.json' && test \"\$(git -C '$W/public.git' rev-parse main)\" = \"\$(python3 -c 'import json; print(json.load(open(\"$W/home/public-sync.json\"))[\"publicSha\"])')\""
+# 39: a git step that fails while the dry run is set up is a loud REFUSED naming the step, never a quiet pass or a bare traceback
+setconf QUEUE_REPO "$W/no-such-queue.git"
+rp sync-dry-run >"$W/sdr-bad.out" 2>&1; SRC=$?
+setconf QUEUE_REPO "$W/queue.git"
+ok "39: sync-dry-run refuses (exit 1) when a git step fails (queue fetch) and names it" bash -c "test $SRC -eq 1 && grep -q 'REFUSED: sync-public dry run' '$W/sdr-bad.out' && grep -q 'fetch of the queue' '$W/sdr-bad.out' && ! grep -q Traceback '$W/sdr-bad.out'"
+rp sync-dry-run >"$W/sdr-good.out" 2>&1; SRC=$?
+ok "39: sync-dry-run passes on the real-shaped state (denylist dropped, fixture scrubbed in a work tree) and leaves no scratch dir" bash -c "test $SRC -eq 0 && grep -q 'dry run: not pushed' '$W/sdr-good.out' && ! ls -d '$W/home'/.sync-dry-run.* >/dev/null 2>&1"
 runarm ARM_TEST=1; ARC=$?
 ok "48: arm.sh refuses while the server runs an older release than private main (and names both)" bash -c "test $ARC -ne 0 && grep -q 'the server runs' '$W/arm.out' && grep -q '${M1:0:12}' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
 # 47: a stand-in origin left in the release user's git config (an earlier project armed with one)
