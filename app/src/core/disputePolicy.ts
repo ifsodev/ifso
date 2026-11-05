@@ -9,6 +9,11 @@
 //                  only in the last-call slot (closesAt - lastCall .. closesAt) if still unconfirmed, and only while
 //                  (a) fewer than `budgetCap` last-call disputes are open and (b) one bond stays in the float after it
 //                  (automatic budget = floor(float / bond) - 1). Largest USDG amount first. Over budget: page a human.
+//
+// Audit M-1 (bond split): a panel answer pays the winner bond + floor(bond / 2) and forfeits the rest of the loser's
+// bond; panel silence gives each side floor(bond / 2). So per dispute the service is in: won +bond/2, a lost
+// last-call dispute -bond, any panel silence -bond/2. The worst case per open dispute is still one bond, which is
+// what the one-bond reserve and the budget above are sized on, so they are unchanged (resolverPolicy.property.test).
 import { latestPerProvider, type Agreement, type SourceReport } from "./outcome";
 
 export type SourceVerdict = "confirmed" | "contradicted" | "unconfirmed";

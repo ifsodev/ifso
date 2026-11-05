@@ -429,6 +429,20 @@ async function actOnForeign(deps: Deps, resolver: Address, candidates: Foreign[]
   }
 }
 
+/**
+ * Audit M-1: panel silence (finalizeTimedOut) now gives each side only floor(bond / 2) back; the other halves go to
+ * the FeeRouter. When the service was one of the two sides, its float shrank by the forfeited half: say so. The
+ * worst case per open dispute is still one bond (a last-call dispute the panel upholds), so the dispute budget
+ * (`floor(float / bond) - 1`, recomputed from the live balance every tick) stays solvent; silence is a panel failure.
+ */
+async function panelSilentCost(deps: Deps, id: string, o: { proposer: string; disputer: string; bond: bigint }, me: string | undefined) {
+  if (!me) return;
+  const sides = [o.proposer, o.disputer].filter((a) => a.toLowerCase() === me).length;
+  if (!sides) return;
+  const lost = (o.bond - o.bond / 2n) * BigInt(sides);
+  await raiseOnce(deps, `resolver-panel-silent:${id}`, `the panel did not answer the dispute on question ${id} in its window, so it is VOID and the payments on it refund; the service got only half its bond back and the float shrank by ${lost} USDG units (forfeited to the FeeRouter). Check the panel signers`);
+}
+
 /** Last-call disputes the panel settled: one the panel upheld cost the float a bond, so say so. */
 async function lastCallResults(deps: Deps, resolver: Address) {
   const rows = await deps.db.select({ id: questions.id }).from(questions).where(eq(questions.disputeKind, "last-call")).limit(200);
@@ -436,6 +450,7 @@ async function lastCallResults(deps: Deps, resolver: Address) {
     const o = await syncRow(deps, resolver, id as Hex);
     const state = Number(o.state);
     if (state < 4) continue;
+    if (state === 5) await panelSilentCost(deps, id, o, deps.clients.resolver?.account?.address?.toLowerCase()); // voided by anyone
     if (state === 4 && o.finalOutcome === o.proposed) {
       await raiseOnce(deps, `resolver-last-call-lost:${id}`, `the panel upheld the proposal (outcome ${o.proposed}) on question ${id} that the service disputed at last call; the bond went to the proposer and the float shrank by one bond`);
     }
@@ -554,9 +569,12 @@ async function resolveOne(deps: Deps, resolver: Address, me: string | undefined,
     const deadline = Number(onchain.disputedAt) + panelWindow;
     if (now >= deadline) {
       const r = await call("finalizeTimedOut", [id], deps.clients.resolver ?? deps.clients.keeper);
-      if (r.ok) await syncRow(deps, resolver, id);
+      if (r.ok) {
+        await syncRow(deps, resolver, id);
+        await panelSilentCost(deps, q.id, onchain, me);
+      }
     } else {
-      await raiseOnce(deps, `panel-waiting:${q.id}`, `question ${q.id} is disputed and waits on the panel until ${new Date(deadline * 1000).toISOString()}; no answer by then voids it and the payments on it refund`);
+      await raiseOnce(deps, `panel-waiting:${q.id}`, `question ${q.id} is disputed and waits on the panel until ${new Date(deadline * 1000).toISOString()}; no answer by then voids it, the payments on it refund and each side gets only half its bond back (the other halves go to the FeeRouter)`);
     }
   }
 }

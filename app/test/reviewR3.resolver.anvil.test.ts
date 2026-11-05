@@ -82,10 +82,10 @@ describe.skipIf(!haveAnvil() || !havePostgres())("R3-H1: honest early proposals 
     expect(Number((await questionOnchain(env, q3.id)).state)).toBe(3); // disputed from the reserved bond
     expect(await env.chain.balance(me.address)).toBe(0n);
 
-    // the panel rules on the truth: the service gets both bonds back on q2 and q3
+    // the panel rules on the truth: on q2 and q3 the service gets its bond plus half the loser's (audit M-1)
     for (const [q, t] of [[q2, truth(2)], [q3, truth(3)]] as const)
       await env.chain.write(env.chain.deployer, env.chain.resolver, ifsoOutcomeResolverAbi as Abi, "panelResolve", [q.id, t]);
-    expect(await claimable(env, me.address)).toBe(4n * bond);
+    expect(await claimable(env, me.address)).toBe(2n * (bond + bond / 2n));
     for (const [q, t] of [[q2, truth(2)], [q3, truth(3)]] as const) expect(await onchainState(env, q.id)).toEqual([4, t]); // SAFE: a wrong answer never becomes final
     await env.chain.warpTo((await env.chain.now()) + 7300n);
     await resolverTick(env.deps); // q1's window closed unconfirmed: never finalized by us, a human is told

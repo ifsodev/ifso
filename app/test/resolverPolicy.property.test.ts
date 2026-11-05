@@ -1,7 +1,8 @@
 // Review R3-H1: property test of the resolver's foreign-dispute policy (core/disputePolicy.ts, the exact function the
 // resolver worker calls every tick). Randomized sequences of foreign proposals (honest and wrong), source states over
 // time (pending / unavailable / conflicting, then final on the truth, or never), bond float sizes and budgets, with a
-// panel that always rules on the truth. Checked on every tick and at the end:
+// panel that rules on the truth or stays silent (audit M-1 amounts: a won dispute credits bond + floor(bond / 2), a
+// lost one nothing, silence floor(bond / 2)). Checked on every tick and at the end:
 //  P1 a contradicted proposal is disputed whenever the float holds one bond at that point (never left to finalize)
 //  P2 an honest proposal that our sources confirm before the last-call slot is never disputed
 //  P3 last-call disputes never take the float below one bond
@@ -27,7 +28,7 @@ interface Q {
   proposed: number;
   proposedAt: number;
   finalAt: number; // sources final on the truth from this time (Infinity = never inside the run)
-  disputed?: { at: number; kind: "contradicted" | "last-call"; settleAt: number };
+  disputed?: { at: number; kind: "contradicted" | "last-call"; settleAt: number; silent: boolean };
   settled?: boolean;
   paged?: boolean;
   atRisk: bigint;
@@ -49,13 +50,16 @@ function run(seed: number) {
   });
   const end = 20_000 + W + PANEL_MAX + TICK;
   for (let now = 0; now <= end; now += TICK) {
-    // the panel rules on the truth: a won dispute returns both bonds, a lost one returns nothing
+    // audit M-1: the panel rules on the truth (won: bond + floor(bond / 2), lost: nothing) or stays silent for its
+    // whole window (each side floor(bond / 2))
     for (const q of qs) {
       if (q.disputed && !q.settled && now >= q.disputed.settleAt) {
         q.settled = true;
-        if (q.proposed !== q.truth) balance += 2n * bond;
+        if (q.disputed.silent) balance += bond / 2n;
+        else if (q.proposed !== q.truth) balance += 2n * bond - (bond - bond / 2n);
       }
     }
+    expect(balance >= 0n).toBe(true);
     const openLastCall = qs.filter((q) => q.disputed?.kind === "last-call" && !q.settled).length;
     const live = qs.filter((q) => now >= q.proposedAt && !q.disputed && now < q.proposedAt + W);
     const candidates: ForeignCandidate[] = live.map((q) => ({
@@ -92,7 +96,8 @@ function run(seed: number) {
           expect(balance >= bond).toBe(true); // P3
         }
         expect(balance >= 0n).toBe(true);
-        q.disputed = { at: now, kind: act.kind, settleAt: now + int(600, PANEL_MAX) };
+        const silent = r() < 0.2;
+        q.disputed = { at: now, kind: act.kind, settleAt: silent ? now + PANEL_MAX : now + int(600, PANEL_MAX), silent };
       }
     }
   }
@@ -130,6 +135,19 @@ describe("R3-H1 property: foreign-dispute policy over random proposals, sources 
       ],
     });
     expect(acts).toEqual([{ id: "b", do: "dispute", kind: "contradicted" }, { id: "a", do: "page", reason: "reserve" }]);
+  });
+
+  test("audit M-1 worst case: last-call disputes all lost or all met by panel silence still leave a bond for a contradicted proposal", () => {
+    const bond = 10_000_000n;
+    const u = (id: string): ForeignCandidate => ({ id, verdict: "unconfirmed", closesAt: 7200, atRisk: 1n });
+    const acts = planForeignDisputes({ now: 7000, lastCall: LC, bond, balance: 4n * bond, openLastCall: 0, candidates: [u("a"), u("b"), u("c"), u("d")] });
+    const n = BigInt(acts.filter((a) => a.do === "dispute").length);
+    expect(n).toBe(3n); // floor(float / bond) - 1
+    const left = 4n * bond - n * bond;
+    for (const settled of [left /* every one lost: -bond each */, left + n * (bond / 2n) /* every one silent: -bond/2 each */]) {
+      const next = planForeignDisputes({ now: 9000, lastCall: LC, bond, balance: settled, openLastCall: 0, candidates: [{ id: "x", verdict: "contradicted", closesAt: 9100, atRisk: 1n }] });
+      expect(next).toEqual([{ id: "x", do: "dispute", kind: "contradicted" }]);
+    }
   });
 
   test("budget goes to the most USDG first; the explicit cap counts disputes already open", () => {

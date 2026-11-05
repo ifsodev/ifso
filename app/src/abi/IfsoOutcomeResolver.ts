@@ -32,6 +32,11 @@ export const ifsoOutcomeResolverAbi = [
         "name": "panel_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "feeRouter_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -219,6 +224,19 @@ export const ifsoOutcomeResolverAbi = [
   },
   {
     "type": "function",
+    "name": "feeRouter",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "finalize",
     "inputs": [
       {
@@ -240,6 +258,26 @@ export const ifsoOutcomeResolverAbi = [
         "internalType": "bytes32"
       }
     ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "forfeited",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "forwardForfeits",
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -663,6 +701,25 @@ export const ifsoOutcomeResolverAbi = [
   },
   {
     "type": "event",
+    "name": "BondForfeited",
+    "inputs": [
+      {
+        "name": "questionId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "BondWithdrawn",
     "inputs": [
       {
@@ -751,6 +808,25 @@ export const ifsoOutcomeResolverAbi = [
         "type": "bool",
         "indexed": false,
         "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ForfeitsForwarded",
+    "inputs": [
+      {
+        "name": "feeRouter",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -966,6 +1042,11 @@ export const ifsoOutcomeResolverAbi = [
   {
     "type": "error",
     "name": "Reentrancy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SelfDispute",
     "inputs": []
   },
   {

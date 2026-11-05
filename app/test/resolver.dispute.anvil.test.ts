@@ -53,11 +53,13 @@ describe.skipIf(!haveAnvil() || !havePostgres())("resolver disputes contradictin
     expect(await onchainState(env, rightQ.id)).toEqual([4, truth(1)]); // finalized
     expect((await rowOf(env, rightQ.id)).finalOutcome).toBe(truth(1));
 
-    // the panel (the deployer in this harness) sides with the service: the service gets both bonds, then withdraws them
+    // the panel (the deployer in this harness) sides with the service: audit M-1, the service gets its own bond plus
+    // half the loser's (the other half is forfeited to the FeeRouter), then withdraws them
     await env.chain.write(env.chain.deployer, env.chain.resolver, ifsoOutcomeResolverAbi as Abi, "panelResolve", [wrongQ.id, truth(0)]);
     const before = await env.chain.balance(env.resolverAddress);
     await resolverTick(env.deps);
-    expect((await env.chain.balance(env.resolverAddress)) - before).toBe(20_000_000n); // both bonds of the dispute
+    expect((await env.chain.balance(env.resolverAddress)) - before).toBe(15_000_000n); // bond + bond/2 of the loser's
+    expect(await env.chain.pc.readContract({ address: env.chain.resolver, abi: ifsoOutcomeResolverAbi, functionName: "forfeited" })).toBe(5_000_000n);
     expect((await rowOf(env, wrongQ.id)).state).toBe(4);
     expect((await rowOf(env, wrongQ.id)).finalOutcome).toBe(truth(0));
   });

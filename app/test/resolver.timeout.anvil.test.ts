@@ -1,4 +1,5 @@
-// R5: a disputed question the panel leaves unanswered for 72 h is voided by finalizeTimedOut (bonds go back) and the
+// R5: a disputed question the panel leaves unanswered for 72 h is voided by finalizeTimedOut (each side gets half its
+// bond back, audit M-1; the other halves are forfeited to the FeeRouter) and the
 // payment on it refunds through the keeper. The panel-SLA monitor runs from the stored dispute time, not from the
 // earliest resolve time.
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
@@ -22,7 +23,7 @@ describe.skipIf(!haveAnvil() || !havePostgres())("resolver panel timeout (R5)", 
   });
   afterAll(async () => env?.stop());
 
-  test("panel silent for 72 h: VOID, bonds back, payment refunded through the keeper; SLA alert counts from the dispute", async () => {
+  test("panel silent for 72 h: VOID, half of each bond back, the rest forfeited, payment refunded through the keeper; SLA alert counts from the dispute", async () => {
     const q = await env.question(0);
     const escrowId = await createOutcomeEscrow(env, q.id, BigInt(q.earliestResolve) + 30n * 86400n);
     const truth = expectedFootball(eplEvents[0]!);
@@ -57,9 +58,17 @@ describe.skipIf(!haveAnvil() || !havePostgres())("resolver panel timeout (R5)", 
     const row = await rowOf(env, q.id);
     expect(row.state).toBe(5);
     expect(row.finalOutcome).toBeNull();
-    // the service's own bond came back (the other bond is the proposer's to withdraw)
-    expect(await env.chain.balance(env.resolverAddress)).toBe(start);
-    expect(await env.chain.pc.readContract({ address: env.chain.resolver, abi: (await import("../src/abi")).ifsoOutcomeResolverAbi, functionName: "claimableBond", args: [env.chain.bob.address] })).toBe(10_000_000n);
+    // audit M-1: half of the service's own bond came back (the proposer has half of its bond to withdraw); the other
+    // two halves sit in `forfeited` for the FeeRouter
+    const { ifsoOutcomeResolverAbi } = await import("../src/abi");
+    expect(await env.chain.balance(env.resolverAddress)).toBe(start - 5_000_000n);
+    expect(await env.chain.pc.readContract({ address: env.chain.resolver, abi: ifsoOutcomeResolverAbi, functionName: "claimableBond", args: [env.chain.bob.address] })).toBe(5_000_000n);
+    expect(await env.chain.pc.readContract({ address: env.chain.resolver, abi: ifsoOutcomeResolverAbi, functionName: "forfeited" })).toBe(10_000_000n);
+    // the float lost half a bond to panel silence: a human is told (once)
+    await resolverTick(env.deps);
+    const silent = env.alerts.filter(([c]) => c === `resolver-panel-silent:${q.id}`);
+    expect(silent.length).toBe(1);
+    expect(silent[0]![1]).toContain("5000000 USDG units");
 
     // the payment on the voided question refunds through the keeper
     await indexerTick(env.deps, async () => {});

@@ -154,7 +154,7 @@ export async function bootChain(): Promise<TestChain> {
   const usdg = await deploy("MockUSDG");
   const router = await deploy("FeeRouter", [d, usdg, ...[1, 2, 3, 4].map((i) => `0x${i.toString(16).padStart(40, "0")}`)]);
   const evaluator = await deploy("IfsoConditionEvaluator", [d, ZERO_ADDRESS, ZERO_ADDRESS]);
-  const resolver = await deploy("IfsoOutcomeResolver", [d, usdg, 7200, 72 * 3600, 10_000_000n, d]);
+  const resolver = await deploy("IfsoOutcomeResolver", [d, usdg, 7200, 72 * 3600, 10_000_000n, d, router]); // audit M-1: forfeited bond halves go to the FeeRouter
   const escrow = await deploy("IfsoEscrow", [d, usdg, evaluator, router, 250_000n, 500_000n]);
   const evalAbi = loadArtifact("IfsoConditionEvaluator").abi;
   await write(deployerK.a, evaluator, evalAbi, "setResolver", [resolver, true]);
