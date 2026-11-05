@@ -1368,6 +1368,9 @@ def arm_problems(results_path):
     elif r.get("main") != main:
         out.append(f"preflight ran on main {str(r.get('main'))[:12]} but private main is now {main[:12]}: run sudo ifso-release-preflight again")
     out += remote_problems(main)
+    if not gate_user_on() and not CFG["sandbox"]:
+        out.append("GATE_USER is not set in paths.conf (or is the release user): the gate would run the queued trees and their "
+                   "dependencies with access to the release user's keys. Run install.sh again (it makes ifso-gate) (audit M-2)")
     if r.get("sfp") != sched_fp(sched):
         out.append("preflight results belong to another schedule (schedule.json changed since): run sudo ifso-release-preflight again")
     want = [u["id"] for u in sched["updates"] if st["updates"][u["id"]]["status"] in ("pending", "held", "in_progress")]

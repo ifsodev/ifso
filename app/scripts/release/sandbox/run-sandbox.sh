@@ -523,6 +523,10 @@ as_rel git config --file "$RGITCFG" --unset "url.$W/standin.git.insteadOf"
 ok "47: arm.sh refuses while the release user's git config has url.*.insteadOf (names it)" bash -c "test $ARC -ne 0 && grep -q 'insteadOf' '$W/arm.out' && grep -q 'standin.git' '$W/arm.out'"
 ok "47: ... and because the clone's origin then resolves to another repo than PRIVATE_URL" grep -q "resolves to $W/standin.git" "$W/arm.out"
 mkdir -p "$W/opt/releases/$M1"; ln -sfn "$W/opt/releases/$M1" "$W/opt/current"   # what `ifso-deploy <main>` does before arming
+if [[ $MODE == local ]]; then   # the local sandbox has no gate user; outside a sandbox that must stop arming (audit M-2)
+  setconf IFSO_SANDBOX 0; runarm ARM_TEST=1; ARC=$?; setconf IFSO_SANDBOX 1
+  ok "M-2: outside a sandbox, arm.sh refuses a gate that would run as the release user (no GATE_USER)" bash -c "test $ARC -ne 0 && grep -q 'GATE_USER' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
+fi
 git -C "$W/backend" -c safe.directory='*' fetch -q origin 2>/dev/null; chown -R "$RUSER" "$W/backend" 2>/dev/null || true
 touch "$CTL/gh-token-bad"
 runarm ARM_TEST=1; ARC=$?
