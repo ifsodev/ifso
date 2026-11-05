@@ -10,11 +10,17 @@ SYSTEMCTL="${SYSTEMCTL:-systemctl}"
 echo "== autopilot"
 "$SYSTEMCTL" is-enabled "${TIMER:-ifso-release.timer}" 2>&1 | sed 's/^/timer enabled: /' || true
 "$SYSTEMCTL" is-active "${TIMER:-ifso-release.timer}" 2>&1 | sed 's/^/timer active:  /' || true
-if [[ -e "$RELEASE_HOME/PAUSE" ]]; then echo "PAUSED: $(head -c 300 "$RELEASE_HOME/PAUSE")"; else echo "not paused"; fi
+# release-user files are read with rel_read (as that user, never through a symlink; audit L-11)
+pause_rc=0; pause_txt="$(rel_read PAUSE 300)" || pause_rc=$?
+case "$pause_rc" in
+  0) echo "PAUSED: $pause_txt" ;;
+  2) echo "not paused" ;;
+  *) echo "PAUSED (the PAUSE entry is not a regular file: not shown)" ;;
+esac
 [[ -e "$ALLOW_FILE" ]] && echo "real deploys: ARMED" || echo "real deploys: NOT armed"
 echo "running revision: $(current_rev)"
 echo; echo "== queue"
 release_py status "$@" || true
 [[ "${1:-}" == --short ]] && exit 0
 echo; echo "== last alerts"
-tail -n 8 "$RELEASE_HOME/logs/alerts.log" 2>/dev/null || echo "(none yet)"
+rel_read logs/alerts.log 65536 8 2>/dev/null || echo "(none yet, or not a regular file)"

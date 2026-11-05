@@ -32,6 +32,36 @@ release_py() {
   while IFS= read -r l; do envs+=("$l"); done < <(runner_env)
   as_rel env "${envs[@]}" python3 "$RUNNER_LIB/release.py" "$@"
 }
+# rel_read <path relative to RELEASE_HOME> <max bytes> [tail lines]: print a release-user file the safe way (audit L-11). Read AS
+# the release user, every component opened with O_NOFOLLOW from RELEASE_HOME down (itself not a symlink either), a regular file
+# only, at most <max bytes> (or its last <tail lines> lines). Exit 2: it does not exist; 1: refused (symlink, not a regular file).
+rel_read() {
+  as_rel python3 -I -c '
+import os, stat, sys
+home, rel, mx, tl = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+parts = [p for p in rel.split("/") if p]
+if not parts or any(p in (".", "..") for p in parts):
+    sys.exit(1)
+try:
+    fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    for p in parts[:-1]:
+        fd = os.open(p, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+    fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+except FileNotFoundError:
+    sys.exit(2)
+except OSError:
+    sys.exit(1)
+st = os.fstat(fd)
+if not stat.S_ISREG(st.st_mode):
+    sys.exit(1)
+if tl:
+    os.lseek(fd, max(0, st.st_size - mx), 0)
+    data = os.read(fd, mx).decode("utf-8", "replace").splitlines()[-tl:]
+    sys.stdout.write("\n".join(data) + ("\n" if data else ""))
+else:
+    sys.stdout.write(os.read(fd, mx).decode("utf-8", "replace"))
+' "$RELEASE_HOME" "$1" "$2" "${3:-0}"
+}
 # Real deploys are armed only by the root-owned file ALLOW_REAL_DEPLOY (arm.sh LAUNCH_AT=... creates it).
 real_deploy_guard() { [[ -e "$ALLOW_FILE" ]] || die "real deploys are NOT armed ($ALLOW_FILE does not exist): refusing"; }
 # the revision running now: the release directory /opt/ifso/current points at (named by the full sha)

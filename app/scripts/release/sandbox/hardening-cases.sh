@@ -183,6 +183,23 @@ python3 -c 'import sys; open(sys.argv[1],"wb").write(b"\x89PNG\r\n\x1a\n"+b"0"*6
 ok "a real PNG poster is uploaded" GH update-03 t "$W/home/.relnotes-U1.md"
 ok "the upload happened" grep -q '/uploads/' "$W/api.log"
 
+echo "== L-11: root wrappers read release-user files without following symlinks"
+rm -rf "$W/home/logs"; mkdir -p "$W/evil-logs"; printf 'x %s\n' "$SECRET" >"$W/evil-logs/alerts.log"
+ln -s "$W/evil-logs" "$W/home/logs"; ln -sf "$W/db.env" "$W/home/PAUSE"
+SYSTEMCTL=true bash "$SBIN/ifso-release-status" >"$W/l11.out" 2>&1
+no "status with a planted PAUSE symlink and a symlinked logs/ never prints the target's text" grep -q "$SECRET" "$W/l11.out"
+ok "  status still says the queue is paused (the PAUSE entry exists)" grep -q "PAUSED" "$W/l11.out"
+rm -f "$W/home/logs" "$W/home/PAUSE"; mkdir -p "$W/home/logs"; printf 'plain alert line\n' >"$W/home/logs/alerts.log"; printf 'planned pause\n' >"$W/home/PAUSE"
+SYSTEMCTL=true bash "$SBIN/ifso-release-status" >"$W/l11b.out" 2>&1
+ok "control: regular PAUSE and alerts.log are shown" bash -c "grep -q 'PAUSED: planned pause' '$W/l11b.out' && grep -q 'plain alert line' '$W/l11b.out'"
+rm -f "$W/home/PAUSE"
+# the notify wrapper reads schedule.json (is the runner armed?): a symlink to a file the release user cannot write counts as no schedule
+printf '{"launchAt":"2026-11-17T14:00:00Z"}\n' >"$W/root-only-schedule.json"; ln -sf "$W/root-only-schedule.json" "$W/home/schedule.json"
+touch "$W/ALLOW"; printf 'ALLOW_FILE=%s\n' "$W/ALLOW" >>"$W/paths.conf"
+bash "$SBIN/ifso-release-notify" "L11 probe" "text" 0 >/dev/null 2>&1
+ok "notify: a symlinked schedule.json is not read (log only, as unarmed)" grep -q 'log only (not armed): L11 probe' "$W/home/logs/notify-log-only.log"
+rm -f "$W/home/schedule.json" "$W/ALLOW"
+
 echo "== B25: a poster staged AFTER its Release exists is uploaded on a later run, once"
 : >"$W/api.log"; echo '[]' >"$W/exists-update-04"
 ok "existing Release, no poster staged: exit 0, nothing uploaded" GH update-04 t "$W/home/.relnotes-U1.md"

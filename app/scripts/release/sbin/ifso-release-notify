@@ -11,7 +11,7 @@ LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
 # shellcheck disable=SC1091
 . "$LIB/common.sh"
 val() { [[ -r "$RELEASE_ENV" ]] && sed -n "s/^$1=//p" "$RELEASE_ENV" | tail -1 | tr -d "\"' \\r" || true; }
-logline() { mkdir -p "$RELEASE_HOME/logs" 2>/dev/null || true; printf '%s\n' "$1" | as_rel tee -a "$RELEASE_HOME/logs/$2" >/dev/null 2>&1 || true; }
+logline() { as_rel mkdir -p "$RELEASE_HOME/logs" 2>/dev/null || true; printf '%s\n' "$1" | as_rel tee -a "$RELEASE_HOME/logs/$2" >/dev/null 2>&1 || true; }
 if [[ "${1:-}" == --ping ]]; then
   [[ $# -ge 2 && $# -le 3 ]] || die "usage: ifso-release-notify --ping ok|fail|status [note]"
   kind="$2"; note="${3:-}"; note="${note:0:300}"
@@ -34,7 +34,8 @@ title="${1:0:200}"; msg="${2:0:3000}"; failed="${3:-0}"; channel="${4:-ops}"
 [[ "$failed" == 0 || "$failed" == 1 ]] || die "failure flag must be 0 or 1"
 [[ "$channel" == ops || "$channel" == test ]] || die "channel must be ops or test"
 if [[ "$channel" == ops ]]; then
-  launch="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])) or {}).get("launchAt") or "")' "$RELEASE_HOME/schedule.json" 2>/dev/null || true)"
+  # schedule.json is the release user's: read with rel_read (never through a symlink; audit L-11), parsed from stdin
+  launch="$(rel_read schedule.json 2097152 2>/dev/null | python3 -I -c 'import json,sys; print((json.load(sys.stdin) or {}).get("launchAt") or "")' 2>/dev/null || true)"
   if [[ -z "$launch" || ! -e "$ALLOW_FILE" ]]; then
     logline "$(date -u +%Y-%m-%dT%H:%M:%SZ) log only (not armed): $title | ${#msg} chars" notify-log-only.log
     exit 0
