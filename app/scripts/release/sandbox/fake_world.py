@@ -7,6 +7,8 @@
                          (CTL/ci.json = the check-runs; CTL/gh-token-bad = creating a Release answers 403)
                          GET .../commits/<sha>/status and .../commits/<sha>/check-runs for any other sha: Vercel's commit status
                          (CTL/vercel-state = success | failure | pending; absent = Vercel never reported anything)
+  website                GET /site/... : 403 "Vercel Security Checkpoint" page while CTL/site-checkpoint exists (the runner must
+                         never depend on it: frontend live = Vercel's deployment state of the exact sha)
 Injected failures are files in the control folder: readyz-down, verify-fail-TUnn (the route answers 500).
 usage: fake_world.py <port-file> <ctl-dir> <repo-dir> <opt-dir>
 """
@@ -77,6 +79,14 @@ class H(BaseHTTPRequestHandler):
             if m.group(3) == "status":
                 return self.reply(200, {"state": vs or "pending", "statuses": [{"context": "Vercel", "state": vs}] if vs else []})
             return self.reply(200, {"total_count": 0, "check_runs": []})
+        if p == "/site" or p.startswith("/site/"):  # the website behind Vercel's Security Checkpoint (CTL/site-checkpoint)
+            self.rec()
+            if os.path.exists(os.path.join(CTL, "site-checkpoint")):
+                b = b"<html><title>Vercel Security Checkpoint</title>We're verifying your browser</html>"
+                self.send_response(403); self.send_header("Content-Type", "text/html"); self.send_header("Content-Length", str(len(b)))
+                self.end_headers(); self.wfile.write(b)
+                return
+            return self.reply(200, {"site": "ok"})
         m = re.fullmatch(r"/repos/([^/]+/[^/]+)/releases/tags/(.+)", p)
         if m:
             r = releases.get(m.group(2))

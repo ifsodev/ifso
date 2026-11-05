@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests of the runner's decision logic (no git, no network, no sudo). Run: python3 -m unittest discover -s lib -p 'test_*.py'"""
-import datetime as dt, json, os, subprocess, sys, tempfile, unittest
+import datetime as dt, json, os, shutil, subprocess, sys, tempfile, unittest
 
 HOME = tempfile.mkdtemp(prefix="ifso-release-unit.")
 os.environ.update(RELEASE_HOME=HOME, NOTIFY_CMD="true", ALLOW_FILE=os.path.join(HOME, "ALLOW"), PUBLIC_CI_API="")
@@ -215,6 +215,59 @@ class ReleaseAlerts(unittest.TestCase):
             self.assertIn("work again", sent[-1][1])
         finally:
             R.run, R.CFG["ghrelease_cmd"] = old_run, old_cmd
+
+
+class ReleaseBody(unittest.TestCase):
+    """The GitHub Release body is the PUBLIC part of notes/TUnn.md only (What changes, How to see it, Activation): never the
+    integrator notes (## Integration, file names), never the Post copy, never a banned word (CLAUDE.md copy rules)."""
+
+    NOTE = ("# TU05: Plain receipts\n\n**What changes.** Every payment gets a receipt link.\n\n"
+            "**How to see it.** Open a claim link and press Receipt.\n\n"
+            "**Under the hood.** `app/src/api/routes/receipt.ts` renders it with `lib/pdf.ts`.\n\n"
+            "**Activation.** On by default.\n\n**Post (Telegram / X):** Receipts are here.\n\n"
+            "## Integration (for the integrator)\nFiles: `app/src/receipt.ts`. Test: `test/receipt.test.ts`; safe to re-run.\n")
+
+    def run_release(self, note):
+        os.makedirs(os.path.join(R.RELEASE_HOME, "notes"), exist_ok=True)
+        open(os.path.join(R.RELEASE_HOME, "notes", "TU05.md"), "w").write(note)
+        sent, bodies = [], []
+        old_run, old_cmd = R.run, R.CFG["ghrelease_cmd"]
+
+        def run(cmd, **k):
+            if cmd[0] == "ghrel":
+                bodies.append(open(cmd[3]).read())
+                return 0, "release created"
+            sent.append(cmd)
+            return 0, ""
+        R.run, R.CFG["ghrelease_cmd"] = run, "ghrel"
+        try:
+            st, t = {}, {}
+            R.github_release(st, {"id": "TU05", "n": 5, "name": "Plain receipts"}, t, os.path.join(HOME, "gh.log"))
+        finally:
+            R.run, R.CFG["ghrelease_cmd"] = old_run, old_cmd
+            os.remove(os.path.join(R.RELEASE_HOME, "notes", "TU05.md"))
+        return sent, bodies, t
+
+    def test_integration_post_and_file_naming_under_the_hood_are_not_published(self):
+        sent, bodies, t = self.run_release(self.NOTE)
+        self.assertEqual(len(bodies), 1)
+        b = bodies[0]
+        for keep in ("# TU05: Plain receipts", "**What changes.**", "**How to see it.**", "**Activation.**"):
+            self.assertIn(keep, b)
+        for gone in ("Integration", "receipt.ts", "Under the hood", "Post (", "safe"):
+            self.assertNotIn(gone, b)
+        self.assertEqual(sent, [], "a clean note raises no alert")
+        self.assertEqual(t.get("releaseTag"), "update-05")
+
+    def test_a_banned_word_in_the_public_part_skips_the_body_and_alerts_but_keeps_the_release(self):
+        sent, bodies, t = self.run_release(self.NOTE.replace("Every payment gets", "A safe way: every payment gets"))
+        self.assertEqual(len(bodies), 1, "the GitHub Release is still made")
+        self.assertNotIn("safe", bodies[0].lower())
+        self.assertNotIn("What changes", bodies[0], "the body is skipped (title line only)")
+        self.assertEqual(len(sent), 1)
+        self.assertIn("RELEASE NOTES REFUSED", sent[0][1])
+        self.assertIn("safe", " ".join(sent[0]))
+        self.assertEqual(t.get("releaseTag"), "update-05")
 
 
 class ReadyzLag(unittest.TestCase):
@@ -676,13 +729,17 @@ class OwnerOnlySigners(unittest.TestCase):
         sh("git", "fetch", "-q", cls.queue, "+refs/heads/*:refs/queue/*", cwd=cls.clone)
         os.makedirs(os.path.join(T, "opt/releases", cls.M))
         os.symlink(os.path.join(T, "opt/releases", cls.M), os.path.join(T, "opt/current"))
-        cls.saved = (R.CFG["repo"], R.CFG["allowed_signers"], os.environ.get("GIT_CONFIG_GLOBAL"))
+        # the queue root pinned at arming (audit L-13): base B (its merge-base with main) .. the owner-signed tip Q_owner
+        cls.pin = os.path.join(T, "queue-pin")
+        open(cls.pin, "w").write(f"{cls.B} {cls.Q_owner}\n")
+        cls.saved = (R.CFG["repo"], R.CFG["allowed_signers"], os.environ.get("GIT_CONFIG_GLOBAL"), R.CFG.get("queue_pin"), R.CFG["opt_dir"])
         R.CFG["repo"], R.CFG["allowed_signers"] = cls.clone, cls.signers
+        R.CFG["queue_pin"], R.CFG["opt_dir"] = cls.pin, os.path.join(T, "opt")
         os.environ["GIT_CONFIG_GLOBAL"] = cls.server_gitcfg  # the release user's ~/.gitconfig from install.sh: signs with the server key
 
     @classmethod
     def tearDownClass(cls):
-        R.CFG["repo"], R.CFG["allowed_signers"], g = cls.saved
+        R.CFG["repo"], R.CFG["allowed_signers"], g, R.CFG["queue_pin"], R.CFG["opt_dir"] = cls.saved
         if g is None:
             os.environ.pop("GIT_CONFIG_GLOBAL", None)
         else:
@@ -692,13 +749,14 @@ class OwnerOnlySigners(unittest.TestCase):
         self.sh("git", "checkout", "-q", "main", cwd=self.clone)
         self.sh("git", "reset", "-q", "--hard", self.M, cwd=self.clone)
 
-    def root_validate(self, sha):
+    def root_validate(self, sha, pin=None):
         """The root wrapper's own gate on `sha` (pushed to origin main first, as the runner does before the deploy)."""
         self.sh("git", "push", "-q", "-f", self.origin, f"{sha}:refs/heads/main", cwd=self.clone)
         conf = os.path.join(self.T, "paths.conf")
         open(conf, "w").write(f"RELEASE_USER={self.sh('id', '-un')}\nRELEASE_HOME={self.T}/home\nREPO_DIR={self.clone}\nQUEUE_REPO={self.queue}\n"
                               f"ROOT_REPO={self.T}/root.git\nPRIVATE_URL={self.origin}\nDEPLOY_BIN=/bin/false\nOPT_DIR={self.T}/opt\n"
-                              f"ALLOWED_SIGNERS={self.signers}\nRUNNER_LIB={os.path.dirname(os.path.abspath(__file__))}\nFETCH_WAIT=0\n")
+                              f"ALLOWED_SIGNERS={self.signers}\nRUNNER_LIB={os.path.dirname(os.path.abspath(__file__))}\nFETCH_WAIT=0\n"
+                              f"QUEUE_PIN={pin or self.pin}\n")
         sbin = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sbin")
         return self.sh("bash", os.path.join(sbin, "ifso-deploy-release"), "--validate", sha, ok=True,
                        env={"IFSO_RELEASE_CONF": conf, "IFSO_RELEASE_LIB": sbin, "GIT_CONFIG_GLOBAL": self.server_gitcfg})
@@ -743,6 +801,52 @@ class OwnerOnlySigners(unittest.TestCase):
         rc, out = self.root_validate(self.sh("git", "rev-parse", "HEAD", cwd=w))
         self.assertNotEqual(rc, 0, out)
 
+    # ---- audit L-13 (rescore of 2522423): docs/reviews/poc_rescore_l13_revert_reapply.py, both cases now REFUSED
+    def test_l13_poc_a_revert_of_an_owner_fix_on_main_is_refused(self):
+        w = self.clone
+        self.sh("git", "revert", "--no-edit", self.M, cwd=w)          # server-key signed, "This reverts commit M."
+        r = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIn("pinned queue", R.runner_commit_problem(r) or "")
+        rc, out = self.root_validate(r)
+        self.assertNotEqual(rc, 0, out)                                # M is the running release but no queued update
+        self.assertIn("pinned queue", out)
+
+    def test_l13_poc_b_reapply_of_an_abandoned_owner_commit_is_refused(self):
+        O = {"GIT_CONFIG_GLOBAL": self.ocfg}
+        wo = self.work
+        self.sh("git", "checkout", "-q", "--detach", self.B, cwd=wo, env=O)
+        open(os.path.join(wo, "debug"), "w").write("ALLOW_ANY=1\n")   # an owner-signed WIP commit never meant for main
+        self.sh("git", "add", "debug", cwd=wo, env=O)
+        self.sh("git", "commit", "-q", "-m", "wip: debug switch (never merge)", cwd=wo, env=O)
+        e = self.sh("git", "rev-parse", "HEAD", cwd=wo)
+        self.sh("git", "push", "-q", self.queue, f"{e}:refs/heads/anything", cwd=wo, env=O)  # the release user owns the queue repo
+        w = self.clone
+        self.sh("git", "fetch", "-q", self.queue, "+refs/heads/*:refs/queue/*", cwd=w)
+        self.sh("git", "cherry-pick", "-x", e, cwd=w)                 # server-key signed, "(cherry picked from commit E)"
+        c = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIn("not a commit of the pinned queue", R.runner_commit_problem(c) or "")
+        rc, out = self.root_validate(c)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("not a commit of the pinned queue", out)
+
+    def test_l13_without_a_pinned_queue_root_refuses_every_runner_commit(self):
+        t = {}
+        R.apply_commit({}, t, {"sha": self.Q_owner, "id": "TU02"}, os.path.join(self.T, "log"))
+        rc, out = self.root_validate(t["landedSha"], pin=os.path.join(self.T, "no-such-pin"))
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("no pinned queue", out)
+        self.assertIn("no pinned queue", R.runner_commit_problem(t["landedSha"], pins=[]) or "")
+
+    def test_l13_revert_of_an_older_update_that_is_not_the_running_release_is_refused(self):
+        t = {}
+        R.apply_commit({}, t, {"sha": self.Q_owner, "id": "TU02"}, os.path.join(self.T, "log"))
+        landed, w = t["landedSha"], self.clone
+        self.sh("git", "revert", "--no-edit", landed, cwd=w)
+        r = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIsNone(R.runner_commit_problem(r, cur=landed))      # the rollback of the running release: accepted
+        self.assertIsNone(R.runner_commit_problem(r, cur=self.M))      # landed is in this same deploy: accepted
+        self.assertIn("neither the running release", R.runner_commit_problem(r, cur=r) or "")  # cur past landed: refused
+
     def test_revert_with_the_inverse_patch_is_accepted_and_an_altered_one_refused(self):
         t = {}
         R.apply_commit({}, t, {"sha": self.Q_owner, "id": "TU02"}, os.path.join(self.T, "log"))
@@ -778,7 +882,7 @@ class GateUser(unittest.TestCase):
             os.environ.pop("IFSO_ALLOW_REAL_DEPLOY")
         self.assertEqual(argv[:7], ["sudo", "-n", "-u", "ifso-gate-test", "--", "env", "-i"])
         self.assertEqual(argv[-3:-1], ["bash", "-c"])
-        self.assertTrue(argv[-1].startswith("cd /var/lib/ifso-gate/release/app && "))
+        self.assertTrue(argv[-1].startswith("umask 022 && cd /var/lib/ifso-gate/release/app && "))
         envs = [a for a in argv[7:-3]]
         self.assertEqual(sorted(e.split("=", 1)[0] for e in envs), ["HOME", "LANG", "PATH", "TMPDIR"])
         self.assertIn("HOME=/var/lib/ifso-gate", envs)
@@ -786,6 +890,26 @@ class GateUser(unittest.TestCase):
 
     def test_no_gate_user_runs_as_the_runner(self):
         self.assertEqual(R.gate_shell("true", "/tmp")[:1], ["env"])
+
+    def test_gate_tree_is_readable_by_the_runner_whatever_umask_it_inherits(self):
+        """sudo-rs (Ubuntu 26.04, the server) keeps the caller's umask, 027 from common.sh when an operator runs
+        ifso-release-preflight; classic sudo's PAM session reset it. With 027 the gate user's tree was unreadable by the
+        runner, changed_tests() found no test, and the preflight passed updates whose tests fail (or need anvil)."""
+        d = tempfile.mkdtemp(prefix="ifso-umask.")
+        old = os.umask(0o077)
+        try:
+            for gu in ("", "ifso-gate-test"):
+                R.CFG["gate_user"], keep = gu, R.CFG["gate_user"]
+                try:
+                    self.assertTrue(R.gate_shell("true", d)[-1].startswith("umask 022 && cd "), gu)
+                finally:
+                    R.CFG["gate_user"] = keep
+            subprocess.run(R.gate_shell("mkdir t && echo x >t/f.test.ts", d), check=True)
+            self.assertEqual(oct(os.stat(os.path.join(d, "t")).st_mode & 0o777), "0o755")
+            self.assertEqual(oct(os.stat(os.path.join(d, "t", "f.test.ts")).st_mode & 0o777), "0o644")
+        finally:
+            os.umask(old)
+            shutil.rmtree(d, ignore_errors=True)
 
     def test_installs_ignore_scripts(self):
         self.assertIn("--ignore-scripts", R.CFG["gate_install"])
@@ -836,6 +960,36 @@ class StaleLocks(unittest.TestCase):
             self.assertEqual(R.clear_stale_git_locks([self.repo, self.bare], {}), [])
         finally:
             R.git_processes_in = old
+        self.assertTrue(all(os.path.exists(f) for f in self.stale))
+
+    def test_a_lock_replaced_between_the_check_and_the_removal_is_kept(self):
+        """Rescore info: check-then-remove race. A git process that starts after the busy check and re-creates the lock (a NEW
+        file at the same path) must keep it: the runner moves the old file aside, checks it is still the same inode and age and
+        that no git process started, and only then deletes it; otherwise the lock goes back."""
+        target = self.stale[0]
+        real_rename = R.os.rename
+        def racing_rename(a, b):
+            if a == target:  # a git process removes the stale lock and takes it anew, just before the runner acts
+                os.remove(a); open(a, "w").close()
+            real_rename(a, b)
+        R.os.rename = racing_rename
+        try:
+            removed = R.clear_stale_git_locks([self.repo, self.bare], None)
+        finally:
+            R.os.rename = real_rename
+        self.assertNotIn(target, removed)
+        self.assertTrue(os.path.exists(target), "the fresh lock of the new git process is back in place")
+        self.assertFalse([f for f in os.listdir(os.path.dirname(target)) if ".stale." in f], "no aside file left behind")
+        self.assertIn(self.stale[1], removed)
+
+    def test_a_git_process_that_starts_during_the_sweep_keeps_its_locks(self):
+        old, calls = R.git_processes_in, []
+        R.git_processes_in = lambda dirs: (calls.append(1) or ([] if len(calls) == 1 else [4242]))
+        try:
+            removed = R.clear_stale_git_locks([self.repo, self.bare], None)
+        finally:
+            R.git_processes_in = old
+        self.assertEqual(removed, [])
         self.assertTrue(all(os.path.exists(f) for f in self.stale))
 
     def test_a_git_process_in_another_repository_does_not_count(self):

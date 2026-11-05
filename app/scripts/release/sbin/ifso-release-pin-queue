@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Root only (NOT in sudoers: neither the runner nor ifso-ops may run it). Pins the queue the runner may release (audit L-13):
+# root fetches tu-queue from the queue repo into its own repository, checks that the tip is signed by an OWNER key, and writes
+# "<base> <tip>" (base = its merge-base with private main as root fetches it) to /etc/ifso-release/queue-pin. The root deploy
+# wrapper accepts a runner cherry-pick only of a commit on base..tip, and a runner revert only of the running release when it
+# carries such an update. arm.sh pins (replaces) it; after a rebuilt queue (README "Rebuilt queue") run it with --add.
+#   sudo ifso-release-pin-queue [--add]
+LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
+[[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
+# shellcheck disable=SC1091
+. "$LIB/common.sh"
+[[ $# == 0 || ( $# == 1 && "$1" == --add ) ]] || die "usage: ifso-release-pin-queue [--add]"
+out="$(pin_queue "$@")" || die "$out"
+say "$out"

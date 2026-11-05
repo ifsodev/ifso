@@ -18,6 +18,8 @@ ETC_DIR="${ETC_DIR:-/etc/ifso-release}"
 ALLOW_FILE="${ALLOW_FILE:-$ETC_DIR/ALLOW_REAL_DEPLOY}"
 RELEASE_ENV="${RELEASE_ENV:-$ETC_DIR/release.env}"
 DEPLOY_LOCK="${DEPLOY_LOCK:-/run/ifso-deploy.lock}"
+# the pinned queue (audit L-13): root-owned lines "<base> <tip>", written only by root (arm.sh, ifso-release-pin-queue)
+QUEUE_PIN="${QUEUE_PIN:-$ETC_DIR/queue-pin}"
 die() { printf '%s: %s\n' "$(basename "$0")" "$*" >&2; exit 1; }
 say() { printf '[%s %s] %s\n' "$(basename "$0")" "$(date -u +%H:%M:%S)" "$*"; }
 # as_rel: run a command as the release user (root only; in tests the caller already is that user)
@@ -132,29 +134,94 @@ owner_signed() {
 }
 # pid_of <a> <b>: git patch-id --verbatim of the diff a..b (binary content in, renames off): only line numbers do not count
 pid_of() { sgit diff --no-ext-diff --no-textconv --no-renames --binary --full-index "$1" "$2" | sgit patch-id --verbatim | cut -d' ' -f1; }
-# commit_ok <sha> [depth]: may this first-parent commit reach production? Yes when it is signed by an owner key, or when it is a
-# runner commit (one parent; the server key's signature counts for nothing) whose LAST trailer names a source X that is accepted:
-#   (cherry picked from commit X)   X signed by an owner key, and the same patch
-#   This reverts commit X.          X an ancestor, accepted itself (a revert, a re-apply), and the exact inverse patch
+# in_pinned_queue <sha>: X is a queued commit of a pinned queue (audit L-13): on the first-parent chain base..tip of a line of
+# $QUEUE_PIN (root-owned, written by arm.sh / ifso-release-pin-queue after root checked the tip is owner-signed). The release user
+# can push anything to its own queue repo; only what root pinned counts. No pin file = nothing is a queued commit.
+in_pinned_queue() {
+  local base tip
+  [[ -r "$QUEUE_PIN" ]] || return 1
+  while read -r base tip _; do
+    { is_sha "$base" && is_sha "$tip"; } || continue
+    sgit cat-file -e "$tip^{commit}" 2>/dev/null || continue
+    sgit rev-list --first-parent "$base..$tip" 2>/dev/null | grep -qx "$1" && return 0
+  done <"$QUEUE_PIN"
+  return 1
+}
+# from_queue <sha> [depth]: X carries a pinned queued update: X is one, or a matching cherry-pick of one ("add"), or a matching
+# revert of such a commit (a rollback, "remove"), or a revert of a rollback (a re-apply, "add"), and so on. Prints "add" or
+# "remove" (what X does to the update), or the reason when X carries none.
+from_queue() {
+  local x="$1" d="${2:-0}" line y a b pol
+  if in_pinned_queue "$x"; then owner_signed "$x" >/dev/null && { echo add; return 0; }; echo "${x:0:12} is pinned but not owner-signed"; return 1; fi
+  (( d < 6 )) || { echo "runner commits nested too deep"; return 1; }
+  line="$(sgit log -1 --format=%B "$x" | grep -E '^(\(cherry picked from commit [0-9a-f]{40}\)|This reverts commit [0-9a-f]{40}\.)$' | tail -1 || true)"
+  [[ -n "$line" && "$(sgit rev-list --parents -n 1 "$x" | wc -w | tr -d ' ')" == 2 ]] || { echo "${x:0:12} is not a commit of the pinned queue (arm.sh / ifso-release-pin-queue pin it)"; return 1; }
+  y="$(grep -oE '[0-9a-f]{40}' <<<"$line")"
+  ensure_commit "$y" || { echo "${x:0:12} names ${y:0:12}, which root cannot find"; return 1; }
+  if [[ "$line" == "(cherry picked"* ]]; then
+    { in_pinned_queue "$y" && owner_signed "$y" >/dev/null; } || { echo "cherry-pick of ${y:0:12}, which is not an owner-signed commit of the pinned queue"; return 1; }
+    a="$(pid_of "$y^" "$y")"; b="$(pid_of "$x^" "$x")"; pol=add
+  else
+    sgit merge-base --is-ancestor "$y" "$x^" || { echo "${x:0:12} reverts ${y:0:12}, which is not an ancestor of it"; return 1; }
+    pol="$(from_queue "$y" $((d + 1)))" || { echo "${x:0:12} reverts ${y:0:12}, which carries no pinned queued update"; return 1; }
+    [[ $pol == add ]] && pol=remove || pol=add
+    a="$(pid_of "$y^" "$y")"; b="$(pid_of "$x" "$x^")"
+  fi
+  [[ -n "$a" && "$a" == "$b" ]] || { echo "${x:0:12} is not the same (or the exact inverse) patch as ${y:0:12}"; return 1; }
+  echo "$pol"
+}
+# commit_ok <sha>: may this first-parent commit (between the running revision $CUR and the sha being deployed) reach production?
+# Yes when it is signed by an owner key, or when it is a runner commit (one parent; the server key's signature counts for nothing)
+# whose LAST trailer names a source X (audit M-2, narrowed by L-13):
+#   (cherry picked from commit X)   X an owner-signed commit of the PINNED queue ($QUEUE_PIN), and the same patch
+#   This reverts commit X.          X an ancestor that carries a pinned queued update (from_queue), and the exact inverse
+#                                   patch: a rollback (X adds the update) only of the running release ($CUR) or of a commit
+#                                   in $CUR..sha (this deploy); a re-apply (X is a rollback) of any earlier rollback.
+#                                   Never an owner fix or any other commit on main.
 # Prints the reason when refused. lib/release.py runner_commit_problem is the same rule (the runner checks before it pushes).
 commit_ok() {
-  local c="$1" d="${2:-0}" sig line x n a b
+  local c="$1" sig line x n a b
   sig="$(owner_signed "$c")" && return 0
-  (( d < 4 )) || { echo "runner commits nested too deep"; return 1; }
   n="$(sgit rev-list --parents -n 1 "$c" | wc -w | tr -d ' ')"
   [[ "$n" == 2 ]] || { echo "not signed by an owner key ($sig) and not a runner commit"; return 1; }
   line="$(sgit log -1 --format=%B "$c" | grep -E '^(\(cherry picked from commit [0-9a-f]{40}\)|This reverts commit [0-9a-f]{40}\.)$' | tail -1 || true)"
   [[ -n "$line" ]] || { echo "not signed by an owner key ($sig) and names no owner-signed source"; return 1; }
   x="$(grep -oE '[0-9a-f]{40}' <<<"$line")"
   ensure_commit "$x" || { echo "names ${x:0:12}, which root cannot find (not on main, not in the queue)"; return 1; }
+  [[ -r "$QUEUE_PIN" ]] || { echo "no pinned queue ($QUEUE_PIN): root accepts runner commits only after arm.sh (or ifso-release-pin-queue) pinned the queue"; return 1; }
   if [[ "$line" == "(cherry picked"* ]]; then
+    in_pinned_queue "$x" || { echo "cherry-pick of ${x:0:12}, which is not a commit of the pinned queue"; return 1; }
     sig="$(owner_signed "$x")" || { echo "cherry-pick of ${x:0:12}, which is not signed by an owner key ($sig)"; return 1; }
     a="$(pid_of "$x^" "$x")"; b="$(pid_of "$c^" "$c")"
     [[ -n "$a" && "$a" == "$b" ]] || { echo "not the same patch as ${x:0:12}, the owner-signed commit it says it picks"; return 1; }
     return 0
   fi
   sgit merge-base --is-ancestor "$x" "$c^" || { echo "reverts ${x:0:12}, which is not an ancestor of it"; return 1; }
-  sig="$(commit_ok "$x" $((d + 1)))" || { echo "reverts ${x:0:12}, which is not accepted itself: $sig"; return 1; }
+  sig="$(from_queue "$x")" || { echo "reverts ${x:0:12}: $sig"; return 1; }
+  if [[ "$sig" == add ]]; then   # c takes an update out (a rollback): only the running release or a commit of this deploy
+    is_sha "${CUR:-}" || { echo "reverts ${x:0:12}, but the running revision is unknown"; return 1; }
+    [[ "$x" == "$CUR" ]] || sgit rev-list --first-parent "$CUR..$c^" | grep -qx "$x" \
+      || { echo "reverts ${x:0:12}, which is neither the running release ${CUR:0:12} nor in this deploy"; return 1; }
+  fi   # else c puts a rolled-back queued update back (a re-apply after a retry): any earlier rollback
   a="$(pid_of "$x^" "$x")"; b="$(pid_of "$c" "$c^")"
   [[ -n "$a" && "$a" == "$b" ]] || { echo "not the exact inverse patch of ${x:0:12}, the commit it says it reverts"; return 1; }
 }
+# pin_queue [--add]: root pins the queue repo's tu-queue (QUEUE_REF) as "<base> <tip>" in $QUEUE_PIN: tip owner-signed, base =
+# its merge-base with private main as root fetches it. --add keeps the earlier lines (a rebuilt queue; old releases still roll back).
+pin_queue() {
+  local add=0 ref="${QUEUE_REF:-refs/heads/tu-queue}" main tip base tmp
+  [[ "$ref" == refs/* ]] || ref="refs/heads/$ref"
+  [[ "${1:-}" == --add ]] && add=1
+  [[ -n "$QUEUE_REPO" ]] || { echo "QUEUE_REPO is not set"; return 1; }
+  main="$(root_fetch_main 2>&1)" || { echo "${main##*$'\n'}"; return 1; }; main="${main##*$'\n'}"
+  root_fetch_local "$QUEUE_REPO" "+$ref:refs/pinned/fetch" || { echo "cannot fetch $ref from $QUEUE_REPO"; return 1; }
+  tip="$(sgit rev-parse --verify refs/pinned/fetch)" || return 1
+  owner_signed "$tip" >/dev/null || { echo "the queue tip ${tip:0:12} is not signed by an owner key: not pinned"; return 1; }
+  base="$(sgit merge-base "$tip" "$main")" || { echo "the queue tip ${tip:0:12} shares no history with private main"; return 1; }
+  sgit update-ref "refs/pinned/$tip" "$tip"
+  tmp="$(mktemp "$QUEUE_PIN.XXXXXX")"
+  { [[ $add == 1 && -r "$QUEUE_PIN" ]] && grep -vx "$base $tip" "$QUEUE_PIN"; printf '%s %s\n' "$base" "$tip"; } >"$tmp" || true
+  chmod 0644 "$tmp"; mv -f "$tmp" "$QUEUE_PIN"
+  echo "pinned the queue: $(sgit rev-list --first-parent --count "$base..$tip") update(s), ${base:0:12}..${tip:0:12}"
+}
+

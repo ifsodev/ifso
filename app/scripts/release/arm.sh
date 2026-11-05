@@ -7,7 +7,8 @@
 # CURRENT schedule (results.main == origin/main, results.sfp == the schedule's fingerprint), tested every pending and held
 # update and passed them all; public CI on the public main tip finished with 0 non-success (release.py arm-check, anonymous
 # GitHub API); no url.*.insteadOf in the release user's git config, origin answers the clone's main, and the server RUNS that main
-# (root's own fetch of private main agrees; incidents 47, 48); the release token created and deleted a draft Release (ifso-release-ghrelease --check-token). Going without
+# (root's own fetch of private main agrees; incidents 47, 48); the server's signing key is not in allowed_signers; root pins tu-queue (owner-signed tip) in queue-pin (audit L-13,
+# common.sh pin_queue); the release token created and deleted a draft Release (ifso-release-ghrelease --check-token). Going without
 # GitHub Releases needs ALLOW_NO_RELEASE_TOKEN=1 and prints a WARNING. Then it writes the 72 slots (hourly from LAUNCH_AT), creates the flag file ALLOW_REAL_DEPLOY and enables
 # the timer. Disarm = delete the flag file (the timer may stay on; a pass without the flag does nothing and alerts nobody).
 # Pause = ifso-release-pause. Test knobs: PREFIX, SYSTEMCTL (sandbox only). There is no knob that skips a check.
@@ -36,6 +37,17 @@ clone_tip="$(as_rel git -c safe.directory='*' -C "$REPO_DIR" rev-parse --verify 
 [[ "$clone_tip" == "$root_tip" ]] || die "the release clone's origin/main (${clone_tip:0:12}) is not private main as root fetches it (${root_tip:0:12}): a stand-in origin? (incident 47)"
 [[ "$(current_rev)" == "$root_tip" ]] || die "the server runs $(current_rev | cut -c1-12), private main is ${root_tip:0:12}: deploy main first (incident 48)"
 say "root's own fetch of private main: ${root_tip:0:12} = the release clone's origin/main = the running release"
+say "2b0/5 the server's own signing key is NOT an allowed signer (audit M-2)"
+if [[ -n "$PREFIX" && -n "${GIT_CONFIG_GLOBAL:-}" ]]; then rcfg="$GIT_CONFIG_GLOBAL"; else rcfg="$(getent passwd "$RELEASE_USER" | cut -d: -f6)/.gitconfig"; fi
+srvpub="$(git config --file "$rcfg" --get user.signingkey 2>/dev/null || true)"
+[[ -r "$srvpub" ]] || die "cannot read the runner's signing key ($rcfg user.signingkey): install.sh sets it"
+srvkey="$(cut -d' ' -f2 "$srvpub")"
+{ [[ -n "$srvkey" ]] && ! grep -qF "$srvkey" "$ALLOWED_SIGNERS"; } \
+  || die "the server's own signing key is in $ALLOWED_SIGNERS: remove it (owner keys only; audit M-2), or everything the runner signs is deployable"
+say "allowed_signers holds no server key"
+say "2c/5 root pins the queue (audit L-13): runner cherry-picks and reverts are accepted only for commits of this queue"
+pin="$(pin_queue)" || die "the queue could not be pinned: $pin"
+say "$pin"
 say "2b/5 release token (GitHub Releases with posters)"
 if ! tok="$("$SBIN_DIR/ifso-release-ghrelease" --check-token 2>&1)"; then
   if [[ "${ALLOW_NO_RELEASE_TOKEN:-0}" == 1 ]]; then

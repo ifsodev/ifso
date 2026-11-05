@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # Installs the Ifso release runner on the server, UNARMED (timer disabled, no flag file). Run ON THE SERVER as root, from a
 # checkout of this folder:
-#   sudo RELEASE_GIT_NAME="<name>" RELEASE_GIT_EMAIL="<email>" SYNC_PUBLIC_SRC=/root/sync-public.py \
-#        PUBLIC_GITHUB_REPO=<public-owner>/<repo> bash install.sh
-# FOUNDRY_VERSION or FOUNDRY_TARBALL, with FOUNDRY_SHA256: installs anvil for the gate (checksum-verified; see below).
+#   sudo SYNC_PUBLIC_SRC=/root/sync-public.py PUBLIC_GITHUB_REPO=<public-owner>/<repo> \
+#        PRIVATE_GITHUB_REPO=<owner>/<private-repo> bash install.sh
+# anvil for the gate: the pinned foundry release (sha256 hard-coded below) by default; see "anvil for the gate" below.
 # PUBLIC_GITHUB_REPO: the public repo; paths.conf gets PUBLIC_CI_API (public CI watcher, arming check) and PUBLIC_COMMIT_URL.
 # PRIVATE_GITHUB_REPO: the private repo (owner/name); paths.conf gets PRIVATE_URL, from which ROOT fetches private main itself with
 # its own read-only deploy key (/etc/ifso-release/root_deploy_key, made here, root 0600) to decide what is on main (audit L-12).
 # SYNC_PUBLIC_SRC: the private public-copy tool (docs/tools/sync-public.py, copied over by hand); needed on the first run.
 # RELEASE_GIT_NAME / RELEASE_GIT_EMAIL: the identity of the commits the runner makes itself on private main (cherry-picks,
-# reverts, re-applies). Use an account that is a member of the Vercel team that builds web/ (the owner's GitHub noreply
-# address), or Vercel skips the build of a rollback. Stored in paths.conf; a later run without them reuses those values.
+# reverts, re-applies). Default: the OWNER identity every commit on private main carries, read from the owner's principal in
+# /etc/ifso-release/allowed_signers (a GitHub noreply address: email = it, name = its login; see owner_id below). Vercel
+# skips the build of a commit whose author is not a member of its team ("Account is blocked", an earlier project's
+# incident 17), so a rollback by the public identity (ifsodev) would never reach the website. Override only with
+# another Vercel team member. Stored in paths.conf; a later run without them sets the owner identity again (an older
+# non-owner value is replaced, and install says so).
 # Safe to run again. Arming is a separate, single step (arm.sh) on launch day.
 #
 # What it makes:
@@ -41,10 +45,27 @@ conf_set() {
   printf '%s="%s"\n' "$1" "$2" >>"$f.new"; cat "$f.new" >"$f"; rm -f "$f.new"
 }
 # ---- the runner's git identity: without it git refuses (or guesses) every commit the runner makes, so every rollback pauses
-GIT_NAME="${RELEASE_GIT_NAME:-$(conf_get RELEASE_GIT_NAME)}"
-GIT_EMAIL="${RELEASE_GIT_EMAIL:-$(conf_get RELEASE_GIT_EMAIL)}"
+# the owner identity = the author of every commit on private main, which is also the owner's signing principal in
+# allowed_signers (`<id>+<login>@users.noreply.github.com namespaces="git" <key>`, README step 2): email = that principal,
+# name = <login>. Read from that file so no account name is written in this (public) repo.
+owner_id() {
+  local f p; f="$(P /etc/ifso-release/allowed_signers)"
+  [[ -r "$f" ]] || return 0
+  p="$(grep -vE '^[[:space:]]*(#|$)' "$f" | head -1 | cut -d' ' -f1 | cut -d, -f1)"
+  [[ "$p" =~ ^([0-9]+\+)?([A-Za-z0-9-]+)@users\.noreply\.github\.com$ ]] && printf '%s\n%s\n' "${BASH_REMATCH[2]}" "$p"
+  return 0
+}
+OWNER_GIT_NAME="$(owner_id | sed -n 1p)"; OWNER_GIT_EMAIL="$(owner_id | sed -n 2p)"
+if [[ -n "${RELEASE_GIT_NAME:-}${RELEASE_GIT_EMAIL:-}" ]]; then GIT_NAME="${RELEASE_GIT_NAME:-}"; GIT_EMAIL="${RELEASE_GIT_EMAIL:-}"
+elif [[ -n "$OWNER_GIT_EMAIL" ]]; then GIT_NAME="$OWNER_GIT_NAME"; GIT_EMAIL="$OWNER_GIT_EMAIL"
+else GIT_NAME="$(conf_get RELEASE_GIT_NAME)"; GIT_EMAIL="$(conf_get RELEASE_GIT_EMAIL)"
+  [[ -n "$GIT_EMAIL" ]] && say "WARNING: no owner key in allowed_signers yet: keeping the runner identity from paths.conf ($GIT_NAME <$GIT_EMAIL>)"
+fi
+old_id="$(conf_get RELEASE_GIT_NAME) <$(conf_get RELEASE_GIT_EMAIL)>"
+[[ "$old_id" != " <>" && "$old_id" != "$GIT_NAME <$GIT_EMAIL>" ]] && say "runner git identity: $old_id replaced by $GIT_NAME <$GIT_EMAIL>"
+[[ -z "$OWNER_GIT_EMAIL" || "$GIT_EMAIL" == "$OWNER_GIT_EMAIL" ]] || say "WARNING: the runner's commits on private main will be authored by $GIT_NAME <$GIT_EMAIL>, not the owner ($OWNER_GIT_EMAIL): Vercel skips the website build unless that account is in its team"
 [[ -n "$GIT_NAME" && -n "$GIT_EMAIL" && "$GIT_NAME$GIT_EMAIL" != *CHANGE_ME* ]] \
-  || die "no git identity for the runner's commits: sudo RELEASE_GIT_NAME='<name>' RELEASE_GIT_EMAIL='<email>' bash install.sh (README, 'Install on the server')"
+  || die "no git identity for the runner's commits: append the owner's signing key to $(P /etc/ifso-release/allowed_signers) as '<id>+<login>@users.noreply.github.com namespaces=\"git\" <key>' (the owner identity is read from it), or pass RELEASE_GIT_NAME / RELEASE_GIT_EMAIL (README, 'Install on the server')"
 [[ "$GIT_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+$ && "$GIT_NAME" != *[\"\'\$\`]* ]] || die "RELEASE_GIT_EMAIL must look like an email and RELEASE_GIT_NAME must not contain quotes or \$"
 GUSER=ifso-gate
 GHOME=/var/lib/ifso-gate
@@ -156,28 +177,49 @@ if [[ ! -e "$(P $RHOME/queue.git)" && -z "$PREFIX" ]]; then
   as_r git init -q --bare "$RHOME/queue.git"
 fi
 # ---- anvil for the gate: the app tests that start a local chain need it, and the gate never skips them (an update whose changed
-# tests need anvil FAILS the gate on a server without it). From a foundry release tarball, sha256-verified, anvil only:
-#   FOUNDRY_TARBALL=<local foundry_v<ver>_linux_<arch>.tar.gz> or FOUNDRY_VERSION=<ver> (downloaded), plus FOUNDRY_SHA256=<hex>
-#   (take it from the release's published checksums; the same version as the contracts' forge).
-if [[ -n "${FOUNDRY_TARBALL:-}${FOUNDRY_VERSION:-}" ]]; then
-  [[ "${FOUNDRY_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || die "FOUNDRY_SHA256 (64 hex) is required with FOUNDRY_TARBALL / FOUNDRY_VERSION"
-  ftmp="$(mktemp -d)"
-  tarball="${FOUNDRY_TARBALL:-}"
-  if [[ -z "$tarball" ]]; then
-    case "$(uname -m)" in x86_64) farch=amd64 ;; aarch64 | arm64) farch=arm64 ;; *) die "no foundry build for $(uname -m)" ;; esac
-    tarball="$ftmp/foundry.tar.gz"
-    curl -fsSL --retry 3 -o "$tarball" "https://github.com/foundry-rs/foundry/releases/download/v${FOUNDRY_VERSION}/foundry_v${FOUNDRY_VERSION}_linux_${farch}.tar.gz" \
-      || { rm -rf "$ftmp"; die "could not download foundry $FOUNDRY_VERSION"; }
+# tests need anvil FAILS the gate on a server without it). From the PINNED foundry release tarball (the version CI pins for the
+# contracts' forge, .github/workflows/ci.yml), sha256 hard-coded below per arch, anvil only; never `curl | sh`. A real install
+# (no PREFIX) installs it by default and skips the download when that anvil version is already there. Overrides:
+#   FOUNDRY_TARBALL=<local foundry_v<ver>_linux_<arch>.tar.gz> + FOUNDRY_SHA256=<hex>, or FOUNDRY_VERSION=<other ver> +
+#   FOUNDRY_SHA256=<hex> (from that release's published .sha256 file); FOUNDRY_SKIP=1 installs no anvil.
+# Hashes checked 2026-11-05 against the downloaded tarballs and the release's own foundry_v1.8.4_linux_<arch>.sha256 files.
+FOUNDRY_PIN=1.8.4
+foundry_pin_sha() {
+  case "$1" in
+    amd64) echo 699e2207a6a9b27ca17c48c81e56f1677ed9c58b623b59128b4e15ec9da0625e ;;
+    arm64) echo d998f88314c057dc37c1de9a2044f49b273505965ff94bea5c3c5aefa9d1debd ;;
+  esac
+}
+FOUNDRY_BASE_URL="${FOUNDRY_BASE_URL:-https://github.com/foundry-rs/foundry/releases/download}"   # test knob (file:// in the hardening cases)
+fver="${FOUNDRY_VERSION:-}"; [[ -z "$fver" && -z "$PREFIX" && -z "${FOUNDRY_TARBALL:-}" ]] && fver="$FOUNDRY_PIN"
+ANVIL_DST="$(P /usr/local/bin/anvil)"
+if [[ "${FOUNDRY_SKIP:-}" == 1 ]]; then
+  say "FOUNDRY_SKIP=1: no anvil installed"
+elif [[ -n "${FOUNDRY_TARBALL:-}$fver" ]]; then
+  fsum="${FOUNDRY_SHA256:-}"
+  case "$(uname -m)" in x86_64 | amd64) farch=amd64 ;; aarch64 | arm64) farch=arm64 ;; *) die "no foundry build for $(uname -m)" ;; esac
+  [[ -z "$fsum" && -z "${FOUNDRY_TARBALL:-}" && "$fver" == "$FOUNDRY_PIN" ]] && fsum="$(foundry_pin_sha "$farch")"
+  [[ "$fsum" =~ ^[0-9a-f]{64}$ ]] || die "FOUNDRY_SHA256 (64 hex) is required with FOUNDRY_TARBALL or a FOUNDRY_VERSION other than the pinned $FOUNDRY_PIN"
+  if [[ -z "${FOUNDRY_TARBALL:-}" && -x "$ANVIL_DST" && "$("$ANVIL_DST" --version 2>/dev/null | head -1)" == "anvil Version: $fver" ]]; then
+    say "anvil $fver already installed"
+  else
+    ftmp="$(mktemp -d)"
+    tarball="${FOUNDRY_TARBALL:-}"
+    if [[ -z "$tarball" ]]; then
+      tarball="$ftmp/foundry.tar.gz"
+      curl -fsSL --proto '=https,file' --retry 3 -o "$tarball" "$FOUNDRY_BASE_URL/v${fver}/foundry_v${fver}_linux_${farch}.tar.gz" \
+        || { rm -rf "$ftmp"; die "could not download foundry $fver"; }
+    fi
+    got="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$tarball")"
+    [[ "$got" == "$fsum" ]] || { rm -rf "$ftmp"; die "foundry tarball sha256 is $got, expected $fsum: nothing installed"; }
+    tar -xzf "$tarball" -C "$ftmp" anvil || { rm -rf "$ftmp"; die "no anvil in the foundry tarball"; }
+    install -d -m 0755 "$(P /usr/local/bin)"
+    install -m 0755 "$ftmp/anvil" "$ANVIL_DST"
+    rm -rf "$ftmp"
+    say "anvil ${fver:-from $FOUNDRY_TARBALL} installed (sha256 $fsum verified)"
   fi
-  got="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$tarball")"
-  [[ "$got" == "$FOUNDRY_SHA256" ]] || { rm -rf "$ftmp"; die "foundry tarball sha256 is $got, expected $FOUNDRY_SHA256: nothing installed"; }
-  tar -xzf "$tarball" -C "$ftmp" anvil || { rm -rf "$ftmp"; die "no anvil in the foundry tarball"; }
-  install -d -m 0755 "$(P /usr/local/bin)"
-  install -m 0755 "$ftmp/anvil" "$(P /usr/local/bin/anvil)"
-  rm -rf "$ftmp"
-  say "anvil installed (sha256 verified)"
-elif [[ ! -x "$(P /usr/local/bin/anvil)" ]] && ! command -v anvil >/dev/null 2>&1; then
-  say "WARNING: no anvil: updates whose changed tests start anvil will FAIL the gate (run again with FOUNDRY_TARBALL or FOUNDRY_VERSION, and FOUNDRY_SHA256)"
+elif [[ ! -x "$ANVIL_DST" ]] && ! command -v anvil >/dev/null 2>&1; then
+  say "WARNING: no anvil: updates whose changed tests start anvil will FAIL the gate (run again without PREFIX, or with FOUNDRY_VERSION / FOUNDRY_TARBALL)"
 fi
 # ---- three keys, made HERE (also under PREFIX for the sandbox); GitHub refuses one key as both a deploy key and an account key
 as_owner() { if [[ -z "$PREFIX" ]]; then runuser -u "$RUSER" -- "$@"; else "$@"; fi; }

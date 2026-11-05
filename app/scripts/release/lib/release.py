@@ -72,6 +72,7 @@ CFG = {
     # OWNER keys only (audit M-2): the server's own signing key is never in it, so a commit signed on this server is accepted
     # only as a runner commit whose trailer names an owner-signed commit with the same (or the inverse) patch.
     "allowed_signers": E("ALLOWED_SIGNERS", "/etc/ifso-release/allowed_signers"),
+    "queue_pin": E("QUEUE_PIN", "/etc/ifso-release/queue-pin"),    # root-owned "<base> <tip>" lines (arm.sh; audit L-13)
     "forbidden_file": E("FORBIDDEN_FILE", "/etc/ifso-release/forbidden.txt"),
     "infra_backoff": [int(x) for x in E("INFRA_RETRY_S", "10,30,60").split(",") if x.strip()],
     "transient_max": int(E("TRANSIENT_MAX_PASSES", "6")),
@@ -94,6 +95,11 @@ CFG = {
     "vercel_api": "" if "CHANGE_ME" in E("VERCEL_STATUS_API", "") else E("VERCEL_STATUS_API", "").rstrip("/"),
     "vercel_token_file": E("VERCEL_STATUS_TOKEN_FILE", ""),
     "vercel_wait_min": float(E("VERCEL_WAIT_MINUTES", "20")),
+    # DECISIONS 49: with VERCEL_STATUS_API AND a readable VERCEL_STATUS_TOKEN_FILE, a release that changes web/ GATES on Vercel:
+    # it is released only once Vercel's deployment of that exact sha is READY (success); ERROR, or nothing READY within
+    # VERCEL_WAIT_MINUTES, rolls it back like a failed post-release check. Without the token file: alert only (vercel_tick).
+    # The website itself (ifso.tech) is never fetched: Vercel's Security Checkpoint answers scripted requests with 403.
+    "vercel_poll_s": int(E("VERCEL_POLL_S", "20")),
     # /readyz answers 503 when the chain head is over the APP's 60 s (app/src/ops/health.ts RPC_MAX_LAG_S). Robinhood Chain (an
     # Orbit chain) makes no block without traffic, so a quiet hour would fail every post-release check and roll good updates
     # back. The runner accepts a 503 whose ONLY reasons are head lag up to this many seconds. CALIBRATE on the server before
@@ -108,7 +114,7 @@ ABORT = os.path.join(RELEASE_HOME, "ABORT")
 RESUME_NOTED = os.path.join(RELEASE_HOME, "RESUME_ANNOUNCED")  # written by `resume`: the wrapper already told the chat
 RUN_LOCK = os.path.join(RELEASE_HOME, ".run.lock")
 DEPLOY_TRANSIENT = 75
-STEPS = ["apply", "gate", "push", "deploy", "verify", "sync", "ghrelease", "publish"]
+STEPS = ["apply", "gate", "push", "deploy", "verify", "frontend", "sync", "ghrelease", "publish"]
 
 
 # ------------------------------------------------------------------ basics
@@ -349,27 +355,97 @@ def patch_id(a, b, repo=None):
     return p.stdout.split()[0].decode() if p.returncode == 0 and p.stdout.strip() else ""
 
 
-def runner_commit_problem(c, repo=None, depth=0):
+def running_rev():
+    """The revision running now: the release directory OPT_DIR/current points at (named by the full sha), as root reads it."""
+    try:
+        return os.path.basename(os.readlink(os.path.join(CFG["opt_dir"], "current")))
+    except OSError:
+        return ""
+
+
+def read_pins():
+    """The pinned queue (audit L-13): [(base, tip)] from the root-owned QUEUE_PIN file arm.sh writes; [] when there is none."""
+    try:
+        lines = open(CFG["queue_pin"]).read().splitlines()
+    except OSError:
+        return []
+    out = []
+    for ln in lines:
+        p = ln.split()
+        if len(p) >= 2 and all(re.fullmatch(r"[0-9a-f]{40}", x) for x in p[:2]):
+            out.append((p[0], p[1]))
+    return out
+
+
+def in_pins(x, pins, repo):
+    for base, tip in pins:
+        if not (re.fullmatch(r"[0-9a-f]{40}", base or "") and re.fullmatch(r"[0-9a-f]{40}", tip or "")):
+            continue
+        if x in (git("rev-list", "--first-parent", f"{base}..{tip}", repo=repo, ok=True) or "").split():
+            return True
+    return False
+
+
+def _trailer(c, repo):
+    found = TRAILER.findall(git("log", "-1", "--format=%B", c, repo=repo) or "")
+    parents = (git("rev-list", "--parents", "-n", "1", c, repo=repo, ok=True) or "").split()[1:]
+    return (found[-1] if found else None), len(parents)
+
+
+def from_queue(x, repo, pins, depth=0):
+    """(None, "add"|"remove") when x carries a pinned queued update: x is one (owner-signed) or a matching cherry-pick of one
+    ("add"), a matching revert of such a commit (a rollback, "remove"), a revert of a rollback (a re-apply, "add"), and so on.
+    (reason, None) otherwise. Mirrors common.sh from_queue."""
+    if in_pins(x, pins, repo):
+        return (None, "add") if signature_ok(x, repo) else (f"{x[:10]} is pinned but not owner-signed", None)
+    if depth >= 6:
+        return f"{x[:10]}: runner commits nested too deep", None
+    tr, n = _trailer(x, repo)
+    if not tr or n != 1:
+        return f"{x[:10]} is not a commit of the pinned queue (arm.sh / ifso-release-pin-queue pin it)", None
+    pick, rev_of = tr
+    y = pick or rev_of
+    if pick:
+        if not (in_pins(y, pins, repo) and signature_ok(y, repo)):
+            return f"cherry-pick of {y[:10]}, which is not an owner-signed commit of the pinned queue", None
+        a, b, pol = patch_id(y + "^", y, repo), patch_id(x + "^", x, repo), "add"
+    else:
+        if git("merge-base", "--is-ancestor", y, x + "^", repo=repo, ok=True) is None:
+            return f"{x[:10]} reverts {y[:10]}, which is not an ancestor of it", None
+        why, p = from_queue(y, repo, pins, depth + 1)
+        if why:
+            return f"{x[:10]} reverts {y[:10]}, which carries no pinned queued update", None
+        a, b, pol = patch_id(y + "^", y, repo), patch_id(x, x + "^", repo), ("remove" if p == "add" else "add")
+    if not a or a != b:
+        return f"{x[:10]} is not the same (or the exact inverse) patch as {y[:10]}", None
+    return None, pol
+
+
+def runner_commit_problem(c, repo=None, depth=0, cur=None, pins=None):
     """None when the root deploy wrapper will accept commit c: signed by an owner key, OR a runner commit (one parent) whose
-    last trailer names a source X that is accepted: `(cherry picked from commit X)` with X owner-signed and the same patch,
-    or `This reverts commit X.` with X an ancestor of c, itself accepted, and the inverse patch. Else the reason. Mirrors
-    common.sh commit_ok, so the runner holds an update BEFORE the push instead of the root wrapper refusing it after."""
+    last trailer names a source X: `(cherry picked from commit X)` with X an owner-signed commit of the PINNED queue and the
+    same patch, or `This reverts commit X.` with X an ancestor carrying a pinned queued update and the inverse patch: a rollback
+    only of the running release (cur) or a commit between it and c, a re-apply of any earlier rollback (audit M-2, L-13). Else the reason. Mirrors common.sh commit_ok, so the
+    runner holds an update BEFORE the push instead of the root wrapper refusing it after. `pins` defaults to the root-owned
+    QUEUE_PIN file, `cur` to the running revision."""
     repo = repo or CFG["repo"]
     if signature_ok(c, repo):
         return None
-    if depth >= 4:
-        return f"{c[:10]}: runner commits nested too deep"
-    parents = (git("rev-list", "--parents", "-n", "1", c, repo=repo, ok=True) or "").split()[1:]
-    if len(parents) != 1:
-        return f"{c[:10]} is not signed by an owner key and is not a runner commit (it has {len(parents)} parents)"
-    found = TRAILER.findall(git("log", "-1", "--format=%B", c, repo=repo) or "")
-    if not found:
+    tr, n = _trailer(c, repo)
+    if n != 1:
+        return f"{c[:10]} is not signed by an owner key and is not a runner commit (it has {n} parents)"
+    if not tr:
         return f"{c[:10]} is not signed by an owner key and names no owner-signed source (no cherry-pick or revert trailer)"
-    pick, rev_of = found[-1]
+    pick, rev_of = tr
     x = pick or rev_of
     if git("cat-file", "-e", x + "^{commit}", repo=repo, ok=True) is None:
         return f"{c[:10]} names {x[:10]}, which is not in this repository"
+    pins = read_pins() if pins is None else pins
+    if not pins:
+        return f"{c[:10]}: no pinned queue ({CFG['queue_pin']}): root accepts runner commits only after arm.sh pinned the queue"
     if pick:
+        if not in_pins(x, pins, repo):
+            return f"{c[:10]} is a cherry-pick of {x[:10]}, which is not a commit of the pinned queue"
         if not signature_ok(x, repo):
             return f"{c[:10]} is a cherry-pick of {x[:10]}, which is not signed by an owner key"
         a, b = patch_id(x + "^", x, repo), patch_id(c + "^", c, repo)
@@ -378,9 +454,16 @@ def runner_commit_problem(c, repo=None, depth=0):
         return None
     if git("merge-base", "--is-ancestor", x, c + "^", repo=repo, ok=True) is None:
         return f"{c[:10]} reverts {x[:10]}, which is not an ancestor of it"
-    why = runner_commit_problem(x, repo, depth + 1)
+    why, pol = from_queue(x, repo, pins)
     if why:
-        return f"{c[:10]} reverts {x[:10]}, which is not accepted itself: {why}"
+        return f"{c[:10]} reverts {x[:10]}: {why}"
+    if pol == "add":  # c takes an update out (a rollback): only the running release or a commit of this deploy
+        cur = running_rev() if cur is None else cur
+        if not re.fullmatch(r"[0-9a-f]{40}", cur or ""):
+            return f"{c[:10]} reverts {x[:10]}, but the running revision is unknown"
+        if x != cur and x not in (git("rev-list", "--first-parent", f"{cur}..{c}^", repo=repo, ok=True) or "").split():
+            return f"{c[:10]} reverts {x[:10]}, which is neither the running release {cur[:10]} nor in this deploy"
+    # else c puts a rolled-back queued update back (a re-apply after a retry): any earlier rollback
     a, b = patch_id(x + "^", x, repo), patch_id(c, c + "^", repo)
     if not a or a != b:
         return f"{c[:10]} is not the exact inverse patch of {x[:10]}, the commit it says it reverts (patch-id differs)"
@@ -492,8 +575,11 @@ def gate_user_on():
 
 def gate_shell(cmd, cwd, env=None):
     """argv that runs the shell command `cmd` in `cwd` as the gate user with a CLEAN environment (PATH, HOME, TMPDIR and the
-    given extras only); without GATE_USER (local sandbox) as the runner itself with its environment plus the extras."""
-    line = f"cd {shlex.quote(cwd)} && {cmd}"
+    given extras only); without GATE_USER (local sandbox) as the runner itself with its environment plus the extras.
+    umask 022 always: the runner reads the gate user's tree (changed tests, anvil use). sudo-rs (the server) keeps the caller's
+    umask (027 from common.sh when an operator runs ifso-release-preflight) where classic sudo's PAM session reset it, and a
+    0640 tree made changed_tests() find nothing: the preflight passed updates whose tests fail."""
+    line = f"umask 022 && cd {shlex.quote(cwd)} && {cmd}"
     if not gate_user_on():
         return ["env", *[f"{k}={v}" for k, v in (env or {}).items()], "bash", "-c", line]
     e = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": CFG["gate_home"], "LANG": "C.UTF-8", **(env or {})}
@@ -667,6 +753,7 @@ def verify(u, log):
 def hold(st, u, t, reason):
     t["status"], t["reason"], t["heldAt"] = "held", reason, iso(now())
     t.pop("step", None)
+    t.pop("vercelWaitSince", None)  # a retry waits for Vercel afresh
     nxt = next_pending(st, schedule(), any_time=True)
     notify(st, f"HELD {u['id']} {u['name']}", plain(f"{u['id']} was not released: {reason}",
            "no. It never went live (or was taken back); the live app is unchanged",
@@ -779,12 +866,51 @@ def tag_for(u):
     return f"update-{u['n']:02d}"
 
 
+# the copy rules of CLAUDE.md, as app/test/bannedWords.test.ts enforces them (BANNED + ENDORSEMENT): never in a public body
+BANNED_WORDS = [r"\bapy\b", r"\byield\w*", r"\bguarantee\w*", r"\bpartner\w*", r"\bbet(s|ting|tor)?\b", r"\bwager\w*", r"\bodds\b",
+                r"\bstake[sd]?\b", r"\bpayouts?\b", r"\bsportsbook\b", r"\bgambl\w*", r"\bwin money\b", r"\bsafe\w*", r"can'?t lose",
+                r"\binsured?\b", r"licensed escrow",
+                r"\b(official|endorsed|approved|sponsored|certified)\s+(by|partner)\b|\bpowered by\b|\bin association with\b"]
+PUBLIC_SECTIONS = ("what changes", "how to see it", "activation")
+_SECTION = re.compile(r"^(?:#{2,6}\s+(?P<h>.+?)\s*|\*\*(?P<b>[^*]+?)[.:]?\*\*.*)$")
+_FILE_REF = re.compile(r"`[^`\s]*(/|\.(ts|tsx|js|py|sh|sql|json|md|sol))[^`]*`")
+
+
+def banned_hits(text):
+    return sorted({m.group(0) for rx in BANNED_WORDS for m in re.finditer(rx, text, re.I)})
+
+
+def public_release_body(note):
+    """The PUBLIC part of notes/TUnn.md for the GitHub Release: the title line plus What changes / How to see it / Activation
+    (and Under the hood only when it names no file). Never ## Integration (the integrator's file list), never the Post copy."""
+    out, keep = [], True
+    for ln in note.splitlines():
+        m = _SECTION.match(ln.strip())
+        if ln.startswith("# "):
+            keep = True
+        elif m:
+            name = (m.group("h") or m.group("b") or "").strip().rstrip(".:").lower()
+            keep = name in PUBLIC_SECTIONS or (name == "under the hood" and not _FILE_REF.search(ln))
+        if keep:
+            out.append(ln)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip() + "\n"
+
+
 def github_release(st, u, t, log):
-    """One GitHub Release per update with its poster on top. Best effort and idempotent: never blocks a release."""
+    """One GitHub Release per update with its poster on top. Best effort and idempotent: never blocks a release. The body is
+    the public part of the notes only, and a banned word in it skips the body (title only) with one alert."""
     if not CFG["ghrelease_cmd"]:
         return
     notes = os.path.join(RELEASE_HOME, "notes", f"{u['id']}.md")
-    body = open(notes).read() if os.path.exists(notes) else u["name"]
+    body = public_release_body(open(notes).read()) if os.path.exists(notes) else u["name"]
+    hits = banned_hits(body)
+    if hits:
+        title = f"# Update {u['n']}" + ("" if banned_hits(u["name"]) else f": {u['name']}")
+        notify(st, f"RELEASE NOTES REFUSED {u['id']}", plain(
+            f"the public notes of {u['id']} use words the copy rules forbid ({', '.join(hits)[:120]}): the GitHub Release is made "
+            "with its title only", f"no. {u['id']} is live", "the Release is published without its notes",
+            f"the owner fixes notes/{u['id']}.md and edits the Release body by hand"), failure=True, key=f"relnotes-{u['id']}", every=24 * 3600)
+        body = title + "\n"
     sha = t.get("publicSha") or t.get("landedSha", "")
     nf = os.path.join(RELEASE_HOME, f".relnotes-{u['id']}.md")
     with open(nf, "w") as f:
@@ -941,13 +1067,18 @@ def release_steps(st, sched, u, t, log, resuming):
         if bad:
             raise Fail(f"post-release check failed: {res[bad[0]]['out'][-180:]}")
 
+    def s_frontend():
+        if web_changed(t["landedSha"]) and vercel_gate_on():
+            wait_vercel_ready(u, t, log)
+
     def s_publish():
         t["status"], t["releasedAt"] = "released", iso(now())
         t.pop("step", None)
         t.pop("pushed", None)
         t.pop("blockedReason", None)
         st["lastReleaseAt"] = t["releasedAt"]
-        if CFG["vercel_api"] and web_changed(t["landedSha"]):  # read by vercel_tick at the end of this and later passes
+        if CFG["vercel_api"] and web_changed(t["landedSha"]) and not (t.get("vercel") or {}).get("gated"):
+            # alert-only mode (or the API never answered while gating): read by vercel_tick at the end of this and later passes
             t["vercel"] = {"sha": t["landedSha"], "since": t["releasedAt"], "state": "watching"}
         st.pop("allDone", None)
         nxt = next_pending(st, sched, any_time=True)
@@ -960,6 +1091,7 @@ def release_steps(st, sched, u, t, log, resuming):
     step("push", s_push)
     step("deploy", s_deploy)
     step("verify", s_verify)
+    step("frontend", s_frontend)
     step("sync", lambda: sync_public(st, u, t, log))
     step("ghrelease", lambda: github_release(st, u, t, log))
     step("publish", s_publish)
@@ -1009,6 +1141,25 @@ def git_processes_in(dirs):
     return found
 
 
+def _remove_if_unchanged(path, s0, repos):
+    """Remove the stale lock `path` (seen as `s0`) without a check-then-remove race: move it aside atomically, then delete the
+    aside file only if it is still the same file (inode, mtime) and no git process started in the repositories meanwhile; else
+    put it back (link, never over a lock a new git process made in the meantime). True when removed."""
+    aside = f"{path}.stale.{os.getpid()}"
+    os.rename(path, aside)
+    s1 = os.lstat(aside)
+    if (s1.st_ino, s1.st_mtime) == (s0.st_ino, s0.st_mtime) and not git_processes_in(repos):
+        os.remove(aside)
+        return True
+    try:
+        os.link(aside, path)
+    except FileExistsError:
+        pass
+    os.remove(aside)
+    say(f"git lock {path} changed or a git process started while it was checked: kept")
+    return False
+
+
 def clear_stale_git_locks(repos, st=None, where="pass"):
     """Incident 43: every *.lock under the git dir of each repo (index.lock, packed-refs.lock, HEAD.lock, refs/**/*.lock, ...)
     older than 10 minutes is removed, but only when no git process of this user works in any of them. Each removed lock is
@@ -1033,8 +1184,8 @@ def clear_stale_git_locks(repos, st=None, where="pass"):
             for f in fn:
                 path = os.path.join(dp, f)
                 try:
-                    if f.endswith(".lock") and t0 - os.lstat(path).st_mtime > LOCK_STALE_S:
-                        os.remove(path)
+                    s0 = os.lstat(path)
+                    if f.endswith(".lock") and t0 - s0.st_mtime > LOCK_STALE_S and _remove_if_unchanged(path, s0, repos):
                         removed.append(path)
                 except OSError as e:
                     say(f"stale git lock {path} could NOT be removed ({e.strerror}): remove it by hand")
@@ -1173,6 +1324,60 @@ def vercel_state(statuses, check_runs):
     if any(x in ("pending", "queued", "in_progress", "requested", "waiting", None) for x in v):
         return "pending"
     return "ok"
+
+
+def log_line(log, msg):
+    say(msg)
+    if log:
+        with open(log, "a") as f:
+            f.write(f"[{iso(now())}] {msg}\n")
+
+
+def vercel_gate_on():
+    """DECISIONS 49: Vercel gates web releases only with the API and a readable read-only token file; else alert only."""
+    tf = CFG["vercel_token_file"]
+    return bool(CFG["vercel_api"] and tf and os.path.isfile(tf) and os.access(tf, os.R_OK))
+
+
+def vercel_mode():
+    if vercel_gate_on():
+        return f"Vercel: GATES web releases (READY for the exact sha within {CFG['vercel_wait_min']:g} min, else rollback)"
+    if CFG["vercel_api"]:
+        return "Vercel: alert only (no readable VERCEL_STATUS_TOKEN_FILE; a web release is not gated on its deploy)"
+    return "Vercel: off (VERCEL_STATUS_API not set; web deploys are not checked)"
+
+
+def wait_vercel_ready(u, t, log):
+    """The frontend-live check (DECISIONS 49, lesson A4): Vercel's deployment state of the update's own private main commit, read
+    from the GitHub commit statuses / check-runs Vercel posts. READY -> return; ERROR -> Fail; nothing READY within
+    VERCEL_WAIT_MINUTES (counted from the first wait, kept across a crash) -> Fail. Only API read errors all the way through do
+    not fail (the site may be fine; alert-only watch instead). Never fetches the website (its bot checkpoint answers 403)."""
+    sha = t["landedSha"]
+    since = t.setdefault("vercelWaitSince", iso(now()))
+    seen, last = None, ""
+    while True:
+        try:
+            statuses = vercel_api_get(f"/commits/{sha}/status").get("statuses", [])
+            runs = vercel_api_get(f"/commits/{sha}/check-runs?per_page=100").get("check_runs", [])
+            seen = vercel_state(statuses, runs)
+        except Exception as e:  # noqa: BLE001
+            last = type(e).__name__
+        if seen == "ok":
+            t["vercel"] = {"sha": sha, "since": since, "state": "ok", "gated": True}
+            log_line(log, f"Vercel deployment of {sha[:10]} is READY")
+            return
+        if seen == "failed":
+            t["vercel"] = {"sha": sha, "since": since, "state": "failed", "gated": True}
+            raise Fail(f"Vercel deployment of {sha[:10]} FAILED (ERROR): the website did not get {u['id']}")
+        if (now() - parse(since)).total_seconds() >= CFG["vercel_wait_min"] * 60:
+            if seen is None:  # the status API never answered: no verdict on the site, so watch and alert instead
+                t["vercel"] = {"sha": sha, "since": since, "state": "watching"}
+                log_line(log, f"Vercel status API unreachable for {CFG['vercel_wait_min']:g} min ({last}): released, watched alert-only")
+                return
+            t["vercel"] = {"sha": sha, "since": since, "state": "missing", "gated": True}
+            raise Fail(f"Vercel deployment of {sha[:10]} not READY within {CFG['vercel_wait_min']:g} min (state {seen}): the website "
+                       f"did not get {u['id']}")
+        time.sleep(max(0, CFG["vercel_poll_s"]))
 
 
 def vercel_tick(st, sched):
@@ -1476,6 +1681,7 @@ def cmd_status(short=False):
     pf = preflight_line()
     if pf:
         print(pf)
+    print(vercel_mode())
     if short:
         return 0
     print(f"\n{'TU':5} {'slot (UTC)':20} {'status':12} {'main':10} {'public':10} note")

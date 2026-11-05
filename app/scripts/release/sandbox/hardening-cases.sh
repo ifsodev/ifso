@@ -84,6 +84,8 @@ G -C "$W/repo" checkout -q main; G -C "$W/repo" reset -q --hard "$GOOD"; G -C "$
 G -C "$W/repo" checkout -q -b q1 "$GOOD"; echo q >"$W/repo/q"; G -C "$W/repo" add q; sign -m "feat: TU07 queued"; QOWN="$(G -C "$W/repo" rev-parse HEAD)"
 G -C "$W/repo" checkout -q -b q2 "$GOOD"; echo u >"$W/repo/u"; G -C "$W/repo" add u; G -C "$W/repo" commit -q -m "feat: TU08 unsigned"; QUNS="$(G -C "$W/repo" rev-parse HEAD)"
 G -C "$W/repo" push -q "$W/queue.git" "$QOWN:refs/heads/tu-queue" "$QUNS:refs/heads/other"
+# the queue root pinned at arming (audit L-13): GOOD..QOWN; the unsigned "other" branch is not part of it
+printf '%s %s\n' "$GOOD" "$QOWN" >"$W/queue-pin"; echo "QUEUE_PIN=$W/queue-pin" >>"$W/paths.conf"
 G -C "$W/repo" checkout -q main
 onmain() { G -C "$W/repo" push -q -f origin "$1:refs/heads/main"; }
 # 1. no trailer at all
@@ -247,6 +249,20 @@ FOUNDRY_TARBALL="$W/foundry.tar.gz" FOUNDRY_SHA256="$(printf '0%.0s' {1..64})" S
 ok "a foundry tarball with the wrong sha256 is refused and nothing is installed" bash -c "[[ $rc != 0 ]] && grep -qi 'sha256' '$W/inst4.out' && test ! -e '$W/pfx3/usr/local/bin/anvil'"
 FOUNDRY_TARBALL="$W/foundry.tar.gz" FOUNDRY_SHA256="$SUM" SYNC_PUBLIC_SRC="$W/sync-public.py" INST "$W/pfx3" >"$W/inst5.out" 2>&1
 ok "the verified tarball installs anvil (only anvil) for the gate" bash -c "test -x '$W/pfx3/usr/local/bin/anvil' && test ! -e '$W/pfx3/usr/local/bin/forge'"
+# the default path: the PINNED version with the sha256 hard-coded in install.sh (never curl | sh); served from file:// here
+PIN="$(sed -n 's/^FOUNDRY_PIN=//p' "$HERE/../install.sh")"
+case "$(uname -m)" in x86_64 | amd64) FARCH=amd64 ;; *) FARCH=arm64 ;; esac
+CI="$HERE/../../../../.github/workflows/ci.yml"
+if [[ -f "$CI" ]]; then
+  ok "install.sh pins the foundry version CI pins for forge (v$PIN)" bash -c "grep -q 'foundry-toolchain' '$CI' && ! grep -oE 'version: v[0-9]+\.[0-9]+\.[0-9]+' '$CI' | grep -vqx 'version: v$PIN'"
+fi
+ok "install.sh hard-codes a sha256 for both linux arches of the pinned release" bash -c "grep -qE '^    amd64\) echo [0-9a-f]{64} ;;' '$HERE/../install.sh' && grep -qE '^    arm64\) echo [0-9a-f]{64} ;;' '$HERE/../install.sh'"
+ok "install.sh never pipes a download into a shell" bash -c "! grep -vE '^[[:space:]]*#' '$HERE/../install.sh' | grep -qE 'curl[^|]*\|[[:space:]]*(ba|z)?sh'"
+mkdir -p "$W/frel/v$PIN"; cp "$W/foundry.tar.gz" "$W/frel/v$PIN/foundry_v${PIN}_linux_$FARCH.tar.gz"
+FOUNDRY_BASE_URL="file://$W/frel" FOUNDRY_VERSION="$PIN" SYNC_PUBLIC_SRC="$W/sync-public.py" INST "$W/pfx4" >"$W/inst6.out" 2>&1; rc=$?
+ok "the pinned version's download is checked against the HARD-CODED sha256 (a tampered tarball is refused, nothing installed)" bash -c "[[ $rc != 0 ]] && grep -q \"expected \$(sed -n 's/^    $FARCH) echo \\([0-9a-f]*\\) ;;/\\1/p' '$HERE/../install.sh')\" '$W/inst6.out' && test ! -e '$W/pfx4/usr/local/bin/anvil'"
+FOUNDRY_BASE_URL="file://$W/frel" FOUNDRY_VERSION=9.9.9 SYNC_PUBLIC_SRC="$W/sync-public.py" INST "$W/pfx5" >"$W/inst7.out" 2>&1; rc=$?
+ok "another foundry version without FOUNDRY_SHA256 is refused" bash -c "[[ $rc != 0 ]] && grep -q 'FOUNDRY_SHA256 (64 hex) is required' '$W/inst7.out'"
 
 echo "== C21: push-queue.sh pushes a rebuilt queue to a NEW branch and never overwrites tu-queue"
 G init -q --bare -b main "$W/srvqueue.git"
@@ -267,6 +283,51 @@ ok "the rebuilt queue lands on the NEW branch queue-r1; tu-queue keeps the old t
 LOCAL_BRANCH=queue-r1 PQ queue-r1 >"$W/pq5.out" 2>&1; rc=$?
 ok "pushing to a branch name that already exists is refused" bash -c "[[ $rc != 0 ]] && grep -q 'already exists' '$W/pq5.out'"
 ok "README has the 'Rebuilt queue' section push-queue.sh points to, with remap and update-ref" bash -c "grep -q '^## Rebuilt queue' '$HERE/../README.md' && grep -q 'release.py remap' '$HERE/../README.md' && grep -q 'update-ref refs/heads/tu-queue' '$HERE/../README.md'"
+
+echo "== ID1: the runner's own commits on private main carry the OWNER identity by default (Vercel skips non-team authors, incident 17)"
+# the owner's principal in allowed_signers (README step 2) is where install.sh reads the owner identity from
+OWNER_LINE="1234+owner-x@users.noreply.github.com namespaces=\"git\" $(cut -d' ' -f1,2 "$W/key.pub")"
+OWNER_ID="owner-x <1234+owner-x@users.noreply.github.com>"
+IDCFG() { printf '%s <%s>' "$(git config --file "$1/var/lib/ifso-release/.gitconfig" user.name)" "$(git config --file "$1/var/lib/ifso-release/.gitconfig" user.email)"; }
+IDINST() { PREFIX="$1" SYNC_PUBLIC_SRC="$W/sync-public.py" bash "$HERE/../install.sh"; }
+IDINST "$W/pfx-id0" >"$W/id0.out" 2>&1; rc=$?
+ok "no owner key in allowed_signers and no identity given: install.sh refuses (never guesses) and says how" bash -c "[[ $rc != 0 ]] && grep -q 'allowed_signers' '$W/id0.out' && test ! -e '$W/pfx-id0/var/lib/ifso-release/.gitconfig'"
+mkdir -p "$W/pfx-id/etc/ifso-release"; printf '# owner keys only\n%s\n' "$OWNER_LINE" >"$W/pfx-id/etc/ifso-release/allowed_signers"
+IDINST "$W/pfx-id" >"$W/id1.out" 2>&1; rc=$?
+ok "install.sh without RELEASE_GIT_NAME / RELEASE_GIT_EMAIL installs (no refusal)" test "$rc" = 0
+ok "  the release user's git identity is the owner's (login + noreply address from allowed_signers)" test "$(IDCFG "$W/pfx-id")" = "$OWNER_ID"
+ok "  paths.conf records the owner identity" bash -c "grep -qx 'RELEASE_GIT_NAME=\"owner-x\"' '$W/pfx-id/etc/ifso-release/paths.conf' && grep -qx 'RELEASE_GIT_EMAIL=\"1234+owner-x@users.noreply.github.com\"' '$W/pfx-id/etc/ifso-release/paths.conf'"
+mkdir -p "$W/pfx-id2/etc/ifso-release"; printf '%s\n' "$OWNER_LINE" >"$W/pfx-id2/etc/ifso-release/allowed_signers"
+PREFIX="$W/pfx-id2" SYNC_PUBLIC_SRC="$W/sync-public.py" RELEASE_GIT_NAME=ifsodev RELEASE_GIT_EMAIL=350520651+ifsodev@users.noreply.github.com bash "$HERE/../install.sh" >"$W/id2.out" 2>&1
+ok "an explicit identity still overrides, with a warning that it is not the owner" bash -c "test \"\$(git config --file '$W/pfx-id2/var/lib/ifso-release/.gitconfig' user.name)\" = ifsodev && grep -q 'WARNING: the runner.s commits on private main will be authored by ifsodev' '$W/id2.out'"
+IDINST "$W/pfx-id2" >"$W/id3.out" 2>&1
+ok "a re-run without an identity replaces an older non-owner identity (the server's ifsodev) by the owner's, and says so" bash -c "test \"\$(git config --file '$W/pfx-id2/var/lib/ifso-release/.gitconfig' user.email)\" = 1234+owner-x@users.noreply.github.com && grep -q 'replaced by owner-x' '$W/id3.out'"
+ok "README says runner commits on private main carry the owner identity (incident 17)" bash -c "grep -q 'owner identity' '$HERE/../README.md' && grep -q 'incident 17' '$HERE/../README.md'"
+
+echo "== S1: sudoers is valid for sudo-rs (the server) and classic sudo; the wrappers, not sudo, check the TUnn argument"
+SUD="${HARDENING_SUDOERS:-$HERE/../sudoers}"   # HARDENING_SUDOERS: point at an older copy to watch the cases fail
+ok "no setting sudo-rs rejects (requiretty: 'unknown setting' on the server)" bash -c "! grep -vE '^[[:space:]]*#' '$SUD' | grep -q 'requiretty'"
+ok "no argument pattern in a command rule (sudo-rs does not match TU[0-9][0-9]): arguments are a plain '*' or exact words" bash -c "! grep -vE '^[[:space:]]*#' '$SUD' | grep -qE '/usr/local/sbin/[a-z-]+ [^,\\\\]*[][?]'"
+ok "L-13: the queue pin is root only (ifso-release-pin-queue is in no sudoers rule)" bash -c "! grep -q 'pin-queue' '$SUD'"
+ok "ops may retry and preflight with any argument (the wrapper decides)" bash -c "grep -qF '/usr/local/sbin/ifso-release-retry *' '$SUD' && grep -qF '/usr/local/sbin/ifso-release-preflight *' '$SUD'"
+# stand-ins for the runner and preflight: they record that a wrapper got past its own argument check
+printf 'import sys\nopen(sys.argv[0] + ".called", "a").write(" ".join(sys.argv[1:]) + "\\n")\n' >"$W/release.py"; cp "$W/release.py" "$W/preflight.py"
+for a in XX07 TU7 TU007 'TU01; id' 'TU01 TU02' '../TU01' 'tu01' ''; do
+  rm -f "$W"/*.py.called
+  ok "retry refuses '$a' before running anything" bash -c "! bash '$SBIN/ifso-release-retry' $([[ -n $a ]] && printf '%q' "$a") 2>'$W/s1.err' && grep -q 'usage: ifso-release-retry TUnn' '$W/s1.err' && test ! -e '$W/release.py.called'"
+  [[ -z $a ]] && continue
+  ok "preflight refuses '$a' before running anything" bash -c "! bash '$SBIN/ifso-release-preflight' $(printf '%q' "$a") 2>'$W/s1.err' && grep -q 'usage: ifso-release-preflight' '$W/s1.err' && test ! -e '$W/preflight.py.called'"
+done
+rm -f "$W"/*.py.called
+ok "retry TU07 passes the wrapper's check and reaches the runner" bash -c "bash '$SBIN/ifso-release-retry' TU07 && grep -qx 'retry TU07' '$W/release.py.called'"
+ok "preflight TU01 passes the wrapper's check and reaches the preflight" bash -c "bash '$SBIN/ifso-release-preflight' TU01 && grep -qx 'run --only TU01' '$W/preflight.py.called'"
+rm -f "$W/release.py" "$W/preflight.py" "$W"/*.py.called
+
+echo "== A4: no check fetches the website (ifso.tech sits behind Vercel's Security Checkpoint: scripted requests get a 403 page)"
+SITE_HITS="$(grep -rnE 'https?://(www\.)?ifso\.tech' "$HERE/../lib" "$HERE/../sbin" "$HERE/../arm.sh" "$HERE/../install.sh" "$HERE/../push-queue.sh" "$HERE/../../server" 2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#' || true)"
+ok "no runner, wrapper or server script requests https://ifso.tech (api.ifso.tech is Cloudflare, not Vercel)" test -z "$SITE_HITS"
+[[ -z "$SITE_HITS" ]] || printf '        %s\n' "$SITE_HITS"
+ok "the frontend-live check is Vercel's state of the exact sha (DECISIONS 49), not page content" bash -c "grep -q 'def wait_vercel_ready' '$HERE/../lib/release.py' && grep -q 'step(\"frontend\", s_frontend)' '$HERE/../lib/release.py'"
 
 echo "hardening cases: $PASS passed, $FAIL failed"
 [[ $FAIL == 0 ]]

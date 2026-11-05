@@ -55,6 +55,8 @@ if [[ $MODE == linux ]]; then
   note "install.sh (real, as root)"
   SYSTEMCTL="$SYSTEMCTL" PUBLIC_GITHUB_REPO=ifsodev/public-sandbox SYNC_PUBLIC_SRC="$SYNC_PY" RELEASE_GIT_NAME="$GIT_NAME" RELEASE_GIT_EMAIL="$GIT_EMAIL" bash "$REL/install.sh" >"$ROOT/install.log" 2>&1
   ok "install.sh ran clean" test $? -eq 0
+  PIN="$(sed -n 's/^FOUNDRY_PIN=//p' "$REL/install.sh")"
+  ok "install.sh downloaded the pinned foundry $PIN, checked the hard-coded sha256, installed its anvil" bash -c "grep -q 'anvil $PIN installed (sha256 [0-9a-f]* verified)' '$ROOT/install.log' && test \"\$(/usr/local/bin/anvil --version | head -1)\" = 'anvil Version: $PIN'"
   ok "sudoers file installed 0440 root" test "$(stat -c '%a %U' /etc/sudoers.d/ifso-release)" = "440 root"
   ok "visudo -c passes on the whole sudo configuration" visudo -c
   ok "timer installed but NOT enabled" test ! -e /etc/systemd/system/timers.target.wants/ifso-release.timer
@@ -206,6 +208,9 @@ EOF
     rm -rf "/var/lib/ifso-release-root/$1.git"
     install -d -o ifso-gate -g ifso-gate -m 0755 "$W/gate" "$W/gate.tmp" "$W/pfgate" "$W/pfgate.tmp"
   fi
+  # root pins the queue, as arm.sh does at arming (audit L-13): the root wrapper accepts runner commits only from it
+  setconf QUEUE_PIN "$ETC/queue-pin.$1"; rm -f "$ETC/queue-pin.$1"
+  "$SBIN/ifso-release-pin-queue" >"$W/pin.log" 2>&1 || { echo "ifso-release-pin-queue failed in $1:"; cat "$W/pin.log"; }
 }
 rp() { # rp <release.py args>: as the release user, with the runner's settings (every KEY=VALUE of paths.conf)
   local envs=() l
@@ -465,6 +470,35 @@ ok "resume after a runner pause: ONE 'release queue RESUMED' message (the wrappe
 as_rel kill "$(cat "$ROOT/w3.pid")" 2>/dev/null || true
 
 # =====================================================================================================================
+note "WORLD 3b: DECISIONS 49, a web release is gated on Vercel's deployment of its exact sha (READY), never on the website"
+new_world w3b
+set_past_launch; arm
+setconf VERCEL_STATUS_API "http://127.0.0.1:$PORT/repos/ifsodev/private-sandbox"; setconf VERCEL_POLL_S 0; setconf VERCEL_WAIT_MINUTES 20
+echo "read-only-status-token" >"$W/vercel-token"; chown "$RUSER" "$W/vercel-token" 2>/dev/null || true
+as_ops "$SBIN/ifso-release-status" --short >"$W/st-alert.out" 2>&1
+setconf VERCEL_STATUS_TOKEN_FILE "$W/vercel-token"
+as_ops "$SBIN/ifso-release-status" --short >"$W/st-gate.out" 2>&1
+ok "49: status says alert only without the token file, and GATES once it is set" bash -c "grep -q 'Vercel: alert only' '$W/st-alert.out' && grep -q 'Vercel: GATES web releases' '$W/st-gate.out'"
+touch "$CTL/site-checkpoint"   # the website answers every scripted request with Vercel's bot checkpoint (403), as ifso.tech does
+echo failure >"$CTL/vercel-state"
+rpass
+ok "49: Vercel ERROR on TU03's exact sha: TU03 rolled back and HELD (like a failed post-release check), TU01 and TU02 released" bash -c "test '$(st TU03)' = held && test '$(st TU01)' = released && test '$(st TU02)' = released && git -C '$W/private.git' log --format=%s main | grep -q '^Revert .*TU03' && grep -q 'Vercel deployment of .* FAILED' <<<\"\$(python3 -c 'import json; print(json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"reason\"])')\""
+ok "49: the rollback was announced (TU03 ROLLED BACK)" tg_has "TU03 ROLLED BACK"
+rm -f "$CTL/vercel-state"; setconf VERCEL_WAIT_MINUTES 0
+as_ops "$SBIN/ifso-release-retry" TU03 >/dev/null 2>&1
+rpass
+ok "49: Vercel never reports a deploy (missing): TU03 rolled back and held again" bash -c "test '$(st TU03)' = held && grep -q 'not READY within' <<<\"\$(python3 -c 'import json; print(json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"reason\"])')\""
+echo success >"$CTL/vercel-state"; setconf VERCEL_WAIT_MINUTES 20
+as_ops "$SBIN/ifso-release-retry" TU03 >/dev/null 2>&1
+rpass
+ok "49: Vercel READY on the exact sha: TU03 released (re-applied) although the website answers 403 to scripts" bash -c "test '$(st TU03)' = released && python3 -c 'import json,sys; v=json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"vercel\"]; sys.exit(0 if v[\"state\"]==\"ok\" and v[\"gated\"] else 1)'"
+ok "49: the READY read is of TU03's landed private main commit" bash -c "grep -q \"/commits/\$(python3 -c 'import json; print(json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"landedSha\"])')/status\" '$CTL/requests.jsonl'"
+ok "the runner never fetched the website (no request to the checkpoint-protected site)" bash -c "! grep -q '\"/site' '$CTL/requests.jsonl'"
+ok "49: no Vercel alert-only watch alerts for a gated release" bash -c "! grep '/sendMessage' '$CTL/requests.jsonl' | grep -q 'VERCEL DEPLOY'"
+setconf VERCEL_STATUS_API ""; setconf VERCEL_STATUS_TOKEN_FILE ""; setconf VERCEL_POLL_S 20; rm -f "$CTL/vercel-state" "$CTL/site-checkpoint"
+as_rel kill "$(cat "$ROOT/w3b.pid")" 2>/dev/null || true
+
+# =====================================================================================================================
 note "WORLD 4: arming (arm.sh, the real one): only on a preflight of the CURRENT main and schedule"
 new_world w4
 FUTURE="$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
@@ -498,6 +532,8 @@ rpre run >"$W/pf-stale-r1.out" 2>&1
 ok "before tu-queue moves, the schedule is STALE (one clear line)" grep -q "STALE schedule.json" "$W/pf-stale-r1.out"
 as_rel git -C "$W/queue.git" update-ref refs/heads/tu-queue-pre-r1 refs/heads/tu-queue
 as_rel git -C "$W/queue.git" update-ref refs/heads/tu-queue refs/heads/queue-r1
+"$SBIN/ifso-release-pin-queue" --add >"$W/pin-r1.out" 2>&1
+ok "L-13: root pins the rebuilt queue next to the old one (--add; README 'Rebuilt queue')" bash -c "test \$(wc -l <'$ETC/queue-pin.w4') -eq 2 && grep -q \" \$(git -C '$W/queue.git' rev-parse queue-r1)\$\" '$ETC/queue-pin.w4' && grep -q ' $QTIP\$' '$ETC/queue-pin.w4'"
 as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4b.out" 2>&1
 cp "$W/home/preflight/results.json" "$W/pf-good.json"
 python3 - "$W/home/preflight/results.json" <<'PY'
@@ -549,6 +585,11 @@ if [[ $MODE == local ]]; then   # the local sandbox has no gate user; outside a 
   ok "M-2: outside a sandbox, arm.sh refuses a gate that would run as the release user (no GATE_USER)" bash -c "test $ARC -ne 0 && grep -q 'GATE_USER' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
 fi
 git -C "$W/backend" -c safe.directory='*' fetch -q origin 2>/dev/null; chown -R "$RUSER" "$W/backend" 2>/dev/null || true
+# rescore info: arming re-asserts that the server's own signing key is NOT an allowed signer (audit M-2)
+cp "$ETC/allowed_signers" "$W/signers.good"; echo "release@example.invalid namespaces=\"git\" $(cut -d' ' -f1,2 "$SRVKEY")" >>"$ETC/allowed_signers"
+runarm ALLOW_NO_RELEASE_TOKEN=1; ARC=$?
+cat "$W/signers.good" >"$ETC/allowed_signers"
+ok "M-2: arm.sh refuses while the server's signing key is in allowed_signers" bash -c "test $ARC -ne 0 && grep -q 'signing key is in' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
 touch "$CTL/gh-token-bad"
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh refuses when the release token cannot create and delete a draft Release" bash -c "test $ARC -ne 0 && grep -q 'release token' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
@@ -559,6 +600,7 @@ rm -f "$W/ALLOW_REAL_DEPLOY" "$CTL/gh-token-bad"
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh: public CI green (0 non-success) and the token made and deleted a draft" bash -c "grep -q 'public CI: 0 non-success' '$W/arm.out' && grep -q 'draft Release created and deleted' '$W/arm.out' && grep -q 'DELETE' '$CTL/requests.jsonl'"
 ok "arm.sh arms on a preflight of the current main and the rebuilt queue's schedule" bash -c "test $ARC -eq 0 && test -e '$W/ALLOW_REAL_DEPLOY' && grep -q ARMED '$W/arm.out'"
+ok "L-13: arm.sh pinned exactly the armed queue (one line: base = private main, tip = tu-queue)" bash -c "test \$(wc -l <'$ETC/queue-pin.w4') -eq 1 && test \"\$(cat '$ETC/queue-pin.w4')\" = \"\$(git -C '$W/private.git' rev-parse main) \$(git -C '$W/queue.git' rev-parse tu-queue)\" && grep -q 'pinned the queue' '$W/arm.out'"
 ok "39: arming ran the real publish dry run over the whole queue and it reached 'dry run: not pushed'" bash -c "grep -q 'sync-public dry run at the queue tip' '$W/arm.out' && grep -q 'dry run: not pushed' '$W/arm.out'"
 ok "47/48: arming said the server runs private main, origin answers it, and root's own fetch of main agrees" bash -c "grep -q 'running release = private main' '$W/arm.out' && grep -q \"root's own fetch of private main\" '$W/arm.out'"
 ok "arming wrote LAUNCH_AT and the slots" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/schedule.json\")); sys.exit(0 if s[\"launchAt\"]==\"$FUTURE\" and all(u[\"slot\"] for u in s[\"updates\"]) else 1)'"
@@ -585,6 +627,19 @@ if [[ $MODE == linux ]]; then
   ok "the runner user may NOT run the status wrapper through sudo" bash -c "! runuser -u '$RUSER' -- sudo -n '$SBIN/ifso-release-status'"
   ok "the runner user may NOT run arbitrary commands as root" bash -c "! runuser -u '$RUSER' -- sudo -n /bin/true"
   ok "retry accepts only TUnn through sudo" bash -c "! runuser -u '$OPS' -- sudo -n '$SBIN/ifso-release-retry' 'TU01; id'"
+  # sudo-rs (the server) did not match the old `TU[0-9][0-9]` argument pattern: every ops rule is checked by `sudo -n -l <cmd>`
+  # (allowed = exit 0, nothing runs), on both sudo-rs and classic sudo
+  for c in "ifso-release-retry TU07" "ifso-release-preflight TU01" "ifso-release-preflight" "ifso-release-pause" "ifso-release-pause owner fix" \
+           "ifso-release-resume" "ifso-release-abort" "ifso-release-status" "ifso-release-status --short"; do
+    # shellcheck disable=SC2086
+    ok "ops user may run '$c' through sudo" runuser -u "$OPS" -- sudo -n -l $SBIN/$c
+  done
+  for c in "ifso-deploy-release --check" "ifso-release-notify t m 0" "ifso-release-ghrelease update-01 t n"; do
+    # shellcheck disable=SC2086
+    ok "the runner user may run '$c' through sudo" runuser -u "$RUSER" -- sudo -n -l $SBIN/$c
+  done
+  ok "sudo lets 'retry XX07' through, the wrapper refuses it (usage, exit 1)" bash -c "out=\$(runuser -u '$OPS' -- sudo -n '$SBIN/ifso-release-retry' XX07 2>&1); [[ \$? == 1 ]] && grep -q 'usage: ifso-release-retry TUnn' <<<\"\$out\""
+  ok "sudo lets 'preflight TU1' through, the wrapper refuses it (usage, exit 1)" bash -c "out=\$(runuser -u '$OPS' -- sudo -n '$SBIN/ifso-release-preflight' TU1 2>&1); [[ \$? == 1 ]] && grep -q 'usage: ifso-release-preflight' <<<\"\$out\""
   note "the gate user (audit M-2)"
   ok "the gate ran every bun step as ifso-gate, never as the release user (worlds 1 to 4)" bash -c "for w in w1 w2 w3 w4; do grep -q '(as ifso-gate)' '$BASE/'\$w/ctl/bun.calls || exit 1; ! grep -q '(as $RUSER)' '$BASE/'\$w/ctl/bun.calls || exit 1; done"
   ok "the gate's environment carries nothing of the runner's (no IFSO_ALLOW_REAL_DEPLOY, RELEASE_HOME, ALLOWED_SIGNERS)" bash -c "! grep -q RUNNER-ENV '$BASE'/w*/ctl/bun.calls"

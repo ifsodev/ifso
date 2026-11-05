@@ -113,7 +113,10 @@ def run_all(only=None, quiet=False):
             # cherry-pick whose patch changed on the new main, is found here, hours before its slot
             if not R.signature_ok(u["sha"], CHECKOUT):
                 raise R.Fail(f"queued commit {u['sha'][:10]} is not signed by an owner key in {R.CFG['allowed_signers']}")
-            why = R.runner_commit_problem(landed, CHECKOUT)
+            # the queue as root will pin it at arming (audit L-13): the schedule's base..tip, plus whatever root pinned already
+            ups = sched.get("updates") or []
+            qtip = ups[-1]["sha"] if ups else sched.get("tip", "")
+            why = R.runner_commit_problem(landed, CHECKOUT, pins=R.read_pins() + [(sched.get("base", ""), qtip)])
             if why:
                 raise R.Fail(f"the deploy wrapper would refuse it on current main {main[:10]}: {why}")
             if only and u["id"] != only:

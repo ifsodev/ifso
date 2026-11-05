@@ -1,7 +1,10 @@
 # /etc/sudoers.d/ifso-release  (installed by install.sh after `visudo -cf`; mode 0440)
 # The release runner may reach production only through these wrappers. Each one validates its own arguments.
+# Valid for BOTH sudo-rs (the server: Ubuntu 26.04, sudo-rs 0.2.13) and classic sudo, checked by both visudos in the Linux proof
+# (sandbox/docker-sandbox.sh all). sudo-rs rejects settings it does not know (`!requiretty` was "unknown setting"; sudo-rs never
+# requires a tty) and does not match argument patterns such as `TU[0-9][0-9]`, so argument rules here are a plain `*` only and
+# the wrapper itself refuses anything but its exact arguments (ifso-release-retry / -preflight: ^TU[0-9]{2}$).
 Defaults:ifso-release env_keep += "IFSO_ALLOW_REAL_DEPLOY"
-Defaults:ifso-release !requiretty
 Cmnd_Alias IFSO_RELEASE_RUNNER = /usr/local/sbin/ifso-deploy-release *, /usr/local/sbin/ifso-release-notify *, /usr/local/sbin/ifso-release-ghrelease *
 ifso-release ALL=(root) NOPASSWD: IFSO_RELEASE_RUNNER
 # The gate (audit M-2): the runner runs the queued trees' installs and tests as ifso-gate, a user that cannot read its keys.
@@ -10,6 +13,6 @@ ifso-release ALL=(ifso-gate) NOPASSWD: ALL
 # Operators (group ifso-ops): read the status, pause, resume, abort, retry a held update, run a preflight. Nothing else.
 Cmnd_Alias IFSO_RELEASE_OPS = /usr/local/sbin/ifso-release-status, /usr/local/sbin/ifso-release-status --short, \
   /usr/local/sbin/ifso-release-pause, /usr/local/sbin/ifso-release-pause *, /usr/local/sbin/ifso-release-resume, \
-  /usr/local/sbin/ifso-release-abort, /usr/local/sbin/ifso-release-retry TU[0-9][0-9], \
-  /usr/local/sbin/ifso-release-preflight, /usr/local/sbin/ifso-release-preflight TU[0-9][0-9]
+  /usr/local/sbin/ifso-release-abort, /usr/local/sbin/ifso-release-retry *, \
+  /usr/local/sbin/ifso-release-preflight, /usr/local/sbin/ifso-release-preflight *
 %ifso-ops ALL=(root) NOPASSWD: IFSO_RELEASE_OPS
