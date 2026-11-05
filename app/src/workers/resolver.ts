@@ -4,7 +4,7 @@
 //  - after earliestResolve: reads >= 2 independent sources, proposes only on agreement (USDG bond)
 //  - watches proposals made by anyone else and disputes the ones its sources contradict
 //  - finalizes undisputed proposals after the window; times out silent panels (=> VOID => refunds)
-import { and, asc, eq, exists, gt, inArray, lt, lte, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gt, inArray, lt, lte, notInArray, or, sql } from "drizzle-orm";
 import { encodeAbiParameters, keccak256, maxUint256, type Address, type Hex } from "viem";
 import { ifsoOutcomeResolverAbi, usdgAbi } from "../abi";
 import { agree, questionSpecHash, type Agreement, type SourceReport } from "../core/outcome";
@@ -274,28 +274,29 @@ export async function gatherReports(deps: Deps, q: typeof questions.$inferSelect
       fresh.map((r) => ({ questionId: q.id, provider: r.provider, fetchedAt: new Date(r.fetchedAt * 1000), status: r.status, outcome: r.outcome, digest: r.digest })),
     );
   }
-  return holdFirstFinals(deps, q.id, fresh);
+  return holdLatestFinals(deps, q.id, fresh);
 }
 
 /**
- * Audit L-7: a provider's FIRST final read for a question is kept. A later pending read from that provider (The Odds
- * API's /scores drops a finished game after 3 days, and any outage reads as pending) is replaced by the stored final,
- * so a met payment is not refunded because a source forgot the game. A later final or void read is a real answer
- * and is used as read (a contradiction then shows up as a conflict, never as a silent change).
+ * Audit L-7 / L-8: a provider's LATEST final read for a question is kept. A later pending read from that provider (The
+ * Odds API's /scores drops a finished game after 3 days, and any outage or missing event reads as pending) is replaced
+ * by the newest stored final, so a met payment is not refunded because a source forgot the game, and a corrected result
+ * (final A, then final B) never falls back to the superseded A. A fresh final or void read is a real answer and is used
+ * as read (a contradiction then shows up as a conflict, never as a silent change).
  */
-async function holdFirstFinals(deps: Deps, questionId: string, fresh: SourceReport[]): Promise<SourceReport[]> {
+async function holdLatestFinals(deps: Deps, questionId: string, fresh: SourceReport[]): Promise<SourceReport[]> {
   if (!fresh.some((r) => r.status === "pending")) return fresh;
   const stored = await deps.db
     .select()
     .from(sourceReports)
     .where(and(eq(sourceReports.questionId, questionId), eq(sourceReports.status, "final")))
-    .orderBy(asc(sourceReports.fetchedAt), asc(sourceReports.id));
-  const first = new Map<string, SourceReport>();
+    .orderBy(desc(sourceReports.fetchedAt), desc(sourceReports.id));
+  const latest = new Map<string, SourceReport>();
   for (const r of stored) {
-    if (first.has(r.provider) || r.outcome === null) continue;
-    first.set(r.provider, { provider: r.provider, fetchedAt: Math.floor(r.fetchedAt.getTime() / 1000), status: "final", outcome: r.outcome, digest: r.digest as Hex });
+    if (latest.has(r.provider) || r.outcome === null) continue;
+    latest.set(r.provider, { provider: r.provider, fetchedAt: Math.floor(r.fetchedAt.getTime() / 1000), status: "final", outcome: r.outcome, digest: r.digest as Hex });
   }
-  return fresh.map((r) => (r.status === "pending" ? (first.get(r.provider) ?? r) : r));
+  return fresh.map((r) => (r.status === "pending" ? (latest.get(r.provider) ?? r) : r));
 }
 
 async function ensureBondAllowance(deps: Deps, resolver: Address) {
