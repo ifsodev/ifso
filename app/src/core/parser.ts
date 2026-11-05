@@ -95,6 +95,9 @@ const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "frida
 const WEEKDAY_SHORT = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
+/** "the-market-slug", "<market-name>", "market-slug", "[slug]"...: the placeholder from the examples, not a market. */
+const MARKET_PLACEHOLDER = /^[<\[({]?(?:the[-_]?)?(?:market[-_]?)?(?:slug|name)[>\])}]?$/;
+
 export function parseCommand(input: string, ctx: ParseContext): ParseResult {
   const res: ParseResult = { ok: false, twoSided: false, ambiguities: [], questions: [], notes: [], errors: [] };
   res.zone = ctx.tz ? { name: ctx.tz } : ctx.tzOffsetMin ? { offsetMin: ctx.tzOffsetMin } : undefined;
@@ -220,6 +223,11 @@ function parseCondition(t: string, conn: string, ctx: ParseContext, res: ParseRe
   if (mk) {
     if (mk.length === 4) {
       const venue = /^(hyperliquid|hl)$/.test(mk[1]!) ? "hyperliquid" : "polymarket";
+      // the examples say "polymarket the-market-slug resolves yes": a pasted placeholder is not a market
+      if (venue === "polymarket" && MARKET_PLACEHOLDER.test(mk[2]!)) {
+        res.errors.push(copy.parse.marketPlaceholder);
+        return undefined;
+      }
       return { kind: "MARKET", venue, ref: mk[2]!, answer: mk[3]!.toUpperCase() as "YES" | "NO" };
     }
     return { kind: "MARKET", venue: "polymarket", ref: mk[1]!, answer: mk[2]!.toUpperCase() as "YES" | "NO" };

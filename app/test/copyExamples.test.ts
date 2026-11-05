@@ -4,7 +4,10 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { BotStore } from "../src/bot/store";
+import { handleCommand } from "../src/bot/flow";
 import { copy } from "../src/core/copy";
+import { parseCommand } from "../src/core/parser";
 
 const PLACEHOLDER = "the-market-slug";
 // "polymarket <slug> resolves|is|settles yes|no" and polymarket.com market links
@@ -60,5 +63,42 @@ describe("Polymarket examples are the placeholder, never a real-looking slug", (
     expect(slugsIn("/ifso @jake 20 if polymarket fed-decision-in-december resolves yes")).toEqual(["fed-decision-in-december"]);
     expect(slugsIn('"the Polymarket question will-eth-reach-5000-in-2026 resolves YES"')).toEqual(["will-eth-reach-5000-in-2026"]);
     expect(slugsIn("see https://polymarket.com/event/fed-cut-december")).toEqual(["fed-cut-december"]);
+  });
+});
+
+describe("a pasted placeholder gets a friendly answer, not a preview that fails at build", () => {
+  const ctx = { nowMs: Date.UTC(2026, 10, 5, 12), tickers: new Set(["ETH"]) };
+  const store = { getUser: async () => undefined, upsertUser: async () => undefined } as unknown as BotStore;
+  const env = { store, publicAppUrl: "https://example.test", tickers: ctx.tickers };
+
+  for (const body of [
+    "@jake 20 if polymarket the-market-slug resolves yes",
+    "link 5 if polymarket THE-MARKET-SLUG resolves no",
+    "@jake 20 if polymarket <market-name> resolves yes",
+    "@jake 20 if pm market-slug yes",
+  ])
+    test(`parser and bot: ${body}`, async () => {
+      const r = parseCommand(`/ifso ${body}`, ctx);
+      expect(r.ok).toBe(false);
+      expect(r.preview).toBeUndefined();
+      expect(r.errors).toEqual([copy.parse.marketPlaceholder]);
+      const reply = await handleCommand(env, { tgId: 1n, chatId: 1n, cmd: "ifso", body });
+      expect(reply.text).toBe(copy.parse.marketPlaceholder);
+      expect(reply.buttons).toBeUndefined();
+    });
+
+  test("the answer says where the market name comes from", () => {
+    expect(copy.parse.marketPlaceholder).toContain("polymarket.com link");
+  });
+
+  test("the copied usage and wrongBot examples get that answer", () => {
+    const usageEx = copy.parse.usage.replace(/^Try: /, "").split(" · ")[0]!;
+    const wrongEx = copy.bot.wrongBot.replace(/^.*like /, "").replace(/\.$/, "");
+    for (const ex of [usageEx, wrongEx]) expect(parseCommand(ex, ctx).errors).toEqual([copy.parse.marketPlaceholder]);
+  });
+
+  test("a real-looking slug and a link still parse as a market", () => {
+    expect(parseCommand("/ifso @jake 20 if polymarket some-open-market resolves yes", ctx).condition).toMatchObject({ kind: "MARKET", ref: "some-open-market" });
+    expect(parseCommand("/ifso @jake 20 if https://polymarket.com/event/some-open-market resolves yes", ctx).condition?.kind).toBe("MARKET");
   });
 });

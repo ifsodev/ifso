@@ -14,6 +14,8 @@ export const copy = {
   parse: {
     usage:
       "Try: /ifso @jake 20 if polymarket the-market-slug resolves yes · /ifso link 50 on the 1st · /ifso @mia 100 if nvda closes above 200 by friday · /challenge @sam 10 if @ref says so",
+    marketPlaceholder:
+      "the-market-slug is only a placeholder. Put the market's name in its place: it is the last part of the market's polymarket.com link.",
     minAmount: "The smallest if-so payment is 1 USDG.",
     counterOnlyForChallenges: "Two amounts only work with /challenge (where both of you chip in).",
     challengeNeedsOutcome: "A challenge needs something to decide it: a price, a result, or a referee.",

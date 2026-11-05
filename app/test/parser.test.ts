@@ -38,8 +38,10 @@ describe("parser: heads", () => {
     expect(shown).not.toMatch(/arsenal|match result/i);
     const examples = copy.parse.usage.replace(/^Try: /, "").split(" · ");
     for (const ex of examples) expect(parseCommand(ex, ctx).condition?.kind).not.toBe("SPORTS");
-    expect(parseCommand(examples[0]!, ctx).condition).toMatchObject({ kind: "MARKET", venue: "polymarket", answer: "YES" });
-    expect(parseCommand(copy.bot.wrongBot.replace(/^.*like /, "").replace(/\.$/, ""), ctx).condition?.kind).toBe("MARKET");
+    // the Polymarket example carries the placeholder slug (test/copyExamples.test.ts); with a real slug in its place it is a market
+    const real = (ex: string) => ex.replace("the-market-slug", "some-open-market");
+    expect(parseCommand(real(examples[0]!), ctx).condition).toMatchObject({ kind: "MARKET", venue: "polymarket", answer: "YES" });
+    expect(parseCommand(real(copy.bot.wrongBot.replace(/^.*like /, "").replace(/\.$/, "")), ctx).condition?.kind).toBe("MARKET");
   });
 
   test("minimum amount", () => {
