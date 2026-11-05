@@ -222,7 +222,7 @@ main_subjects() { git -C "$W/private.git" log --format=%s main; }
 arm() { echo "launch" >"$W/ALLOW_REAL_DEPLOY"; chown "$RUSER" "$W/ALLOW_REAL_DEPLOY" 2>/dev/null || true; }
 set_past_launch() { rp set-times --launch-at "$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"))')" --interval-minutes 60 --min-gap 0 >/dev/null; }
 prod_sha() { basename "$(readlink "$W/opt/current")"; }
-stale_lock() { mkdir -p "$(dirname "$1")"; : >"$1"; chown "$RUSER" "$1" 2>/dev/null || true; python3 -c 'import os,sys,time; t=time.time()-1200; os.utime(sys.argv[1],(t,t))' "$1"; }
+stale_lock() { as_rel mkdir -p "$(dirname "$1")"; : >"$1"; chown "$RUSER" "$1" 2>/dev/null || true; python3 -c 'import os,sys,time; t=time.time()-1200; os.utime(sys.argv[1],(t,t))' "$1"; }
 prod_subject() { git -C "$W/private.git" log -1 --format=%s "$(prod_sha)"; }
 all_signed() { ! git -C "$W/private.git" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$ALLSIGNERS" log --format=%G? "$M0..main" | grep -qv '^G$'; }
 public_equals_private() { [[ "$(git -C "$W/public.git" rev-parse 'main^{tree}')" == "$(git -C "$W/private.git" rev-parse 'main^{tree}')" ]]; }

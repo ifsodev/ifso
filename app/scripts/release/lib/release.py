@@ -1036,7 +1036,8 @@ def clear_stale_git_locks(repos, st=None, where="pass"):
                     if f.endswith(".lock") and t0 - os.lstat(path).st_mtime > LOCK_STALE_S:
                         os.remove(path)
                         removed.append(path)
-                except OSError:
+                except OSError as e:
+                    say(f"stale git lock {path} could NOT be removed ({e.strerror}): remove it by hand")
                     continue
     if removed:
         say(f"removed stale git lock(s) (over 10 min old, no git process running): {', '.join(removed)}")
