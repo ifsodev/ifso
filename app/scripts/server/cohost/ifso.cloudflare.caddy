@@ -4,11 +4,27 @@
 # ranges only and drops every other connection (someone hitting the server's IP directly cannot forge a country).
 # Ranges from https://www.cloudflare.com/ips-v4/ and /ips-v6/ (2026-11-01); refresh them with the provision script's
 # --caddy-only when Cloudflare publishes changes. ACME HTTP-01 challenges are answered by Caddy before these routes.
-# No access-log file on purpose: a log path Caddy cannot write would fail a reload that also carries the other sites.
+# Access log (usage report): /var/lib/caddy is the caddy user's own home (its certificates live there), so Caddy can
+# always write it and a reload carrying the other sites cannot fail on the path. Each JSON line has the edge address in
+# request.remote_ip and the visitor in request.headers.Cf-Connecting-Ip, which is true here because every request that
+# is not from Cloudflare is aborted above it. Optional, server-wide, in the main Caddyfile's global options (it applies
+# to every site on this Caddy, so it is not set from this file):
+#	servers {
+#		trusted_proxies static <the @not_cloudflare ranges below>
+#		client_ip_headers CF-Connecting-IP
+#	}
+# Caddy then also logs the visitor as request.client_ip.
 
 @DOMAIN@ {
 	@not_cloudflare not remote_ip 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
 	abort @not_cloudflare
+
+	log {
+		output file /var/lib/caddy/ifso-api.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
 
 	encode zstd gzip
 	request_body {

@@ -395,6 +395,16 @@ check "caddy step: a failed reload restores the Caddyfile from the backup" bash 
 pcreset; sed -i.bak 's/^example.test/BROKEN/' "$C/caddy/Caddyfile"; pc --caddy-only
 check "caddy step: it validates the whole file, so a problem in the other project's part also stops it" bash -c '[ "$1" != 0 ]' _ "$RC"
 
+# Usage-report prerequisites: an access log Caddy can always write, the visitor's address trusted from Cloudflare only
+CFT="$HERE/cohost/ifso.cloudflare.caddy"
+check "cloudflare site: an access log under /var/lib/caddy (the caddy user's home), rolled" bash -c 'f="$1"; grep -q "output file /var/lib/caddy/ifso-api.log" "$f" && grep -q "roll_size 20MiB" "$f" && grep -q "roll_keep 5" "$f" && ! grep -q "output file /var/log" "$f"' _ "$CFT"
+check "cloudflare site: the log block sits inside the site, after the Cloudflare-only abort" bash -c 'f="$1"; a=$(grep -n "abort @not_cloudflare" "$f" | cut -d: -f1); l=$(grep -n "^	log {" "$f" | cut -d: -f1); s=$(grep -n "^@DOMAIN@ {" "$f" | cut -d: -f1); [ -n "$a" ] && [ -n "$l" ] && [ "$s" -lt "$a" ] && [ "$a" -lt "$l" ]' _ "$CFT"
+check "own-server Caddyfile: global trusted_proxies = exactly the Cloudflare ranges of the cloudflare site, client_ip_headers CF-Connecting-IP" bash -c '
+  cf=$(sed -n "s/^.*@not_cloudflare not remote_ip //p" "$1"); tp=$(sed -n "s/^[[:space:]]*trusted_proxies static //p" "$2")
+  [ -n "$cf" ] && [ "$cf" = "$tp" ] && grep -q "^[[:space:]]*client_ip_headers CF-Connecting-IP$" "$2" && [ "$(grep -n "^{$" "$2" | head -1 | cut -d: -f1)" -lt "$(grep -n "^{\$DOMAIN" "$2" | cut -d: -f1)" ]' _ "$CFT" "$HERE/Caddyfile"
+check "own-server Caddyfile: the access log is kept and the forgeable cf headers are still stripped" bash -c 'grep -q "output file /var/log/caddy/ifso-api.log" "$1" && grep -q "header_up -CF-Connecting-IP" "$1"' _ "$HERE/Caddyfile"
+check "caddy templates: braces balance (a stray brace fails the reload of every site)" bash -c 'for f in "$@"; do o=$(grep -v "^[[:space:]]*#" "$f" | tr -cd "{" | wc -c); c=$(grep -v "^[[:space:]]*#" "$f" | tr -cd "}" | wc -c); [ "$o" = "$c" ] || exit 1; done' _ "$CFT" "$HERE/cohost/ifso.caddy" "$HERE/Caddyfile"
+
 # Static guarantees of the co-host files
 PC="$HERE/provision-cohost.sh"
 check "cohost: never restarts, stops or reconfigures postgres, caddy, fail2ban, ssh (only reload caddy; stop/disable/mask only the package's own redis unit)" bash -c '

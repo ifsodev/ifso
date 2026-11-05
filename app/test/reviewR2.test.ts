@@ -81,11 +81,17 @@ describe("R2-M1: production env leaves TRUST_PROXY at none behind Caddy", () => 
   });
 
   test("Caddy's client address is the LAST X-Forwarded-For hop, and a forged first entry is ignored", () => {
-    // Caddy's reverse_proxy without `trusted_proxies` discards any X-Forwarded-For the client sent and writes the peer
-    // address (so the last, and only, hop is the real client). If a future Caddyfile trusted an upstream proxy, Caddy
-    // would APPEND the peer: the last entry is still the address Caddy itself saw. Either way the API reads the last one.
+    // Caddy's reverse_proxy discards any X-Forwarded-For an untrusted client sent and writes the peer address (so the
+    // last, and only, hop is the real client). For a trusted upstream (Cloudflare's ranges only) Caddy APPENDS the peer:
+    // the last entry is still the address Caddy itself saw. Either way the API reads the last one.
     const caddyfile = readFileSync(new URL("../scripts/server/Caddyfile", import.meta.url), "utf8").replace(/#.*$/gm, "");
-    expect(caddyfile).not.toMatch(/trusted_proxies/); // no upstream trusted: the client's own XFF is replaced
+    // the only trusted upstream is Cloudflare's published ranges (usage report: request.client_ip); nothing local or
+    // catch-all, so a client that is not Cloudflare still has its own X-Forwarded-For replaced
+    const trusted = [...caddyfile.matchAll(/trusted_proxies\s+static\s+([^\n]+)/g)].flatMap((m) => m[1]!.trim().split(/\s+/));
+    expect(caddyfile.match(/trusted_proxies/g)?.length ?? 0).toBe(trusted.length ? 1 : 0);
+    expect(trusted.filter((r) => /^(0\.0\.0\.0|::\/0|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|private_ranges)/.test(r))).toEqual([]);
+    expect(trusted.every((r) => /^[0-9a-f:.]+\/\d+$/i.test(r))).toBe(true);
+    expect(trusted).toContain("173.245.48.0/20"); // Cloudflare's first v4 range
     expect(caddyfile).not.toMatch(/header_up\s+[+-]?X-Forwarded-For/i); // nothing rewrites the header Caddy sets
     expect(caddyfile).toMatch(/reverse_proxy 127\.0\.0\.1:8080/);
     const h = (xff: string) => new Headers({ "x-forwarded-for": xff });

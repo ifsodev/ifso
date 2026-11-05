@@ -5,8 +5,20 @@
 # grey cloud, "DNS only"), Caddy fetches and renews the HTTPS certificate by itself (ports 80 and 443 must be open).
 #
 # Only the API (127.0.0.1:8080) is public. The bot and the worker listen on nothing. The API reads the client address from
-# X-Forwarded-For, which Caddy sets itself (it discards any value a client sends); the Cloudflare headers a client could
-# forge are removed before the request reaches the API.
+# X-Forwarded-For, which Caddy sets itself (it discards any value an untrusted client sends); the Cloudflare headers a
+# client could forge are removed before the request reaches the API.
+#
+# Global options: when api.<domain> sits behind Cloudflare's proxy, the access log's request.client_ip is the visitor
+# (CF-Connecting-IP), taken only from Cloudflare's own ranges (https://www.cloudflare.com/ips-v4/ and /ips-v6/,
+# 2026-11-01, the same list as cohost/ifso.cloudflare.caddy). A client outside those ranges cannot set it, and with
+# no Cloudflare in front it changes nothing. The API still reads X-Forwarded-For's last entry, which Caddy appends.
+
+{
+	servers {
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP
+	}
+}
 
 {$DOMAIN::80} {
 	encode zstd gzip
