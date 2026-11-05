@@ -104,17 +104,33 @@ jobs:
         run: python3 .github/scripts/semgrep-gate.py "$RUNNER_TEMP/semgrep-report.json" .github/semgrep/semgrep.allow .
 
   app:
+    # audit I-14: Foundry (anvil + forge) is installed so the anvil-gated app tests run here too; Postgres 16 ships with
+    # the runner image. The contract artifacts are cached on the contract sources, so forge build is a no-op on a hit.
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults: { run: { working-directory: app } }
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with: { persist-credentials: false }
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with: { bun-version: 1.4.4 }
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with: { version: v1.8.4, cache: false }
+      - name: cache contract artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            contracts/out
+            contracts/cache
+          key: forge-out-${{ runner.os }}-v1.8.4-${{ hashFiles('contracts/src/**', 'contracts/foundry.toml') }}
+      - name: build the contracts the anvil tests deploy
+        working-directory: contracts
+        run: forge build
+      - name: anvil and Postgres are present (else the chain tests would skip silently)
+        run: anvil --version && ls /usr/lib/postgresql/16/bin/pg_ctl
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
-      - run: bun test # includes the banned-words gate and TS<->Solidity parity vectors
+      - run: bun test # includes the banned-words gate, TS<->Solidity parity vectors and the anvil + Postgres suites
 
   web:
     # the website: type check, shared-client copy in sync, production build, then the tests (they read the build output)
