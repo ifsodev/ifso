@@ -80,7 +80,12 @@ export function loadConfig(env: SiteEnv): IfsoConfig {
   const chain: ChainProfile = { ...base, rpcUrl: clean(env.NEXT_PUBLIC_RPC_URL) ?? base.rpcUrl, explorerUrl: clean(env.NEXT_PUBLIC_EXPLORER_URL) ?? base.explorerUrl };
   const file = DEPLOYMENTS[id];
   const fromFile = (name: string) => addr(file.contracts?.[name]?.address, `deployments ${name}`);
-  const escrow = addr(env.NEXT_PUBLIC_ESCROW_ADDRESS, "NEXT_PUBLIC_ESCROW_ADDRESS") ?? fromFile("IfsoEscrow");
+  const envEscrow = addr(env.NEXT_PUBLIC_ESCROW_ADDRESS, "NEXT_PUBLIC_ESCROW_ADDRESS");
+  const fileEscrow = fromFile("IfsoEscrow");
+  // A stale env must never ship: once the chain has a deployment record, the env (if set) has to name the same escrow.
+  if (envEscrow && fileEscrow && envEscrow !== fileEscrow)
+    throw new Error(`NEXT_PUBLIC_ESCROW_ADDRESS ${envEscrow} disagrees with the ${id} deployment record ${fileEscrow}; fix the env or unset it`);
+  const escrow = envEscrow ?? fileEscrow;
   const usdg = addr(env.NEXT_PUBLIC_USDG_ADDRESS, "NEXT_PUBLIC_USDG_ADDRESS") ?? fromFile("MockUSDG") ?? fromFile("USDG") ?? chain.usdg;
   const apiUrl = (clean(env.NEXT_PUBLIC_API_URL) ?? "").replace(/\/+$/, "");
   const connectOrigins = [apiUrl && origin(apiUrl), origin(chain.rpcUrl)].filter((x): x is string => !!x);

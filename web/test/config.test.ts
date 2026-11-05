@@ -21,6 +21,14 @@ describe("config", () => {
     expect(() => loadConfig({ NEXT_PUBLIC_CHAIN_ID: "1" })).toThrow(/4663/);
     expect(() => loadConfig({ NEXT_PUBLIC_ESCROW_ADDRESS: "nope" })).toThrow(/not an address/);
   });
+  test("an escrow env that disagrees with the chain's deployment record fails the build", () => {
+    // 2026-11-05: Vercel kept the v1 testnet escrow after the v2 deploy; every create on the live site was refused.
+    expect(() => loadConfig({ NEXT_PUBLIC_CHAIN_ID: "46630", NEXT_PUBLIC_ESCROW_ADDRESS: "0x7FFf1cE34532f76A6aFEb53E503891e671f891d6" })).toThrow(/deployment record/);
+    expect(loadConfig({ NEXT_PUBLIC_CHAIN_ID: "46630", NEXT_PUBLIC_ESCROW_ADDRESS: "0x154fb83621180f9dfe80ec3382107c864e79626f" }).escrow).toBe("0x154Fb83621180f9Dfe80EC3382107C864e79626F");
+    expect(loadConfig({ NEXT_PUBLIC_CHAIN_ID: "46630" }).escrow).toBe("0x154Fb83621180f9Dfe80EC3382107C864e79626F");
+    // no record yet (mainnet before the deploy): the env alone is used
+    expect(loadConfig({ NEXT_PUBLIC_ESCROW_ADDRESS: ESCROW }).escrow).toBe(getAddress(ESCROW));
+  });
   test("connect origins are the API and the RPC only", () => {
     const c = loadConfig({ NEXT_PUBLIC_API_URL: "https://api.example.test/", NEXT_PUBLIC_RPC_URL: "https://rpc.example.test/x" });
     expect(c.apiUrl).toBe("https://api.example.test");
