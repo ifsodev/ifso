@@ -334,4 +334,9 @@ MUTANTS = [
          find="if (amt == 0) revert NothingToWithdraw();\n        forfeited = 0;", repl="forfeited = 0;"),
     dict(id="AM1-ctor-zero", file=R, finding="A-M1", why="a zero FeeRouter is accepted (forfeits burned)",
          find=" || feeRouter_ == address(0)) revert ZeroAddress();", repl=") revert ZeroAddress();"),
+    # ---- audit 2026-11-05 I-16 (strict accept / propose times)
+    dict(id="AI16-earliest", file=R, finding="A-I16", why="earliestResolve may equal closeTime again",
+         find="earliestResolve <= closeTime) revert BadQuestion();", repl="earliestResolve < closeTime) revert BadQuestion();"),
+    dict(id="AI16-acceptby", file=E, finding="A-I16", why="acceptBy may equal closeTime again",
+         find="acceptBy >= closeTime || nowTs >= closeTime", repl="acceptBy > closeTime || nowTs >= closeTime"),
 ]

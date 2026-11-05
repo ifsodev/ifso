@@ -108,6 +108,7 @@ accepting an empty forward, and a zero FeeRouter in the constructor. `R-pot`, `R
 | Refund works after expiry for any amount, paused or not, link or named | `testFuzz_RefundAlwaysWorksAfterExpiry` |
 | Owner actions never touch escrowed USDG | `test_OwnerHasNoPathToEscrowedFunds` |
 | Pause gates only new entries | `test_Pause_GatesOnlyNewEntries` |
+| An accept and an outcome proposal never share a second: `acceptBy < closeTime < earliestResolve` (audit I-16; mutants `AI16-*`) | `test_I16_*`, `testFuzz_I16_AcceptAndProposeNeverShareASecond` |
 | Deploy script refuses on Robinhood Chain (4663, 46630) unless armed; every broadcasting script carries the guard | `test_Deploy_RefusesUnarmedOnRealChainIds`, `test_Deploy_EveryBroadcastingScriptIsGuarded` |
 | A local run of the deploy script passes the post-deploy assertions with the launch values | `test_Deploy_LocalRunPassesAssertions` |
 | PostDeployCheck: on 4663 the launch values are hard-coded constants (USDG, five feed proxies and their Stock Tokens, 1,000 USDG cap, fees, bond, 2 h / 72 h windows); any drift fails | `test_PostDeploy_MainnetConstants` |

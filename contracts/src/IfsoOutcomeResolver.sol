@@ -147,7 +147,7 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     // ------------------------------------------------------------------ questions
     /// @notice questionId = keccak256(abi.encode(specHash, closeTime, earliestResolve, numOutcomes)).
     /// @param closeTime       when the answer starts to be knowable (kickoff, market close)
-    /// @param earliestResolve earliest proposal time (e.g. scheduled full time + buffer)
+    /// @param earliestResolve earliest proposal time (e.g. scheduled full time + buffer), strictly after closeTime
     /// @param specHash keccak256 of the question spec document.
     /// @param numOutcomes Number of outcomes (2..MAX_OUTCOMES); outcome 0 is VOID.
     /// @param specURI Where the question spec is published.
@@ -160,7 +160,9 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     ) external returns (bytes32 questionId) {
         if (!isCreator[msg.sender]) revert NotCreator();
         if (specHash == bytes32(0) || numOutcomes < 2 || numOutcomes > MAX_OUTCOMES) revert BadQuestion();
-        if (closeTime <= block.timestamp || earliestResolve < closeTime) revert BadQuestion();
+        // I-16: strictly after closeTime, so an accept (at the latest acceptBy < closeTime) and a proposal never
+        // share a second
+        if (closeTime <= block.timestamp || earliestResolve <= closeTime) revert BadQuestion();
         questionId = keccak256(abi.encode(specHash, closeTime, earliestResolve, numOutcomes));
         Question storage q = _q[questionId];
         if (q.state != State.NONE) revert BadQuestion();

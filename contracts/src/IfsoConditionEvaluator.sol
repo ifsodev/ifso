@@ -150,7 +150,8 @@ contract IfsoConditionEvaluator is IIfsoConditionEvaluator, Owned2Step {
             IIfsoOutcomeResolver r = IIfsoOutcomeResolver(c.target);
             (IIfsoOutcomeResolver.State st, uint8 n, uint64 closeTime, uint64 earliest) = r.questionInfo(c.key);
             if (st != IIfsoOutcomeResolver.State.OPEN) revert InvalidCondition();
-            if (acceptBy != 0 && (acceptBy > closeTime || nowTs >= closeTime)) revert InvalidCondition();
+            // I-16: acceptBy strictly before closeTime (and earliestResolve strictly after it, resolver side)
+            if (acceptBy != 0 && (acceptBy >= closeTime || nowTs >= closeTime)) revert InvalidCondition();
             // bit 0 (VOID) can never count as met; no bits above numOutcomes
             if (c.outcomeMask == 0 || c.outcomeMask & 1 != 0 || (c.outcomeMask >> (uint256(n) + 1)) != 0) {
                 revert InvalidCondition();
