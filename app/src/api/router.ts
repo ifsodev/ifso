@@ -6,6 +6,7 @@ import { erc8056Abi, ifsoConditionEvaluatorAbi, ifsoEscrowAbi, ifsoOutcomeResolv
 import { BuildError, DEFAULTS, buildParams, type BuildInput } from "../core/builder";
 import { conditionHash, createAuthNonce, escrowId } from "../core/condition";
 import { paramsFromJson } from "../core/paramsJson";
+import { PAYMENT_ID_RE, parsePaymentId } from "../core/paymentId";
 import { verifiedAcceptSigner, verifiedCreateSigner, verifiedDecisionSigner, verifiedRedirectSigner } from "./signers";
 import { copy } from "../core/copy";
 import { stockPriceConditionAllowed } from "../core/geo";
@@ -46,6 +47,18 @@ const t = initTRPC.context<Ctx>().create({
 const addr = z.string().regex(/^0x[0-9a-fA-F]{40}$/).transform((a) => getAddress(a) as Address);
 const hex = z.string().regex(/^0x[0-9a-fA-F]*$/).transform((h) => h as Hex);
 const uint = z.string().regex(/^\d+$/).transform((s) => BigInt(s));
+/** A payment id (uint256, 1 to 78 digits, at most 2^256 - 1) through the shared parser in core/paymentId.ts. */
+export const paymentIdInput = z
+  .string()
+  .regex(PAYMENT_ID_RE, "the payment id must be a number")
+  .transform((s, ctx) => {
+    const id = parsePaymentId(s);
+    if (id === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "the payment id is out of range" });
+      return z.NEVER;
+    }
+    return id;
+  });
 
 /** Seconds after earliestResolve that an OUTCOME escrow must stay open, read from the contracts (never hard-coded). */
 export async function outcomeMinSpan(deps: Deps, resolver: Address): Promise<number> {
@@ -493,14 +506,14 @@ export const appRouter = t.router({
     }),
 
   /** Claim page: everything shown is read from the chain, not from the URL (anti-phishing). */
-  escrow: t.procedure.input(z.object({ id: uint })).query(async ({ input, ctx }) => {
+  escrow: t.procedure.input(z.object({ id: paymentIdInput })).query(async ({ input, ctx }) => {
     await readBudget(ctx); // audit L-2
     const { e, c } = await readEscrow(ctx.deps, input.id);
     if (e.status === 0) throw new TRPCError({ code: "NOT_FOUND" });
     return escrowView(e as never, c as never);
   }),
 
-  claim: t.procedure.input(z.object({ id: uint, recipient: addr, signature: hex })).mutation(async ({ input, ctx }) => {
+  claim: t.procedure.input(z.object({ id: paymentIdInput, recipient: addr, signature: hex })).mutation(async ({ input, ctx }) => {
     try {
       return await relayClaim(ctx.deps, ctx.limiter, { ...input, ip: ctx.ip });
     } catch (e) {
@@ -510,7 +523,7 @@ export const appRouter = t.router({
   }),
 
   accept: t.procedure
-    .input(z.object({ id: uint, acceptor: addr, linkSig: hex, counterRefundTo: addr, validAfter: uint, validBefore: uint, authSig: hex }))
+    .input(z.object({ id: paymentIdInput, acceptor: addr, linkSig: hex, counterRefundTo: addr, validAfter: uint, validBefore: uint, authSig: hex }))
     .mutation(async ({ input, ctx }) => {
       await relayBudgetVerified(
         ctx,
@@ -537,7 +550,7 @@ export const appRouter = t.router({
 
   /** Relayed EIP-712 Decision (tap OK / decline / referee). */
   decide: t.procedure
-    .input(z.object({ id: uint, signer: addr, action: z.number().int().min(1).max(4), deadline: uint, signature: hex }))
+    .input(z.object({ id: paymentIdInput, signer: addr, action: z.number().int().min(1).max(4), deadline: uint, signature: hex }))
     .mutation(async ({ input, ctx }) => {
       const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
       const ipHash = await relayBudgetVerified(ctx, () => verifiedDecisionSigner(ctx.deps, { id: input.id, signer: input.signer, action: input.action, deadline: input.deadline, signature: input.signature }), "the signature does not match this wallet, action and current nonce");
@@ -561,7 +574,7 @@ export const appRouter = t.router({
 
   /** Relayed refund redirect (sender signs; useful when the sender's own address can't transact). */
   redirectRefund: t.procedure
-    .input(z.object({ id: uint, refundTo: addr, altRefundTo: addr, deadline: uint, signature: hex }))
+    .input(z.object({ id: paymentIdInput, refundTo: addr, altRefundTo: addr, deadline: uint, signature: hex }))
     .mutation(async ({ input, ctx }) => {
       const escrowAddr = required(ctx.deps.clients.escrow, "ESCROW_ADDRESS");
       let e: Awaited<ReturnType<typeof readEscrow>>["e"] | undefined;

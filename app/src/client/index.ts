@@ -24,6 +24,7 @@ export {
 // hashes and ids (to double-check what the server returns)
 export { conditionHash, createAuthNonce, acceptAuthNonce, escrowId } from "../core/condition";
 export { paramsFromJson } from "../core/paramsJson";
+export { parsePaymentId, paymentIdString, isPaymentId, MAX_PAYMENT_ID, PAYMENT_ID_RE, PAYMENT_ID_SOURCE } from "../core/paymentId";
 export { verifyBuildAnswer, type AskedFor, type BuildAnswer } from "./verifyBuild";
 
 // wallet linking and the region rule

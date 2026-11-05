@@ -11,6 +11,7 @@ import { patchFor, patchFromLogs, patchRow, recordPatch, rowsForMode, subscribe,
 import { FLAG, has, isOpen, KIND_TEXT, owedVoidSide, same, STATUS_TEXT, usdgText, when } from "@/lib/ifso/status";
 import { shortAddress, signTyped } from "@/lib/ifso/wallet";
 import { useWallet } from "./wallet-context";
+import { paymentIdString } from "@/vendor/ifso/client";
 
 export type PaymentsMode = "Sent" | "Received" | "Approvals" | "Refunds" | "Activity";
 
@@ -108,9 +109,10 @@ function ByNumber() {
   async function open() {
     setMsg("");
     setView(undefined);
-    if (!/^\d+$/.test(id.trim())) return setMsg("A payment number is digits only.");
+    const pid = paymentIdString(id);
+    if (!pid) return setMsg("A payment number is digits only, up to 78 of them.");
     try {
-      setView(await api.escrow({ id: id.trim() }));
+      setView(await api.escrow({ id: pid }));
     } catch (e) {
       setMsg(friendlyError(e));
     }
