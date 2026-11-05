@@ -1,6 +1,6 @@
 {
- "killed": 129,
- "total": 129,
+ "killed": 142,
+ "total": 142,
  "score": 100.0,
  "results": [
   {
@@ -33,7 +33,7 @@
    "finding": "R1-M3",
    "why": "OUTCOME expiry ignores the panel window",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 567468)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 567543)"
   },
   {
    "id": "M3-b",
@@ -41,7 +41,7 @@
    "finding": "R1-M3",
    "why": "OUTCOME expiry ignores the dispute window",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 573238)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 567541)"
   },
   {
    "id": "M3-c",
@@ -49,7 +49,7 @@
    "finding": "R1-M3",
    "why": "OUTCOME expiry ignores the settle margin",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 574642)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 574717)"
   },
   {
    "id": "M4-a",
@@ -153,7 +153,7 @@
    "finding": "R1-L1",
    "why": "a change still pending at settle VOIDs a decided result",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"deadline price was pre-split and decided: should release\")] test_R1_L1_PendingSplitAfterDeadline"
+   "killedBy": "[FAIL: AssertionFailed(\"pending change: decided result stands\")] test_R2_L1_ProvablyUnchangedStillDecides() (gas: 110304"
   },
   {
    "id": "L1-b",
@@ -161,7 +161,7 @@
    "finding": "R1-L1",
    "why": "a change in force before the deciding round no longer VOIDs",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"decided on a re-based price: 17571 != 1000000000000000000\")"
+   "killedBy": "[FAIL: AssertionFailed(\"decided on a re-based price: 17720 != 1000000000000000000\")"
   },
   {
    "id": "L1-c",
@@ -241,7 +241,7 @@
    "finding": "R2-L2",
    "why": "OUTCOME expiry ignores the late-proposal grace",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_R2_L2_LateProposal_DisputeStillRunsOutTheClock() (gas: 493261)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_R1_M3_Outcome_DisputeRunsOutTheClock() (gas: 568945)"
   },
   {
    "id": "R2-L2-b",
@@ -369,7 +369,7 @@
    "finding": "-",
    "why": "OUTCOME TRUE and FALSE swapped",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"panel outcome HOME\")] test_Dispute_PanelSidesWithDisputer() (gas: 746753)"
+   "killedBy": "[FAIL: AssertionFailed(\"panel outcome HOME\")] test_Dispute_PanelSidesWithDisputer() (gas: 770856)"
   },
   {
    "id": "E-outcome-void",
@@ -377,7 +377,7 @@
    "finding": "-",
    "why": "outcome 0 no longer means VOID",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"outcome 0 is VOID\")] test_Outcome_FinalZeroEvaluatesToVoid() (gas: 382421)"
+   "killedBy": "[FAIL: AssertionFailed(\"outcome 0 is VOID\")] test_Outcome_FinalZeroEvaluatesToVoid() (gas: 406527)"
   },
   {
    "id": "E-pyth-conf",
@@ -449,7 +449,7 @@
    "finding": "-",
    "why": "OUTCOME escrows skip the resolver fee",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"creation + resolver fee: 250000 != 750000\")] test_ResolverFeeChargedForOutcome() (gas: 387859)"
+   "killedBy": "[FAIL: AssertionFailed(\"creation + resolver fee: 250000 != 750000\")] test_ResolverFeeChargedForOutcome() (gas: 387881)"
   },
   {
    "id": "X-fee-create",
@@ -457,7 +457,7 @@
    "finding": "-",
    "why": "create reports a different fee than feeFor",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"batch pull == sum of amount + reported fee: 41200000 != 42100000\")] test_CreateBatch_PullsSumOfA"
+   "killedBy": "[FAIL: AssertionFailed(\"creation + resolver fee: 250000 != 750000\")] test_ResolverFeeChargedForOutcome() (gas: 387721)"
   },
   {
    "id": "X-fee-pull",
@@ -473,7 +473,7 @@
    "finding": "-",
    "why": "the fee is not forwarded to the router (gasless create)",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"both stakes held: 40250000 != 40000000\")] test_Accept_AllowedAtTheAcceptByInstant() (gas: 420068"
+   "killedBy": "[FAIL: AssertionFailed(\"router fee == sum of reported fees: 0 != 2100000\")] test_CreateBatch_PullsSumOfAmountsAndReporte"
   },
   {
    "id": "X-fee-cap",
@@ -561,7 +561,7 @@
    "finding": "-",
    "why": "accept works on a closed escrow",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"everything owed went out: 88914472 != 87914310\")] invariant_BalanceMatchesObligations"
+   "killedBy": "[FAIL: AssertionFailed(\"everything owed went out: 746824875 != 43991476\")] invariant_BalanceMatchesObligations"
   },
   {
    "id": "X-accept-twice",
@@ -745,7 +745,7 @@
    "finding": "-",
    "why": "VOID pays the sender side with the acceptor amount",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"sender own stake: 30000000 != 20000000\")] test_PanelTimeout_VoidsAndBondsReturn_TwoSidedVoided()"
+   "killedBy": "[FAIL: AssertionFailed(\"sender own stake: 30000000 != 20000000\")] test_PanelTimeout_VoidsAndHalfBondsReturn_TwoSidedVoid"
   },
   {
    "id": "X-void-alt",
@@ -793,7 +793,7 @@
    "finding": "-",
    "why": "dispute window boundary",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Dispute_AfterWindowReverts() (gas: 186593)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_Dispute_AfterWindowReverts() (gas: 186761)"
   },
   {
    "id": "R-finalize-early",
@@ -801,7 +801,7 @@
    "finding": "-",
    "why": "an undisputed proposal finalizes one second early",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_FinalizeOneSecondEarlyRefused() (gas: 297792)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_FinalizeOneSecondEarlyRefused() (gas: 297839)"
   },
   {
    "id": "R-panel-window",
@@ -809,7 +809,7 @@
    "finding": "-",
    "why": "panel can answer after its window",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() (gas: 462462)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() (gas: 486590)"
   },
   {
    "id": "R-timeout-early",
@@ -817,15 +817,15 @@
    "finding": "-",
    "why": "a disputed question times out early",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() (gas: 456574)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() (gas: 480899)"
   },
   {
    "id": "R-pot",
    "file": "IfsoOutcomeResolver.sol",
    "finding": "-",
-   "why": "the panel winner gets one bond, not two",
+   "why": "the panel winner gets only its own bond back",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"disputer receives both bonds: 100000000 != 200000000\")] test_Dispute_PanelSidesWithDisputer() (g"
+   "killedBy": "[FAIL: AssertionFailed(\"everything the attacker lost is held for the FeeRouter: 10000008 != 5000004\")"
   },
   {
    "id": "R-winner",
@@ -833,15 +833,15 @@
    "finding": "-",
    "why": "panel winner swapped",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"disputer receives both bonds: 0 != 200000000\")] test_Dispute_PanelSidesWithDisputer() (gas: 7620"
+   "killedBy": "[FAIL: AssertionFailed(\"disputer: own bond + half the proposer's (M-1): 0 != 150000000\")] test_Dispute_PanelSidesWithDis"
   },
   {
    "id": "R-timeout-credit",
    "file": "IfsoOutcomeResolver.sol",
    "finding": "-",
-   "why": "a timed-out dispute keeps the disputer bond",
+   "why": "a timed-out dispute keeps the disputer's half bond",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"disputer bond back: 0 != 100000000\")] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() (gas"
+   "killedBy": "[FAIL: AssertionFailed(\"disputer half bond back: 0 != 50000000\")] test_Resolver_PanelWindowBoundaries_AndBondSnapshot() "
   },
   {
    "id": "R-creator",
@@ -849,7 +849,7 @@
    "finding": "-",
    "why": "anyone can register questions",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_OnlyCreatorsRegisterQuestions_PanelChangeDelayed() (gas: 104279)"
+   "killedBy": "[FAIL: Error != expected error: BadQuestion() != NotCreator()] test_OnlyCreatorsRegisterQuestions_PanelChangeDelayed() ("
   },
   {
    "id": "R-panel-only",
@@ -857,7 +857,7 @@
    "finding": "-",
    "why": "anyone can act as the panel",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Dispute_PanelSidesWithDisputer() (gas: 608908)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_Dispute_PanelSidesWithDisputer() (gas: 632989)"
   },
   {
    "id": "R-withdraw-reset",
@@ -865,7 +865,7 @@
    "finding": "-",
    "why": "claimable bond is not zeroed (double withdraw)",
    "status": "KILLED",
-   "killedBy": "[FAIL: Error != expected error: TransferFailed() != NothingToWithdraw()] test_Resolver_WithdrawBondOnlyOnce() (gas: 3899"
+   "killedBy": "[FAIL: Error != expected error: TransferFailed() != NothingToWithdraw()] test_Resolver_WithdrawBondOnlyOnce() (gas: 3900"
   },
   {
    "id": "R-panel-delay",
@@ -873,7 +873,7 @@
    "finding": "-",
    "why": "panel change delay shortened",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelChangeNeedsTheFullDelay() (gas: 94422)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelChangeNeedsTheFullDelay() (gas: 94377)"
   },
   {
    "id": "R-panel-apply",
@@ -881,7 +881,7 @@
    "finding": "-",
    "why": "panel change applies before its delay",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_PanelChangeNeedsTheFullDelay() (gas: 94262)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_OnlyCreatorsRegisterQuestions_PanelChangeDelayed() (gas: 121641)"
   },
   {
    "id": "R-propose-early",
@@ -889,7 +889,7 @@
    "finding": "-",
    "why": "a result may be proposed before earliestResolve",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Undisputed_Finalize_Settles() (gas: 498903)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_Undisputed_Finalize_Settles() (gas: 499036)"
   },
   {
    "id": "R-outcome-range",
@@ -897,7 +897,7 @@
    "finding": "-",
    "why": "propose accepts an outcome above numOutcomes",
    "status": "KILLED",
-   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_OutcomeAboveRangeRefused() (gas: 240695)"
+   "killedBy": "[FAIL: next call did not revert as expected] test_Resolver_OutcomeAboveRangeRefused() (gas: 240720)"
   },
   {
    "id": "R-bond-snapshot",
@@ -921,7 +921,7 @@
    "finding": "-",
    "why": "perks share changed",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"perks 5%: 60000 != 50000\")] test_Distribute_80_10_5_5() (gas: 237023)"
+   "killedBy": "[FAIL: AssertionFailed(\"work: 790000 != 800000\")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 362352)"
   },
   {
    "id": "F-burn",
@@ -937,7 +937,7 @@
    "finding": "-",
    "why": "the work share forgets the burn share",
    "status": "KILLED",
-   "killedBy": "[FAIL: TransferFailed()] test_Distribute_80_10_5_5() (gas: 192169)"
+   "killedBy": "[FAIL: TransferFailed()] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 324148)"
   },
   {
    "id": "F-sweep-usdg",
@@ -993,7 +993,7 @@
    "finding": "-",
    "why": "withdrawBond pays one unit less than it clears (OR1)",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"bond returned: 99999999 != 100000000\")] test_Undisputed_Finalize_Settles() (gas: 879012)"
+   "killedBy": "[FAIL: AssertionFailed(\"bond returned: 99999999 != 100000000\")] test_Undisputed_Finalize_Settles() (gas: 879211)"
   },
   {
    "id": "INV-OR2-refinalize",
@@ -1001,7 +1001,7 @@
    "finding": "-",
    "why": "finalize leaves the question PROPOSED, so it credits again (OR2)",
    "status": "KILLED",
-   "killedBy": "[FAIL: ConditionPending()] test_OtherOutcome_Returns() (gas: 596985)"
+   "killedBy": "[FAIL: ConditionPending()] test_OtherOutcome_Returns() (gas: 597007)"
   },
   {
    "id": "INV-OR3-timeout-party",
@@ -1009,7 +1009,7 @@
    "finding": "-",
    "why": "panel time-out returns the disputer's bond to the proposer (OR3)",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"proposer bond back: 200000000 != 100000000\")] test_PanelTimeout_VoidsAndBondsReturn_TwoSidedVoid"
+   "killedBy": "[FAIL: AssertionFailed(\"proposer half bond back: 100000000 != 50000000\")] test_Resolver_PanelWindowBoundaries_AndBondSna"
   },
   {
    "id": "INV-OR4-repropose",
@@ -1033,7 +1033,7 @@
    "finding": "-",
    "why": "the treasury share goes to the work address (FR2)",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"treasury 10%: 0 != 100000\")] test_Distribute_80_10_5_5() (gas: 201022)"
+   "killedBy": "[FAIL: AssertionFailed(\"work: 900000 != 800000\")] test_Router_SetRecipients_OwnerOnly_NoZero() (gas: 336452)"
   },
   {
    "id": "INV-FR3-stuck",
@@ -1041,7 +1041,111 @@
    "finding": "-",
    "why": "work takes floor(80%), so the rounding remainder stays in the router (FR3)",
    "status": "KILLED",
-   "killedBy": "[FAIL: AssertionFailed(\"work 80% + dust: 800000 != 800001\")] test_Distribute_80_10_5_5() (gas: 253542)"
+   "killedBy": "[FAIL: AssertionFailed(\"all dust to work: 7 != 9\")] test_Router_DistributeEmptyDoesNothing_DustGoesToWork() (gas: 189829"
+  },
+  {
+   "id": "AM1-self",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "the proposer may dispute its own proposal again",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_SelfDispute_SameAddressRefused() (gas: 203449)"
+  },
+  {
+   "id": "AM1-panel-full-pot",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "the panel winner takes both whole bonds again (free self-dispute)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"attacker loses >= bond / 2\")"
+  },
+  {
+   "id": "AM1-panel-no-forfeit",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "the loser's forfeited half is not booked for the FeeRouter",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"everything the attacker lost is held for the FeeRouter: 5000004 != 0\")"
+  },
+  {
+   "id": "AM1-panel-floor",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "the loser's forfeited half rounds down",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"panel: ceil(bond / 2) forfeited: 5000000 != 5000001\")] test_OddBond_ForfeitRoundsUp() (gas: 3373"
+  },
+  {
+   "id": "AM1-timeout-full-back",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "panel silence returns whole bonds again (free self-dispute)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"attacker loses >= bond / 2\")"
+  },
+  {
+   "id": "AM1-timeout-no-forfeit",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "panel silence books no forfeit",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"everything the attacker lost is held for the FeeRouter: 3234697212 != 0\")"
+  },
+  {
+   "id": "AM1-timeout-one-half",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "panel silence forfeits only one side's half",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"both other halves forfeited to the FeeRouter: 50000000 != 100000000\")] test_PanelTimeout_VoidsAn"
+  },
+  {
+   "id": "AM1-forward-reset",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "forwardForfeits does not clear the counter (drains claimable bonds)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"forfeits reached the router: 200000000 != 150000000\")] test_FeeRouterHandlerReachesEveryPath() ("
+  },
+  {
+   "id": "AM1-forward-dest",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "forfeits go to the caller instead of the FeeRouter",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"FR1: USDG in != held + paid: 0 != 11579208923731619542357098500868790785326998466564056403945758"
+  },
+  {
+   "id": "AM1-forward-empty",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "an empty forward is accepted (no-op transaction)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Forfeits_ForwardedToFeeRouter_AndSplit() (gas: 452500)"
+  },
+  {
+   "id": "AM1-ctor-zero",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-M1",
+   "why": "a zero FeeRouter is accepted (forfeits burned)",
+   "status": "KILLED",
+   "killedBy": "[FAIL: next call did not revert as expected] test_Constructor_ZeroFeeRouterRefused() (gas: 10817)"
+  },
+  {
+   "id": "AI16-earliest",
+   "file": "IfsoOutcomeResolver.sol",
+   "finding": "A-I16",
+   "why": "earliestResolve may equal closeTime again",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"at least one full second between them\")"
+  },
+  {
+   "id": "AI16-acceptby",
+   "file": "IfsoConditionEvaluator.sol",
+   "finding": "A-I16",
+   "why": "acceptBy may equal closeTime again",
+   "status": "KILLED",
+   "killedBy": "[FAIL: AssertionFailed(\"at least one full second between them\")"
   }
  ]
 }
