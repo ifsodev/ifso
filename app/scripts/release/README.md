@@ -31,6 +31,7 @@ involved on launch day. It is inert until armed.
 - **Catch-up after an outage:** a pass releases at most `MAX_PER_PASS` (default 3) overdue updates, `minGapMinutes` apart; the timer starts the next pass 5 minutes later, so a long outage never becomes a flood that outlives the unit's 3 h timeout.
 - **Slots:** `release.py set-times --launch-at <ISO UTC with Z>` writes 72 hourly slots. Local time zones are refused.
 - **Migration order:** `make-schedule` (and `remap`) read `app/drizzle/meta/_journal.json` in every queue tree and refuse when a queued migration's `when` is not above main's and every earlier queued one (Drizzle would skip it silently). Every update that adds a journal entry is marked `migration`, so a held migration keeps the later ones waiting.
+- **Stale git locks (incident 43).** Every pass and every preflight first removes lock files under the git dirs of the runner's clone, the queue repo and the preflight checkout (`index.lock`, `packed-refs.lock`, `refs/**/*.lock`, ...) that are older than 10 minutes, only when no git process of the release user works in them, and names each one in its log and in one `STALE GIT LOCK REMOVED` alert.
 - **A stale `schedule.json`** (tip not equal to the queue branch tip) stops every pass and the preflight with one clear line.
 
 ## Install on the server

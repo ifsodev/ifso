@@ -222,6 +222,7 @@ main_subjects() { git -C "$W/private.git" log --format=%s main; }
 arm() { echo "launch" >"$W/ALLOW_REAL_DEPLOY"; chown "$RUSER" "$W/ALLOW_REAL_DEPLOY" 2>/dev/null || true; }
 set_past_launch() { rp set-times --launch-at "$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"))')" --interval-minutes 60 --min-gap 0 >/dev/null; }
 prod_sha() { basename "$(readlink "$W/opt/current")"; }
+stale_lock() { mkdir -p "$(dirname "$1")"; : >"$1"; chown "$RUSER" "$1" 2>/dev/null || true; python3 -c 'import os,sys,time; t=time.time()-1200; os.utime(sys.argv[1],(t,t))' "$1"; }
 prod_subject() { git -C "$W/private.git" log -1 --format=%s "$(prod_sha)"; }
 all_signed() { ! git -C "$W/private.git" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$ALLSIGNERS" log --format=%G? "$M0..main" | grep -qv '^G$'; }
 public_equals_private() { [[ "$(git -C "$W/public.git" rev-parse 'main^{tree}')" == "$(git -C "$W/private.git" rev-parse 'main^{tree}')" ]]; }
@@ -332,8 +333,12 @@ setconf GATE_WEB_RUNTIME no-such-node-here
 # --- injected failures: TU01 test fails, TU02 deploy fails after the switch
 touch "$CTL/test-fail-TU01" "$CTL/deploy-fail-TU02"
 BEFORE_PROD="$(prod_sha)"
+# incident 43: 20-minute-old locks left by a git that died (the two that hit an earlier project's preflight)
+stale_lock "$W/backend/.git/packed-refs.lock"; stale_lock "$W/backend/.git/refs/runner/heads/release-queue-copy.lock"
 setconf VERCEL_STATUS_API "http://127.0.0.1:$PORT/repos/ifsodev/private-sandbox"; setconf VERCEL_WAIT_MINUTES 0   # Vercel never reports
 rpass
+ok "43: the pass removed both stale locks and named them in its log" bash -c "test ! -e '$W/backend/.git/packed-refs.lock' && test ! -e '$W/backend/.git/refs/runner/heads/release-queue-copy.lock' && grep -q 'removed stale git lock.*packed-refs.lock' '$W/pass.log'"
+ok "43: ONE alert names the locks" bash -c "test \"\$(grep '/sendMessage' '$CTL/requests.jsonl' | grep 'STALE GIT LOCK REMOVED' | grep -c 'release-queue-copy.lock')\" = 1"
 ok "gate failure: TU01 HELD" test "$(st TU01)" = held
 ok "gate failure: TU01 never reached private main" test "$(main_subjects | grep -c 'TU01')" = 0
 ok "deploy failure: TU02 HELD" test "$(st TU02)" = held
@@ -372,7 +377,10 @@ kill "$LOCKPID" 2>/dev/null; wait "$LOCKPID" 2>/dev/null || true
 ok "preflight alert: failing set named, once" bash -c "grep '/sendMessage' '$CTL/requests.jsonl' | grep -q 'PREFLIGHT'"
 # --- the fix, preflight green, retry, release
 rm -f "$CTL/test-fail-TU01" "$CTL/deploy-fail-TU02"
+stale_lock "$W/home/preflight/backend/.git/packed-refs.lock"; : >"$W/home/preflight/backend/.git/fresh.lock"
 as_ops "$SBIN/ifso-release-preflight" >"$W/pf2.out" 2>&1
+ok "43: the preflight removed the stale lock in its own checkout, named it, and left a fresh one" bash -c "test ! -e '$W/home/preflight/backend/.git/packed-refs.lock' && grep -q 'packed-refs.lock' '$W/pf2.out' && test -e '$W/home/preflight/backend/.git/fresh.lock'"
+rm -f "$W/home/preflight/backend/.git/fresh.lock"
 ok "after the fix: preflight 2 of 2 PASS" grep -q "preflight: 2 of 2 PASS" "$W/home/preflight/status"
 ok "preflight sends the all-clear" tg_has "preflight all clear"
 as_ops "$SBIN/ifso-release-retry" TU01 >/dev/null 2>&1

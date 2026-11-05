@@ -76,6 +76,8 @@ def run_all(only=None, quiet=False):
     for u in sched["updates"]:
         st["updates"].setdefault(u["id"], {"status": "pending"})
     alerts = R.load(ALERTS, {"updates": {}})
+    # incident 43: stale locks in its own checkout and in the runner's repositories, named in its log and alert
+    R.clear_stale_git_locks([CHECKOUT, R.CFG["repo"], R.CFG["queue_repo"]], alerts, "preflight")
     stale = R.queue_alignment_error(sched)
     if stale:
         result = {"at": R.iso(R.now()), "main": "", "stale": stale, "results": {}}

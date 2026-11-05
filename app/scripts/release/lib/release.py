@@ -975,11 +975,75 @@ def disk_low():
     return None
 
 
-def clear_stale_git_locks():
-    for d in (CFG["repo"], CFG["gate_dir"]):
-        lock = os.path.join(d, ".git", "index.lock")
-        if os.path.exists(lock) and time.time() - os.path.getmtime(lock) > 600:
-            os.remove(lock)
+LOCK_STALE_S = 600
+
+
+def git_processes_in(dirs):
+    """Pids of this user's running git processes whose working directory is inside one of `dirs` (git -C chdirs there).
+    Linux: /proc. Elsewhere (the Mac sandbox): pgrep + lsof. If that cannot be answered, a pid of -1 (assume one runs)."""
+    me, roots = os.getuid(), [os.path.realpath(d) for d in dirs]
+    inside = lambda cwd: any(cwd == d or cwd.startswith(d + os.sep) for d in roots)  # noqa: E731
+    found = []
+    if os.path.isdir("/proc/self/fd"):
+        for p in os.listdir("/proc"):
+            if not p.isdigit():
+                continue
+            try:
+                if os.stat(f"/proc/{p}").st_uid != me or open(f"/proc/{p}/comm").read().strip() != "git":
+                    continue
+                if inside(os.path.realpath(os.readlink(f"/proc/{p}/cwd"))):
+                    found.append(int(p))
+            except OSError:
+                continue
+        return found
+    c, out = run(["pgrep", "-u", str(me), "-x", "git"])
+    if c not in (0, 1):
+        return [-1]
+    for pid in out.split():
+        c2, o2 = run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"])
+        cwd = next((x[1:] for x in o2.splitlines() if x.startswith("n")), "")
+        if c2 == 0 and cwd and inside(os.path.realpath(cwd)):
+            found.append(int(pid))
+    return found
+
+
+def clear_stale_git_locks(repos, st=None, where="pass"):
+    """Incident 43: every *.lock under the git dir of each repo (index.lock, packed-refs.lock, HEAD.lock, refs/**/*.lock, ...)
+    older than 10 minutes is removed, but only when no git process of this user works in any of them. Each removed lock is
+    named in the log and in ONE alert. Returns the removed paths. The pass and the preflight both call it before any git work."""
+    gitdirs = []
+    for r in repos:
+        if os.path.isdir(os.path.join(r, ".git")):
+            gitdirs.append(os.path.join(r, ".git"))
+        elif os.path.isfile(os.path.join(r, "HEAD")) and os.path.isdir(os.path.join(r, "objects")):
+            gitdirs.append(r)  # a bare repository (the queue)
+    if not gitdirs:
+        return []
+    busy = git_processes_in(repos)
+    if busy:
+        say(f"stale-lock check skipped: git is running in {', '.join(repos)} (pid {', '.join(map(str, busy))})")
+        return []
+    removed, t0 = [], time.time()
+    for gd in gitdirs:
+        for dp, dn, fn in os.walk(gd):
+            if os.path.basename(dp) == "objects" and os.path.dirname(dp) == gd:
+                dn[:] = [d for d in dn if d in ("info", "pack")]  # not the loose-object fan-out
+            for f in fn:
+                path = os.path.join(dp, f)
+                try:
+                    if f.endswith(".lock") and t0 - os.lstat(path).st_mtime > LOCK_STALE_S:
+                        os.remove(path)
+                        removed.append(path)
+                except OSError:
+                    continue
+    if removed:
+        say(f"removed stale git lock(s) (over 10 min old, no git process running): {', '.join(removed)}")
+        if st is not None:
+            notify(st, f"STALE GIT LOCK REMOVED ({where})", plain(
+                f"lock file(s) older than 10 minutes with no git process holding them: {', '.join(removed)[:600]}",
+                "no", f"removed before the {where}'s git work, which goes on", "nothing; if it repeats, look for a git process that "
+                "died (disk full, out of memory, a killed pass) in the journal"))
+    return removed
 
 
 def ping(problems, notes=()):
@@ -1170,13 +1234,13 @@ def cmd_pass():
 
 
 def _pass():
-    clear_stale_git_locks()
     try:
         sched = schedule()
     except Blocked as e:
         say(str(e))
         return 0
     st = init_state(sched)
+    clear_stale_git_locks([CFG["repo"], CFG["queue_repo"]], st, "release pass")
     save(STATE, st)
     if not sched.get("launchAt"):
         say("no LAUNCH_AT set: unarmed, nothing runs")

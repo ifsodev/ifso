@@ -792,5 +792,65 @@ class GateUser(unittest.TestCase):
         self.assertIn("--ignore-scripts", R.CFG["gate_web_install"])
 
 
+class StaleLocks(unittest.TestCase):
+    """Incident 43: lock files older than 10 minutes (index.lock, packed-refs.lock, refs/**/*.lock) are removed only when no
+    git process works in that repository, and every removed lock is named in the log and the alert."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="ifso-locks.")
+        subprocess.run(["git", "init", "-q", self.repo], check=True)
+        self.bare = tempfile.mkdtemp(prefix="ifso-locks-bare.")
+        subprocess.run(["git", "init", "-q", "--bare", self.bare], check=True)
+        old = R.time.time() - 20 * 60
+        self.stale = [os.path.join(self.repo, ".git", "packed-refs.lock"), os.path.join(self.repo, ".git", "index.lock"),
+                      os.path.join(self.repo, ".git", "refs", "runner", "heads", "release-queue-copy.lock"),
+                      os.path.join(self.bare, "refs", "heads", "tu-queue.lock")]
+        for f in self.stale:
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            open(f, "w").close()
+            os.utime(f, (old, old))
+        self.fresh = os.path.join(self.repo, ".git", "HEAD.lock")
+        open(self.fresh, "w").close()
+        self.calls = []
+        self.old_run = R.run
+
+    def tearDown(self):
+        R.run = self.old_run
+
+    def test_stale_locks_are_removed_and_named(self):
+        st = {}
+        R.run = lambda cmd, **k: (self.calls.append(cmd) or (0, "")) if "--ping" not in cmd and cmd[:1] != ["pgrep"] else self.old_run(cmd, **k)
+        removed = R.clear_stale_git_locks([self.repo, self.bare], st)
+        self.assertEqual(sorted(removed), sorted(self.stale))
+        self.assertFalse(any(os.path.exists(f) for f in self.stale))
+        self.assertTrue(os.path.exists(self.fresh), "a lock younger than 10 minutes is never touched")
+        alert = [c for c in self.calls if "STALE GIT LOCK" in " ".join(c)]
+        self.assertEqual(len(alert), 1)
+        self.assertIn("packed-refs.lock", " ".join(alert[0]))
+        self.assertIn("release-queue-copy.lock", " ".join(alert[0]))
+
+    def test_nothing_is_removed_while_a_git_process_works_there(self):
+        old = R.git_processes_in
+        R.git_processes_in = lambda dirs: [4242]
+        try:
+            self.assertEqual(R.clear_stale_git_locks([self.repo, self.bare], {}), [])
+        finally:
+            R.git_processes_in = old
+        self.assertTrue(all(os.path.exists(f) for f in self.stale))
+
+    def test_a_git_process_in_another_repository_does_not_count(self):
+        p = subprocess.Popen(["git", "-C", tempfile.mkdtemp(), "hash-object", "--stdin"], stdin=subprocess.PIPE)
+        try:
+            self.assertEqual(R.git_processes_in([self.repo]), [])
+        finally:
+            p.communicate(b"x")
+        q = subprocess.Popen(["git", "-C", self.repo, "hash-object", "--stdin"], stdin=subprocess.PIPE)
+        try:
+            R.time.sleep(0.3)
+            self.assertEqual(R.git_processes_in([self.repo]), [q.pid])  # ... and one working in the repository does
+        finally:
+            q.communicate(b"x")
+
+
 if __name__ == "__main__":
     unittest.main()
