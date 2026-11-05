@@ -114,14 +114,19 @@ runs and follows a cursor. Set `FEE_ROUTER_ADDRESS` so the fee router is watched
 leave the log. **Every one of these messages needs a matching signer announcement in the signer chat; one without it is an
 incident** (start at "Incident response" above).
 
-### Signer contacts (fill in before mainnet; keep real phone numbers and emails out of this public file)
-| Role | Name | Handle in the signer chat | Backup contact route |
+### Signer contacts
+Signers are reached in the project's private signer chat (Telegram); the backup route is GitHub private vulnerability
+reporting on this repository. Each multisig needs 2 of its 3 signers. Addresses are public on chain; no personal details here.
+
+| Role | Address | Reached through | Backup contact route |
 |---|---|---|---|
-| Owner multisig signer 1 | _name_ | _handle_ | _how to reach them if the chat is down_ |
-| Owner multisig signer 2 | _name_ | _handle_ | _..._ |
-| Owner multisig signer 3 | _name_ | _handle_ | _..._ |
-| Panel multisig signers (decide disputes within 72 h) | _names_ | _handle_ | _..._ |
-| On-call engineer (ops chat) | _name_ | _handle_ | _..._ |
+| Owner multisig (owns every Ifso contract, receives fees) | `0xd21656B6ddA03246E63903Bc23F26494fAfc59d1` | signer chat | private vulnerability reporting |
+| Owner multisig signer 1 | `0x16663C56291E0aE390E2776bbCa9611aB5f5C0F0` | signer chat | private vulnerability reporting |
+| Owner multisig signer 2 | `0x142bE52599Fd875ee939d66CD6EBA4661A861D74` | signer chat | private vulnerability reporting |
+| Owner multisig signer 3 | `0x6Ccb7528d48E61995BF1DcB6dD9642c974456062` | signer chat | private vulnerability reporting |
+| Panel multisig (decides disputes within 72 h) | `0x1B435fBF1288834F5a14A6924dF660D4313f87dE` | signer chat | private vulnerability reporting |
+| Panel multisig signers 1-3 | `0xc90a2eac51f247F3f9640265Ce3e7f8008795bd7`, `0x627c3f86f8Ca34A6988DcF6465fAaf6eF954923c`, `0xe4c5f73328561074be5a94f95b55386a65dA05bE` | signer chat | private vulnerability reporting |
+| On-call engineer | | ops chat (the alert bot posts there) | private vulnerability reporting |
 | Security reports | see "Reporting" above | | |
 
 Agree before launch: who may pause (any one owner signer, then confirm in the chat within 15 minutes), who answers the
