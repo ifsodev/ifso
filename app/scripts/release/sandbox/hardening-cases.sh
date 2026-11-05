@@ -15,7 +15,7 @@ SRVPID=""
 trap '[[ -n "$SRVPID" ]] && { kill "$SRVPID" 2>/dev/null; wait "$SRVPID" 2>/dev/null; }; rm -rf "$W"' EXIT
 PASS=0; FAIL=0
 ok() { local what="$1"; shift; if "$@" >/dev/null 2>&1; then PASS=$((PASS + 1)); printf '  PASS  %s\n' "$what"; else FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$what"; fi; }
-no() { local what="$1"; shift; if "$@" >/dev/null 2>&1; then FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$what"; else PASS=$((PASS + 1)); printf '  PASS  %s\n' "$what"; fi; }
+no() { local what="$1"; shift; if "$@" >"$W/.last" 2>&1; then FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$what"; tail -n 2 "$W/.last" | sed 's/^/        /'; else PASS=$((PASS + 1)); printf '  PASS  %s\n' "$what"; fi; }
 G() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -c user.name=t -c user.email=t@example.invalid "$@"; }
 
 # ---- world: origin, release clone, signing key, running revision
@@ -29,8 +29,9 @@ echo a >"$W/repo/a"; G -C "$W/repo" add a; sign -m base
 BASE="$(G -C "$W/repo" rev-parse HEAD)"
 G -C "$W/repo" push -q origin main
 mkdir -p "$W/opt/releases/$BASE" "$W/home/posters"; ln -s "$W/opt/releases/$BASE" "$W/opt/current"
-printf 'RELEASE_USER=%s\nRELEASE_HOME=%s\nREPO_DIR=%s\nDEPLOY_BIN=/bin/false\nOPT_DIR=%s\nALLOWED_SIGNERS=%s\nRUNNER_LIB=%s\nFETCH_WAIT=0\n' \
-  "$(id -un)" "$W/home" "$W/repo" "$W/opt" "$W/allowed_signers" "$W" >"$W/paths.conf"
+G init -q --bare -b main "$W/queue.git"
+printf 'RELEASE_USER=%s\nRELEASE_HOME=%s\nREPO_DIR=%s\nQUEUE_REPO=%s\nROOT_REPO=%s\nDEPLOY_BIN=/bin/false\nOPT_DIR=%s\nALLOWED_SIGNERS=%s\nRUNNER_LIB=%s\nFETCH_WAIT=0\n' \
+  "$(id -un)" "$W/home" "$W/repo" "$W/queue.git" "$W/root.git" "$W/opt" "$W/allowed_signers" "$W" >"$W/paths.conf"
 export IFSO_RELEASE_CONF="$W/paths.conf" IFSO_RELEASE_LIB="$SBIN"
 unset SUDO_UID
 
@@ -73,6 +74,44 @@ no "planted .git/info/grafts: the unrelated signed commit is still refused" bash
 rm -f "$W/repo/.git/info/grafts"
 ok "rgit pins GIT_GRAFT_FILE=/dev/null and core.commitGraph=false" bash -c "grep -q 'GIT_GRAFT_FILE=/dev/null' '$SBIN/common.sh' && grep -q 'core.commitGraph=false' '$SBIN/common.sh'"
 G -C "$W/repo" remote set-url origin "$W/origin.git"
+
+echo "== M-2: allowed_signers holds owner keys only; a server-signed commit is a runner commit, accepted only by its trailer"
+ssh-keygen -q -t ed25519 -N '' -C server -f "$W/srvkey" >/dev/null
+G -C "$W/repo" config --unset gpg.ssh.program; G -C "$W/repo" config --unset gpg.ssh.allowedSignersFile   # the M-4 plant, gone
+ssign() { G -C "$W/repo" -c gpg.format=ssh -c "user.signingkey=$W/srvkey" commit -q -S "$@"; }   # what the release user can do
+G -C "$W/repo" checkout -q main; G -C "$W/repo" reset -q --hard "$GOOD"; G -C "$W/repo" clean -qfd
+# queued commits live only in the server's queue repo (never on GitHub): one owner-signed, one unsigned, both on GOOD
+G -C "$W/repo" checkout -q -b q1 "$GOOD"; echo q >"$W/repo/q"; G -C "$W/repo" add q; sign -m "feat: TU07 queued"; QOWN="$(G -C "$W/repo" rev-parse HEAD)"
+G -C "$W/repo" checkout -q -b q2 "$GOOD"; echo u >"$W/repo/u"; G -C "$W/repo" add u; G -C "$W/repo" commit -q -m "feat: TU08 unsigned"; QUNS="$(G -C "$W/repo" rev-parse HEAD)"
+G -C "$W/repo" push -q "$W/queue.git" "$QOWN:refs/heads/tu-queue" "$QUNS:refs/heads/other"
+G -C "$W/repo" checkout -q main
+onmain() { G -C "$W/repo" push -q -f origin "$1:refs/heads/main"; }
+# 1. no trailer at all
+echo x >"$W/repo/x1"; G -C "$W/repo" add x1; ssign -m "chore: harmless"; C1="$(G -C "$W/repo" rev-parse HEAD)"; onmain "$C1"
+no "server-signed commit with no owner-signed source is refused" bash "$SBIN/ifso-deploy-release" --validate "$C1"
+# 2. a real pick of the owner-signed queued commit (another parent than the queued one, so not a fast-forward)
+G -C "$W/repo" reset -q --hard "$GOOD"; echo m >"$W/repo/m"; G -C "$W/repo" add m; sign -m "fix: owner fix on main"; MFIX="$(G -C "$W/repo" rev-parse HEAD)"
+G -C "$W/repo" -c gpg.format=ssh -c "user.signingkey=$W/srvkey" -c commit.gpgsign=true cherry-pick -x "$QOWN" >/dev/null; C2="$(G -C "$W/repo" rev-parse HEAD)"; onmain "$C2"
+ok "server-signed cherry-pick of an owner-signed QUEUED commit (same patch) validates; root fetched the queued commit itself" bash "$SBIN/ifso-deploy-release" --validate "$C2"
+ok "  root's own repository holds the queued commit (fetched from the queue repo)" git --git-dir="$W/root.git" cat-file -e "$QOWN^{commit}"
+# 3. the same trailer, a different patch
+G -C "$W/repo" reset -q --hard "$MFIX"; echo q >"$W/repo/q"; echo extra >"$W/repo/x3"; G -C "$W/repo" add q x3; ssign -m "feat: TU07 queued
+
+(cherry picked from commit $QOWN)"; C3="$(G -C "$W/repo" rev-parse HEAD)"; onmain "$C3"
+no "server-signed commit naming the owner-signed commit but carrying another patch is refused" bash "$SBIN/ifso-deploy-release" --validate "$C3"
+# 4. a pick of the UNSIGNED queued commit (the PoC's poisoned update), same patch
+G -C "$W/repo" reset -q --hard "$MFIX"; G -C "$W/repo" -c gpg.format=ssh -c "user.signingkey=$W/srvkey" -c commit.gpgsign=true cherry-pick -x "$QUNS" >/dev/null; C4="$(G -C "$W/repo" rev-parse HEAD)"; onmain "$C4"
+no "server-signed cherry-pick of an UNSIGNED queued commit is refused (PoC)" bash "$SBIN/ifso-deploy-release" --validate "$C4"
+# 5. a revert that names a commit that is not its ancestor
+G -C "$W/repo" reset -q --hard "$MFIX"; echo r >"$W/repo/r"; G -C "$W/repo" add r; ssign -m "Revert \"x\"
+
+This reverts commit $QOWN."; C5="$(G -C "$W/repo" rev-parse HEAD)"; onmain "$C5"
+no "server-signed 'revert' of a commit that is not an ancestor is refused" bash "$SBIN/ifso-deploy-release" --validate "$C5"
+# 6. a real revert of the pick, and its re-apply (revert of the revert)
+G -C "$W/repo" reset -q --hard "$C2"; G -C "$W/repo" -c gpg.format=ssh -c "user.signingkey=$W/srvkey" -c commit.gpgsign=true revert --no-edit "$C2" >/dev/null; C6="$(G -C "$W/repo" rev-parse HEAD)"
+G -C "$W/repo" -c gpg.format=ssh -c "user.signingkey=$W/srvkey" -c commit.gpgsign=true revert --no-edit "$C6" >/dev/null; C7="$(G -C "$W/repo" rev-parse HEAD)"; onmain "$C7"
+ok "a runner revert (inverse patch) and its re-apply validate" bash "$SBIN/ifso-deploy-release" --validate "$C7"
+onmain "$GOOD"; G -C "$W/repo" reset -q --hard "$GOOD"
 
 echo "== L-5: ifso-release-ghrelease publishes only allow-listed files"
 cat >"$W/srv.py" <<'EOS'

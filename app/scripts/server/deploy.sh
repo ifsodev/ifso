@@ -13,7 +13,7 @@
 #   1. check /etc/ifso: the files exist, no CHANGE_ME is left, CHAIN_ID matches the profile (testnet 46630, mainnet 4663),
 #      NODE_ENV=production, key files are private, the first RPC answers with that chain id;
 #   2. git fetch, then make sure the sha exists;
-#   3. add a release directory /opt/ifso/releases/<sha> (a git worktree) and run `bun install --frozen-lockfile` there;
+#   3. add a release directory /opt/ifso/releases/<sha> (a git worktree) and run `bun install --frozen-lockfile --ignore-scripts` there;
 #   4. back up the database (/usr/local/sbin/ifso-backup) because migrations only go forward;
 #   5. point /opt/ifso/current at the new release, run the migrations (`bun run db:migrate`), restart the services;
 #   6. wait for GET /readyz to answer 200 and for every unit to stay active. Any failure from step 5 on puts /opt/ifso/current
@@ -291,7 +291,7 @@ abandon() { # abandon <sha>: remove a release that never went live
   as_ifso "$GIT" -C "$REPO" worktree prune >/dev/null 2>&1 || true
 }
 install_release() {
-  (cd "$RELEASES/$SHA/app" && as_ifso "$BUN" install --frozen-lockfile)
+  (cd "$RELEASES/$SHA/app" && as_ifso "$BUN" install --frozen-lockfile --ignore-scripts)   # no dependency install script runs as ifso (audit M-2)
 }
 if [[ "$SHA" == "$prev" && -e "$RELEASES/$SHA/.healthy" ]]; then
   log "$SHA is already the current release: re-running migrations and restarting"
@@ -301,7 +301,7 @@ else
   as_ifso "$GIT" -C "$REPO" worktree add --detach --quiet "$RELEASES/$SHA" "$SHA" || die "could not check out $SHA; nothing switched" 75
   if ! retry "bun install" install_release; then
     abandon "$SHA"
-    die "bun install --frozen-lockfile failed (is bun.lock committed with the change?); nothing switched" 75
+    die "bun install --frozen-lockfile --ignore-scripts failed (is bun.lock committed with the change?); nothing switched" 75
   fi
   [[ -f "$RELEASES/$SHA/app/src/main.ts" ]] || { abandon "$SHA"; die "$SHA has no app/src/main.ts: wrong commit?; nothing switched" 75; }
 fi

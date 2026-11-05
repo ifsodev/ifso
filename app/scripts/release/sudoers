@@ -4,6 +4,9 @@ Defaults:ifso-release env_keep += "IFSO_ALLOW_REAL_DEPLOY"
 Defaults:ifso-release !requiretty
 Cmnd_Alias IFSO_RELEASE_RUNNER = /usr/local/sbin/ifso-deploy-release *, /usr/local/sbin/ifso-release-notify *, /usr/local/sbin/ifso-release-ghrelease *
 ifso-release ALL=(root) NOPASSWD: IFSO_RELEASE_RUNNER
+# The gate (audit M-2): the runner runs the queued trees' installs and tests as ifso-gate, a user that cannot read its keys.
+# ifso-gate holds nothing of value, so any command as ifso-gate is allowed (never as root).
+ifso-release ALL=(ifso-gate) NOPASSWD: ALL
 # Operators (group ifso-ops): read the status, pause, resume, abort, retry a held update, run a preflight. Nothing else.
 Cmnd_Alias IFSO_RELEASE_OPS = /usr/local/sbin/ifso-release-status, /usr/local/sbin/ifso-release-status --short, \
   /usr/local/sbin/ifso-release-pause, /usr/local/sbin/ifso-release-pause *, /usr/local/sbin/ifso-release-resume, \

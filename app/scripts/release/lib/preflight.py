@@ -27,7 +27,9 @@ import release as R  # noqa: E402  (the runner itself: same CFG, same gate_at, s
 
 PF = os.path.abspath(os.environ.get("PREFLIGHT_DIR", os.path.join(R.RELEASE_HOME, "preflight")))
 RESULTS, STATUS, ALERTS = (os.path.join(PF, n) for n in ("results.json", "status", "alerts.json"))
-CHECKOUT, GATE, LOGS, TMP = (os.path.join(PF, n) for n in ("backend", "gate", "logs", "tmp"))
+CHECKOUT, LOGS, TMP = (os.path.join(PF, n) for n in ("backend", "logs", "tmp"))
+# the gate dir belongs to the gate user (audit M-2): its own preflight folder there, never the release gate's
+GATE = os.path.abspath(os.environ.get("PREFLIGHT_GATE_DIR") or (os.path.join(R.CFG["gate_home"], "preflight") if R.gate_user_on() else os.path.join(PF, "gate")))
 
 
 def sh(cmd, cwd=None, ok=False, log=None, timeout=900):
@@ -105,6 +107,13 @@ def run_all(only=None, quiet=False):
                     R.run(["git", "-c", "safe.directory=*", "cherry-pick", "--abort"], cwd=CHECKOUT, log=log)
                     raise R.Fail(f"does not apply on current main {main[:10]}: {out.strip()[-160:]}")
             landed = g("rev-parse", "HEAD")
+            # the same signature rule as the runner and the root deploy wrapper (audit M-2): an unsigned queued commit, or a
+            # cherry-pick whose patch changed on the new main, is found here, hours before its slot
+            if not R.signature_ok(u["sha"], CHECKOUT):
+                raise R.Fail(f"queued commit {u['sha'][:10]} is not signed by an owner key in {R.CFG['allowed_signers']}")
+            why = R.runner_commit_problem(landed, CHECKOUT)
+            if why:
+                raise R.Fail(f"the deploy wrapper would refuse it on current main {main[:10]}: {why}")
             if only and u["id"] != only:
                 results[u["id"]] = {"ok": True, "skipped": True}
                 continue

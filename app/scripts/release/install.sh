@@ -44,10 +44,17 @@ GIT_EMAIL="${RELEASE_GIT_EMAIL:-$(conf_get RELEASE_GIT_EMAIL)}"
 [[ -n "$GIT_NAME" && -n "$GIT_EMAIL" && "$GIT_NAME$GIT_EMAIL" != *CHANGE_ME* ]] \
   || die "no git identity for the runner's commits: sudo RELEASE_GIT_NAME='<name>' RELEASE_GIT_EMAIL='<email>' bash install.sh (README, 'Install on the server')"
 [[ "$GIT_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+$ && "$GIT_NAME" != *[\"\'\$\`]* ]] || die "RELEASE_GIT_EMAIL must look like an email and RELEASE_GIT_NAME must not contain quotes or \$"
+GUSER=ifso-gate
+GHOME=/var/lib/ifso-gate
 if [[ -z "$PREFIX" ]]; then
   getent group ifso-ops >/dev/null || groupadd --system ifso-ops
   id "$RUSER" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$RHOME" --create-home --shell /bin/bash "$RUSER"
   install -d -o "$RUSER" -g "$RUSER" -m 0750 "$RHOME"
+  # the gate user (audit M-2): runs the queued trees' installs and tests; no access to the release user's home (~/.ssh keys)
+  id "$GUSER" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$GHOME" --create-home --shell /usr/sbin/nologin "$GUSER"
+  install -d -o "$GUSER" -g "$GUSER" -m 0755 "$GHOME"
+  # root's own repository for every check root makes on a commit (common.sh sgit)
+  install -d -o root -g root -m 0700 /var/lib/ifso-release-root
 fi
 OWN=(-m 0750); [[ -z "$PREFIX" ]] && OWN=(-o "$RUSER" -g "$RUSER" -m 0750)
 install -d "${OWN[@]}" "$(P $RHOME/home)" "$(P $RHOME/home/logs)" "$(P $RHOME/home/notes)" "$(P $RHOME/home/posters)" "$(P $RHOME/.ssh)"
@@ -103,6 +110,11 @@ if [[ -n "$PUB" ]]; then
 elif [[ -z "$(conf_get PUBLIC_CI_API)" ]]; then
   conf_set PUBLIC_CI_API "https://api.github.com/repos/CHANGE_ME/CHANGE_ME"
 fi
+# the gate runs as ifso-gate in its own home (an older paths.conf had GATE_DIR in the release user's home: moved)
+if [[ -z "$PREFIX" ]]; then
+  conf_set GATE_USER "$GUSER"; conf_set GATE_HOME "$GHOME"; conf_set GATE_DIR "$GHOME/release"; conf_set PREFLIGHT_GATE_DIR "$GHOME/preflight"
+fi
+[[ -n "$(conf_get ROOT_REPO)" ]] || conf_set ROOT_REPO "$(P /var/lib/ifso-release-root/private.git)"
 conf_set RELEASE_GIT_NAME "$GIT_NAME"
 conf_set RELEASE_GIT_EMAIL "$GIT_EMAIL"
 chmod 0644 "$CONF"
@@ -160,11 +172,17 @@ as_owner git config --file "$GITCFG" user.signingkey "$(P $RHOME/.ssh/id_ed25519
 as_owner git config --file "$GITCFG" commit.gpgsign true
 as_owner git config --file "$GITCFG" gpg.ssh.allowedSignersFile "$(P /etc/ifso-release/allowed_signers)"
 as_owner git config --file "$GITCFG" safe.directory '*'
-# ... so that key must be an allowed signer, or the runner holds its own cherry-picks (signature_ok) and the deploy wrapper
-# refuses its reverts (a failed rollback = PAUSE). Added once, as "<release email> <key>"; the owner's keys are added by hand.
+# ... but that key is NOT an allowed signer (audit M-2): allowed_signers holds OWNER keys only, so whatever runs as the release
+# user can never make a commit root deploys for what it is. A runner commit is accepted only when its trailer names an
+# owner-signed commit with the same (cherry-pick) or the inverse (revert) patch (common.sh commit_ok). An older install put the
+# server key in: it is taken out here. The owner's keys are added by hand (README).
 SIGNERS="$(P /etc/ifso-release/allowed_signers)"
-srvkey="$(cut -d' ' -f1,2 "$(P $RHOME/.ssh/id_ed25519_signing.pub)")"
-grep -qF "${srvkey#* }" "$SIGNERS" || printf '%s namespaces="git" %s\n' "$GIT_EMAIL" "$srvkey" >>"$SIGNERS"
+srvkey="$(cut -d' ' -f2 "$(P $RHOME/.ssh/id_ed25519_signing.pub)")"
+if grep -qF "$srvkey" "$SIGNERS"; then
+  grep -vF "$srvkey" "$SIGNERS" >"$SIGNERS.new" || true
+  cat "$SIGNERS.new" >"$SIGNERS"; rm -f "$SIGNERS.new"
+  say "removed the server signing key from allowed_signers (owner keys only)"
+fi
 # ---- units and sudoers (the timer is NOT enabled here)
 install -m 0644 "$HERE/systemd/ifso-release.service" "$HERE/systemd/ifso-release.timer" "$(P /etc/systemd/system)/"
 TMP="$(mktemp)"; cp "$HERE/sudoers" "$TMP"
@@ -198,7 +216,7 @@ SSH
   echo "  private repo, WRITE deploy key : $(cat "$RHOME/.ssh/id_ed25519_private.pub")"
   echo "  public repo,  WRITE deploy key : $(cat "$RHOME/.ssh/id_ed25519_public.pub")"
   echo "  public account, SIGNING key    : $(cat "$RHOME/.ssh/id_ed25519_signing.pub")"
-  echo "allowed_signers already has the server signing key; append the owner's keys. Next: README.md 'Install on the server'"
+  echo "allowed_signers holds OWNER keys only (never the server key above): append the owner's keys. Next: README.md 'Install on the server'"
   echo "(clone through the ssh aliases github-ifso-private / github-ifso-public, queue, release.env, rehearsal), then arm.sh."
 else
   say "installed under $PREFIX (sandbox mode: no users, no systemctl)"

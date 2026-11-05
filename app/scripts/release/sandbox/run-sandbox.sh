@@ -60,8 +60,12 @@ if [[ $MODE == linux ]]; then
   ok "timer installed but NOT enabled" test ! -e /etc/systemd/system/timers.target.wants/ifso-release.timer
   ok "three keys made on the server" test -e /var/lib/ifso-release/.ssh/id_ed25519_signing.pub -a -e /var/lib/ifso-release/.ssh/id_ed25519_private.pub -a -e /var/lib/ifso-release/.ssh/id_ed25519_public.pub
   CONF=/etc/ifso-release/paths.conf; LIBDIR=/usr/local/lib/ifso-release; SBIN=/usr/local/sbin; ETC=/etc/ifso-release
-  BASE=/var/lib/ifso-release/sandbox
-  install -d -o "$RUSER" -g "$RUSER" -m 0750 "$BASE"
+  # outside the release user's home (0750): the gate user (ifso-gate) runs the fake bun from here and writes its call log
+  BASE=/srv/ifso-sandbox
+  install -d -o "$RUSER" -g "$RUSER" -m 0755 "$BASE"
+  ok "install.sh made the gate user ifso-gate (audit M-2)" id ifso-gate
+  ok "the gate user cannot read the release user's keys (~/.ssh)" bash -c "! runuser -u ifso-gate -- cat /var/lib/ifso-release/.ssh/id_ed25519_signing && ! runuser -u ifso-gate -- ls /var/lib/ifso-release/.ssh"
+  ok "paths.conf runs the gate as ifso-gate" grep -q '^GATE_USER="ifso-gate"' /etc/ifso-release/paths.conf
 else
   PFX="$ROOT/root"; mkdir -p "$PFX"
   note "install.sh (PREFIX mode: no users, no systemctl)"
@@ -96,8 +100,11 @@ KEY="$BASE/key"; ssh-keygen -q -t ed25519 -N '' -f "$KEY" -C sandbox; chmod 600 
 # allowed_signers: install.sh already put the SERVER's signing key in (the key every runner-made commit is signed with); the
 # owner's key (the queue commits) is added the way the README says, appended
 SRVKEY="$PFX/var/lib/ifso-release/.ssh/id_ed25519_signing.pub"
-ok "install.sh put the server's own signing key into allowed_signers" bash -c "grep -qF \"\$(cut -d' ' -f2 '$SRVKEY')\" '$ETC/allowed_signers'"
+ok "install.sh keeps the server's own signing key OUT of allowed_signers (owner keys only; audit M-2)" bash -c "! grep -qF \"\$(cut -d' ' -f2 '$SRVKEY')\" '$ETC/allowed_signers'"
 echo "owner@example.invalid $(cat "$KEY.pub")" >>"$ETC/allowed_signers"
+# for the "every private commit is signed" checks only: the owner's key OR the server's (runner commits are server-signed, and
+# accepted by root only through their trailer rule; the deploys below prove that rule on every runner commit)
+ALLSIGNERS="$BASE/all-signers"; { cat "$ETC/allowed_signers"; echo "release@example.invalid $(cut -d' ' -f1,2 "$SRVKEY")"; } >"$ALLSIGNERS"
 PUBKEY_LINE="$(cat "$KEY.pub")"; : "$PUBKEY_LINE"
 
 setconf() { # setconf KEY VALUE  (later assignments win, both for the shell wrappers and for systemd's EnvironmentFile)
@@ -108,6 +115,7 @@ setconf() { # setconf KEY VALUE  (later assignments win, both for the shell wrap
 new_world() { # new_world <name>
   W="$BASE/$1"; rm -rf "$W"; mkdir -p "$W"/{ctl,home,opt/releases}; CTL="$W/ctl"
   chown -R "$RUSER" "$W" 2>/dev/null || true
+  chmod 0777 "$CTL"; : >"$CTL/bun.calls"; chmod 0666 "$CTL/bun.calls"   # the gate (ifso-gate on Linux) logs its bun calls here
   git init -q --bare -b main "$W/private.git"; git init -q --bare -b main "$W/public.git"; git init -q --bare -b main "$W/queue.git"
   S="$W/seed"; git init -q -b main "$S"
   sg() { git -C "$S" -c user.name=Owner -c user.email=owner@example.invalid -c gpg.format=ssh -c "user.signingkey=$KEY" -c commit.gpgsign=true "$@"; }
@@ -153,6 +161,9 @@ new_world() { # new_world <name>
   setconf PUBLIC_SYNC_STATE "$W/home/public-sync.json"; setconf API_URL "http://127.0.0.1:$PORT"
   setconf ALLOW_FILE "$W/ALLOW_REAL_DEPLOY"; setconf RELEASE_ENV "$W/release.env"; setconf DEPLOY_LOCK "$W/deploy.lock"
   setconf FORBIDDEN_FILE "$ETC/forbidden.txt"
+  # root's own repository (audit M-2): created by the deploy wrapper itself, root-owned and 0700 on Linux
+  if [[ $MODE == linux ]]; then setconf ROOT_REPO "/var/lib/ifso-release-root/$1.git"; else setconf ROOT_REPO "$W/root.git"; fi
+  setconf PREFLIGHT_GATE_DIR "$W/pfgate"
   setconf GATE_WEB_RUNTIME node
   setconf PUBLIC_CI_API ""   # the CI watcher stays off in the passes (world 4 points it at the fake GitHub for arm.sh)
   setconf VERCEL_STATUS_API ""   # the Vercel watcher stays off unless a world turns it on (worlds 1 to 3, at the fake GitHub)
@@ -183,6 +194,10 @@ EOF
   mkdir -p "$W/home/posters" "$W/home/notes"
   for n in 01 02 03; do printf 'Sandbox update %s. Plain public notes.\n' "$n" >"$W/home/notes/TU$n.md"; done
   chown -R "$RUSER" "$W" 2>/dev/null || true
+  if [[ $MODE == linux ]]; then   # after the last chown: the gate dirs belong to the gate user, root's repo to root
+    rm -rf "/var/lib/ifso-release-root/$1.git"
+    install -d -o ifso-gate -g ifso-gate -m 0755 "$W/gate" "$W/gate.tmp" "$W/pfgate" "$W/pfgate.tmp"
+  fi
 }
 rp() { # rp <release.py args>: as the release user, with the runner's settings (every KEY=VALUE of paths.conf)
   local envs=() l
@@ -206,7 +221,7 @@ arm() { echo "launch" >"$W/ALLOW_REAL_DEPLOY"; chown "$RUSER" "$W/ALLOW_REAL_DEP
 set_past_launch() { rp set-times --launch-at "$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"))')" --interval-minutes 60 --min-gap 0 >/dev/null; }
 prod_sha() { basename "$(readlink "$W/opt/current")"; }
 prod_subject() { git -C "$W/private.git" log -1 --format=%s "$(prod_sha)"; }
-all_signed() { ! git -C "$W/private.git" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$ETC/allowed_signers" log --format=%G? "$M0..main" | grep -qv '^G$'; }
+all_signed() { ! git -C "$W/private.git" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$ALLSIGNERS" log --format=%G? "$M0..main" | grep -qv '^G$'; }
 public_equals_private() { [[ "$(git -C "$W/public.git" rev-parse 'main^{tree}')" == "$(git -C "$W/private.git" rev-parse 'main^{tree}')" ]]; }
 one_public_author() { [[ "$(git -C "$W/public.git" log --format='%an <%ae>' main | sort -u | wc -l | tr -d ' ')" == 1 ]]; }
 public_signed() { ! git -C "$W/public.git" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$W/pub-signers" log --format=%G? main | grep -qv '^G$'; }
@@ -256,11 +271,12 @@ ok "world 1: 3 of 3 released" bash -c "test '$(st TU01)' = released -a '$(st TU0
 ok "world 1: public copy caught up (no publicPending left)" test -z "$(st TU02 publicPending)"
 ok "world 1: public tree == private tree" public_equals_private
 ok "world 1: public history has one author" one_public_author
-ok "world 1: every private commit signed by an allowed key" all_signed
+ok "world 1: every private commit signed (owner key, or the server key on a runner commit)" all_signed
 ok "world 1: perk-gated TU03 passed its check as 'locked'" bash -c "python3 -c 'import json; v=json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU03\"][\"verify\"]; assert v[\"/v1/tu03\"][\"ok\"]'"
 ok "world 1: production runs the last release" test "$(prod_subject)" = "feat(api): TU03 sandbox update 03"
 ok "web/ change (TU03): the gate ran the web install, tests and the PRODUCTION build" bash -c "grep -q '^web install' '$CTL/bun.calls' && grep -q '^web run test' '$CTL/bun.calls' && grep -q '^web run build' '$CTL/bun.calls'"
 ok "updates without a web/ change ran no web step" test "$(grep -c '^web run build' "$CTL/bun.calls")" = 1
+ok "M-2: the gate installs with --ignore-scripts (app and web): no dependency install script runs" bash -c "grep -q '^app install --frozen-lockfile --ignore-scripts' '$CTL/bun.calls' && grep -q '^web install --frozen-lockfile --ignore-scripts' '$CTL/bun.calls' && ! grep -E '^(app|web) install' '$CTL/bun.calls' | grep -vq -- '--ignore-scripts'"
 ok "B17: no Vercel watch on updates without a web/ change (TU01, TU02)" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/state.json\"))[\"updates\"]; sys.exit(0 if \"vercel\" not in s[\"TU01\"] and \"vercel\" not in s[\"TU02\"] and s[\"TU03\"][\"vercel\"][\"state\"]==\"failed\" else 1)'"
 # pause / abort / resume
 rp set-times --launch-at "$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"))')" >/dev/null
@@ -320,7 +336,7 @@ ok "gate failure: TU01 HELD" test "$(st TU01)" = held
 ok "gate failure: TU01 never reached private main" test "$(main_subjects | grep -c 'TU01')" = 0
 ok "deploy failure: TU02 HELD" test "$(st TU02)" = held
 ok "deploy failure: TU02 reverted on main (signed revert exists)" bash -c "git -C '$W/private.git' log --format=%s main | grep -q '^Revert .*TU02'"
-ok "the revert is signed by the SERVER key (made by install.sh) and the reverted tree deployed" bash -c "test \"\$(git -C '$W/private.git' -c gpg.format=ssh -c gpg.ssh.allowedSignersFile='$ETC/allowed_signers' log -1 --format=%G?%GF --grep='^Revert' main)\" = \"G\$(ssh-keygen -lf '$SRVKEY' | cut -d' ' -f2)\" && python3 -c 'import json,sys; sys.exit(0 if json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU02\"][\"rollbackDeploy\"]==\"ok\" else 1)'"
+ok "the revert is signed by the SERVER key (made by install.sh) and the reverted tree deployed" bash -c "test \"\$(git -C '$W/private.git' -c gpg.format=ssh -c gpg.ssh.allowedSignersFile='$ALLSIGNERS' log -1 --format=%G?%GF --grep='^Revert' main)\" = \"G\$(ssh-keygen -lf '$SRVKEY' | cut -d' ' -f2)\" && python3 -c 'import json,sys; sys.exit(0 if json.load(open(\"$W/home/state.json\"))[\"updates\"][\"TU02\"][\"rollbackDeploy\"]==\"ok\" else 1)'"
 ok "the runner's revert carries the release identity from install.sh" bash -c "test \"\$(git -C '$W/private.git' log -1 --format='%an <%ae>' --grep='^Revert' main)\" = '$GIT_NAME <$GIT_EMAIL>'"
 ok "deploy failure: production never keeps the held updates (no TU01 or TU02 route in the live tree; the live tree is not older than the start)" bash -c "! git -C '$W/private.git' cat-file -e '$(prod_sha):app/src/api/routes/tu02.ts' && ! git -C '$W/private.git' cat-file -e '$(prod_sha):app/src/api/routes/tu01.ts' && git -C '$W/private.git' merge-base --is-ancestor '$BEFORE_PROD' '$(prod_sha)'"
 ok "no cascade: TU03 released although TU01 and TU02 are held" test "$(st TU03)" = released
@@ -372,7 +388,10 @@ s=json.load(open('$W/home/state.json'))['updates']
 assert all(s[k]['status']=='released' for k in ('TU01','TU02','TU03'))
 PY"
 ok "final: production runs the last release (every update's route exists in the live tree)" bash -c "for n in 01 02 03; do git -C '$W/private.git' cat-file -e \"\$(basename \$(readlink '$W/opt/current')):app/src/api/routes/tu\$n.ts\" || exit 1; done"
-ok "final: every private commit is signed by an allowed key" all_signed
+ok "final: every private commit is signed (owner key, or the server key on a runner commit)" all_signed
+ok "M-2: runner commits on main exist (cherry-picks, revert, re-apply) and none is owner-signed: root deployed them by the trailer rule" bash -c "
+  n=\$(git -C '$W/private.git' -c gpg.format=ssh -c gpg.ssh.allowedSignersFile='$ETC/allowed_signers' log --format='%G?' '$M0..main' | grep -vc '^G$')
+  test \"\$n\" -ge 3 && test \"\$(basename \$(readlink '$W/opt/current'))\" = \"\$(git -C '$W/private.git' rev-parse main)\""
 ok "final: public tree == private tree" public_equals_private
 ok "final: public history has exactly one author" one_public_author
 ok "final: every public commit signed (Verified)" public_signed
@@ -496,6 +515,11 @@ if [[ $MODE == linux ]]; then
   ok "the runner user may NOT run the status wrapper through sudo" bash -c "! runuser -u '$RUSER' -- sudo -n '$SBIN/ifso-release-status'"
   ok "the runner user may NOT run arbitrary commands as root" bash -c "! runuser -u '$RUSER' -- sudo -n /bin/true"
   ok "retry accepts only TUnn through sudo" bash -c "! runuser -u '$OPS' -- sudo -n '$SBIN/ifso-release-retry' 'TU01; id'"
+  note "the gate user (audit M-2)"
+  ok "the gate ran every bun step as ifso-gate, never as the release user (worlds 1 to 4)" bash -c "for w in w1 w2 w3 w4; do grep -q '(as ifso-gate)' '$BASE/'\$w/ctl/bun.calls || exit 1; ! grep -q '(as $RUSER)' '$BASE/'\$w/ctl/bun.calls || exit 1; done"
+  ok "the gate's environment carries nothing of the runner's (no IFSO_ALLOW_REAL_DEPLOY, RELEASE_HOME, ALLOWED_SIGNERS)" bash -c "! grep -q RUNNER-ENV '$BASE'/w*/ctl/bun.calls"
+  ok "the release user may run commands as ifso-gate, the gate user may not sudo at all" bash -c "runuser -u '$RUSER' -- sudo -n -u ifso-gate true && ! runuser -u ifso-gate -- sudo -n true"
+  ok "root's own repositories are root's, mode 0700" bash -c "for d in /var/lib/ifso-release-root /var/lib/ifso-release-root/w2.git; do test \"\$(stat -c '%U %a' \$d)\" = 'root 700' || exit 1; done"
 fi
 
 echo

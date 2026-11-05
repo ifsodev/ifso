@@ -44,20 +44,66 @@ rgit() {
   GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -c "safe.directory=$REPO_DIR" -c core.fsmonitor= -c core.commitGraph=false \
     -c core.hooksPath=/dev/null -c core.sshCommand= -c core.pager=cat "$@"
 }
-# verify_signed <40-hex sha>: is that commit of $REPO_DIR signed by a key in $ALLOWED_SIGNERS? The commit object is copied out of
-# the release user's clone into a fresh root-owned scratch repository and verified there with ssh-keygen pinned on the command
-# line, so nothing the release user planted in its own clone (gpg.ssh.program, includes, hooks, replace refs) takes part.
-# Prints git's last line on failure; returns non-zero.
-verify_signed() {
-  local c="$1" scratch id out rc=0 keygen
+# ---- root's own repository (audit M-2). Every check root makes on a commit (ancestry, signatures, patch-ids) runs in
+# $ROOT_REPO: root-owned, mode 0700, config-free (hooks, fsmonitor, pager, commit graph, grafts, replace refs pinned off). Its
+# objects come from fetches whose packs root's own git indexes (every object hashed), and the remote side of a fetch from a
+# release-user repository runs AS the release user (rel_upload_pack), so nothing the release user planted runs as root.
+ROOT_REPO="${ROOT_REPO:-/var/lib/ifso-release-root/private.git}"
+QUEUE_REPO="${QUEUE_REPO:-}"
+sgit() {
+  GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -C "$ROOT_REPO" \
+    -c core.fsmonitor= -c core.commitGraph=false -c core.hooksPath=/dev/null -c core.sshCommand= -c core.pager=cat "$@"
+}
+rel_upload_pack() { if [[ "$(id -u)" == 0 && "$RELEASE_USER" != "$(id -un)" ]]; then printf 'runuser -u %s -- git upload-pack' "$RELEASE_USER"; else printf 'git upload-pack'; fi; }
+root_repo_init() {
+  if [[ ! -d "$ROOT_REPO" ]]; then
+    (umask 077 && mkdir -p "$ROOT_REPO" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git init -q --bare "$ROOT_REPO") || { echo "cannot create $ROOT_REPO"; return 1; }
+  fi
+  if [[ "$(id -u)" == 0 && "$(stat -c '%u %a' "$ROOT_REPO" 2>/dev/null)" != "0 700" ]]; then echo "$ROOT_REPO must be root's, mode 0700"; return 1; fi
+}
+# root_fetch_local <release-user repo path> <refspec...>
+root_fetch_local() { local src="$1"; shift; sgit fetch -q --no-tags --no-write-fetch-head --upload-pack "$(rel_upload_pack)" "$src" "$@"; }
+# ensure_commit <sha>: the commit is in root's repo, fetched from the queue repo when it is a queued commit not on main yet
+ensure_commit() {
+  sgit cat-file -e "$1^{commit}" 2>/dev/null && return 0
+  [[ -n "$QUEUE_REPO" ]] && root_fetch_local "$QUEUE_REPO" "+refs/heads/*:refs/queue/*" >/dev/null 2>&1
+  sgit cat-file -e "$1^{commit}" 2>/dev/null
+}
+# owner_signed <sha>: signed by a key in $ALLOWED_SIGNERS (OWNER keys only), ssh-keygen pinned on the command line. Prints
+# git's last line on failure.
+owner_signed() {
+  local out rc=0 keygen
   keygen="$(command -v ssh-keygen)" || { echo "ssh-keygen not found"; return 1; }
-  scratch="$(mktemp -d "${TMPDIR:-/tmp}/ifso-verify.XXXXXX")" || return 1
-  if ! GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git init -q --bare "$scratch"; then rm -rf "$scratch"; return 1; fi
-  id="$(rgit -C "$REPO_DIR" cat-file commit "$c" | GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -C "$scratch" hash-object -t commit -w --stdin)" || id=""
-  if [[ "$id" != "$c" ]]; then rm -rf "$scratch"; echo "could not copy commit $c"; return 1; fi
-  out="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git -C "$scratch" -c gpg.format=ssh -c "gpg.ssh.program=$keygen" \
-    -c "gpg.ssh.allowedSignersFile=$ALLOWED_SIGNERS" -c gpg.ssh.revocationFile= verify-commit "$c" 2>&1)" || rc=$?
-  rm -rf "$scratch"
+  out="$(sgit -c gpg.format=ssh -c "gpg.ssh.program=$keygen" -c "gpg.ssh.allowedSignersFile=$ALLOWED_SIGNERS" -c gpg.ssh.revocationFile= \
+    verify-commit "$1" 2>&1)" || rc=$?
   [[ $rc == 0 ]] || printf '%s' "$out" | tail -1
   return $rc
+}
+# pid_of <a> <b>: git patch-id --verbatim of the diff a..b (binary content in, renames off): only line numbers do not count
+pid_of() { sgit diff --no-ext-diff --no-textconv --no-renames --binary --full-index "$1" "$2" | sgit patch-id --verbatim | cut -d' ' -f1; }
+# commit_ok <sha> [depth]: may this first-parent commit reach production? Yes when it is signed by an owner key, or when it is a
+# runner commit (one parent; the server key's signature counts for nothing) whose LAST trailer names a source X that is accepted:
+#   (cherry picked from commit X)   X signed by an owner key, and the same patch
+#   This reverts commit X.          X an ancestor, accepted itself (a revert, a re-apply), and the exact inverse patch
+# Prints the reason when refused. lib/release.py runner_commit_problem is the same rule (the runner checks before it pushes).
+commit_ok() {
+  local c="$1" d="${2:-0}" sig line x n a b
+  sig="$(owner_signed "$c")" && return 0
+  (( d < 4 )) || { echo "runner commits nested too deep"; return 1; }
+  n="$(sgit rev-list --parents -n 1 "$c" | wc -w | tr -d ' ')"
+  [[ "$n" == 2 ]] || { echo "not signed by an owner key ($sig) and not a runner commit"; return 1; }
+  line="$(sgit log -1 --format=%B "$c" | grep -E '^(\(cherry picked from commit [0-9a-f]{40}\)|This reverts commit [0-9a-f]{40}\.)$' | tail -1 || true)"
+  [[ -n "$line" ]] || { echo "not signed by an owner key ($sig) and names no owner-signed source"; return 1; }
+  x="$(grep -oE '[0-9a-f]{40}' <<<"$line")"
+  ensure_commit "$x" || { echo "names ${x:0:12}, which root cannot find (not on main, not in the queue)"; return 1; }
+  if [[ "$line" == "(cherry picked"* ]]; then
+    sig="$(owner_signed "$x")" || { echo "cherry-pick of ${x:0:12}, which is not signed by an owner key ($sig)"; return 1; }
+    a="$(pid_of "$x^" "$x")"; b="$(pid_of "$c^" "$c")"
+    [[ -n "$a" && "$a" == "$b" ]] || { echo "not the same patch as ${x:0:12}, the owner-signed commit it says it picks"; return 1; }
+    return 0
+  fi
+  sgit merge-base --is-ancestor "$x" "$c^" || { echo "reverts ${x:0:12}, which is not an ancestor of it"; return 1; }
+  sig="$(commit_ok "$x" $((d + 1)))" || { echo "reverts ${x:0:12}, which is not accepted itself: $sig"; return 1; }
+  a="$(pid_of "$x^" "$x")"; b="$(pid_of "$c" "$c^")"
+  [[ -n "$a" && "$a" == "$b" ]] || { echo "not the exact inverse patch of ${x:0:12}, the commit it says it reverts"; return 1; }
 }

@@ -619,5 +619,178 @@ class CatchUp(unittest.TestCase):
         self.assertEqual(R.CFG["max_per_pass"], 3)
 
 
+class OwnerOnlySigners(unittest.TestCase):
+    """Audit M-2 (PoC poc_audit_m2_server_key.py): install.sh's allowed_signers must hold OWNER keys only, so a commit signed
+    by the server key is never accepted for what it is. A runner-made commit (cherry-pick of a queued commit, revert, re-apply)
+    is accepted only when its trailer names an owner-signed commit with the same patch (or the inverse one). Driven through the
+    real install.sh (PREFIX mode), apply_commit and the root wrapper ifso-deploy-release --validate."""
+
+    @classmethod
+    def setUpClass(cls):
+        rel = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cls.T = T = tempfile.mkdtemp(prefix="ifso-m2.")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        cls.env0 = dict(env, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM="/dev/null")
+
+        def sh(*a, cwd=None, env=None, inp=None, ok=False):
+            p = subprocess.run(a, cwd=cwd, env=dict(cls.env0, **(env or {})), input=inp, text=True, capture_output=True)
+            if p.returncode and not ok:
+                raise RuntimeError(f"{a}: {p.stdout}{p.stderr}")
+            return p.stdout.strip() if not ok else (p.returncode, (p.stdout + p.stderr).strip())
+        cls.sh = staticmethod(sh)
+        open(os.path.join(T, "sync-public.py"), "w").write("# stand-in\n")
+        pfx = os.path.join(T, "pfx")
+        sh("bash", os.path.join(rel, "install.sh"), env={"PREFIX": pfx, "RELEASE_GIT_NAME": "Ifso Release", "RELEASE_GIT_EMAIL": "release@example.invalid",
+                                                         "SYNC_PUBLIC_SRC": os.path.join(T, "sync-public.py")})
+        cls.signers = os.path.join(pfx, "etc/ifso-release/allowed_signers")
+        cls.server_gitcfg = os.path.join(pfx, "var/lib/ifso-release/.gitconfig")
+        cls.env0["GIT_CONFIG_GLOBAL"] = cls.server_gitcfg  # every command here is the release user's unless it says otherwise
+        sh("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "owner", "-f", os.path.join(T, "owner"))
+        with open(cls.signers, "a") as f:  # the owner's key, appended as the README says
+            f.write(f'owner@example.invalid namespaces="git" {" ".join(open(os.path.join(T, "owner.pub")).read().split()[:2])}\n')
+        cls.ocfg = os.path.join(T, "owner.gitconfig")
+        open(cls.ocfg, "w").write(f"[user]\n name = Owner\n email = owner@example.invalid\n signingkey = {T}/owner.pub\n[gpg]\n format = ssh\n[commit]\n gpgsign = true\n")
+        cls.origin = os.path.join(T, "origin.git")
+        sh("git", "init", "-q", "--bare", "-b", "main", cls.origin)
+        cls.work = w = os.path.join(T, "owner-work")
+        sh("git", "clone", "-q", cls.origin, w)
+        O = {"GIT_CONFIG_GLOBAL": cls.ocfg}
+
+        def commit(msg, f, sign=True, base=None):
+            if base:
+                sh("git", "checkout", "-q", "--detach", base, cwd=w, env=O)
+            open(os.path.join(w, f), "w").write(msg + "\n")
+            sh("git", "add", f, cwd=w, env=O)
+            sh("git", "-c", f"commit.gpgsign={'true' if sign else 'false'}", "commit", "-q", "-m", msg, cwd=w, env=O)
+            return sh("git", "rev-parse", "HEAD", cwd=w)
+        cls.B = commit("base", "a")
+        cls.M = commit("owner fix on main", "b")
+        sh("git", "push", "-q", "origin", "HEAD:refs/heads/main", cwd=w, env=O)
+        cls.Q_unsigned = commit("POISON: unsigned queued update", "evil", sign=False, base=cls.B)  # parent B != main M
+        cls.Q_owner = commit("feat(api): TU02 owner-signed queued update", "tu02", base=cls.B)
+        cls.queue = os.path.join(T, "queue.git")
+        sh("git", "init", "-q", "--bare", "-b", "main", cls.queue)
+        sh("git", "push", "-q", cls.queue, f"{cls.Q_owner}:refs/heads/tu-queue", f"{cls.Q_unsigned}:refs/heads/poison", cwd=w, env=O)
+        cls.clone = os.path.join(T, "backend")
+        sh("git", "clone", "-q", cls.origin, cls.clone)
+        sh("git", "fetch", "-q", cls.queue, "+refs/heads/*:refs/queue/*", cwd=cls.clone)
+        os.makedirs(os.path.join(T, "opt/releases", cls.M))
+        os.symlink(os.path.join(T, "opt/releases", cls.M), os.path.join(T, "opt/current"))
+        cls.saved = (R.CFG["repo"], R.CFG["allowed_signers"], os.environ.get("GIT_CONFIG_GLOBAL"))
+        R.CFG["repo"], R.CFG["allowed_signers"] = cls.clone, cls.signers
+        os.environ["GIT_CONFIG_GLOBAL"] = cls.server_gitcfg  # the release user's ~/.gitconfig from install.sh: signs with the server key
+
+    @classmethod
+    def tearDownClass(cls):
+        R.CFG["repo"], R.CFG["allowed_signers"], g = cls.saved
+        if g is None:
+            os.environ.pop("GIT_CONFIG_GLOBAL", None)
+        else:
+            os.environ["GIT_CONFIG_GLOBAL"] = g
+
+    def setUp(self):
+        self.sh("git", "checkout", "-q", "main", cwd=self.clone)
+        self.sh("git", "reset", "-q", "--hard", self.M, cwd=self.clone)
+
+    def root_validate(self, sha):
+        """The root wrapper's own gate on `sha` (pushed to origin main first, as the runner does before the deploy)."""
+        self.sh("git", "push", "-q", "-f", self.origin, f"{sha}:refs/heads/main", cwd=self.clone)
+        conf = os.path.join(self.T, "paths.conf")
+        open(conf, "w").write(f"RELEASE_USER={self.sh('id', '-un')}\nRELEASE_HOME={self.T}/home\nREPO_DIR={self.clone}\nQUEUE_REPO={self.queue}\n"
+                              f"ROOT_REPO={self.T}/root.git\nPRIVATE_URL={self.origin}\nDEPLOY_BIN=/bin/false\nOPT_DIR={self.T}/opt\n"
+                              f"ALLOWED_SIGNERS={self.signers}\nRUNNER_LIB={os.path.dirname(os.path.abspath(__file__))}\nFETCH_WAIT=0\n")
+        sbin = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sbin")
+        return self.sh("bash", os.path.join(sbin, "ifso-deploy-release"), "--validate", sha, ok=True,
+                       env={"IFSO_RELEASE_CONF": conf, "IFSO_RELEASE_LIB": sbin, "GIT_CONFIG_GLOBAL": self.server_gitcfg})
+
+    def test_install_keeps_the_server_key_out_of_allowed_signers(self):
+        srv = open(os.path.join(self.T, "pfx/var/lib/ifso-release/.ssh/id_ed25519_signing.pub")).read().split()[1]
+        self.assertNotIn(srv, open(self.signers).read())
+
+    def test_poc_unsigned_queued_commit_is_refused(self):
+        with self.assertRaises(R.Fail) as e:
+            R.apply_commit({}, {}, {"sha": self.Q_unsigned, "id": "TU01"}, os.path.join(self.T, "log"))
+        self.assertIn("not signed by an owner key", str(e.exception))
+        self.assertEqual(self.sh("git", "rev-parse", "main", cwd=self.clone), self.M)  # nothing landed
+
+    def test_owner_signed_queued_commit_lands_as_a_runner_cherry_pick_root_accepts(self):
+        t = {}
+        R.apply_commit({}, t, {"sha": self.Q_owner, "id": "TU02"}, os.path.join(self.T, "log"))
+        landed = t["landedSha"]
+        self.assertNotEqual(landed, self.Q_owner)  # not a fast-forward: a runner-made cherry-pick
+        self.assertIn(f"(cherry picked from commit {self.Q_owner})", self.sh("git", "log", "-1", "--format=%B", landed, cwd=self.clone))
+        self.assertIsNone(R.runner_commit_problem(landed))
+        rc, out = self.root_validate(landed)
+        self.assertEqual(rc, 0, out)
+
+    def test_server_signed_commit_whose_trailer_names_another_patch_is_refused(self):
+        # what a compromised release user can make: its own change, signed by the server key, claiming to be a pick of Q_owner
+        w = self.clone
+        open(os.path.join(w, "evil"), "w").write("evil\n")
+        self.sh("git", "add", "evil", cwd=w)
+        self.sh("git", "commit", "-q", "-S", "-m", f"feat(api): TU02\n\n(cherry picked from commit {self.Q_owner})", cwd=w)
+        forged = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIn("patch", R.runner_commit_problem(forged) or "")
+        rc, out = self.root_validate(forged)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("patch", out)
+
+    def test_server_signed_commit_without_a_trailer_is_refused_by_root(self):
+        w = self.clone
+        open(os.path.join(w, "evil2"), "w").write("evil\n")
+        self.sh("git", "add", "evil2", cwd=w)
+        self.sh("git", "commit", "-q", "-S", "-m", "chore: looks harmless", cwd=w)
+        rc, out = self.root_validate(self.sh("git", "rev-parse", "HEAD", cwd=w))
+        self.assertNotEqual(rc, 0, out)
+
+    def test_revert_with_the_inverse_patch_is_accepted_and_an_altered_one_refused(self):
+        t = {}
+        R.apply_commit({}, t, {"sha": self.Q_owner, "id": "TU02"}, os.path.join(self.T, "log"))
+        landed, w = t["landedSha"], self.clone
+        self.sh("git", "revert", "--no-edit", landed, cwd=w)  # signed by the server key (commit.gpgsign in install's gitconfig)
+        good = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIsNone(R.runner_commit_problem(good))
+        rc, out = self.root_validate(good)
+        self.assertEqual(rc, 0, out)
+        self.sh("git", "reset", "-q", "--hard", landed, cwd=w)
+        self.sh("git", "revert", "--no-commit", landed, cwd=w)
+        open(os.path.join(w, "evil3"), "w").write("smuggled\n")
+        self.sh("git", "add", "evil3", cwd=w)
+        self.sh("git", "commit", "-q", "-S", "-m", f'Revert "x"\n\nThis reverts commit {landed}.', cwd=w)
+        bad = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIn("patch", R.runner_commit_problem(bad) or "")
+        rc, out = self.root_validate(bad)
+        self.assertNotEqual(rc, 0, out)
+
+
+class GateUser(unittest.TestCase):
+    """Audit M-2: the gate runs as GATE_USER (no access to the release user's keys) with a clean environment, and installs
+    without running any dependency's install script."""
+
+    def test_gate_runs_as_the_gate_user_with_a_clean_environment(self):
+        old = R.CFG["gate_user"]
+        R.CFG["gate_user"] = "ifso-gate-test"
+        os.environ["IFSO_ALLOW_REAL_DEPLOY"] = "1"
+        try:
+            argv = R.gate_shell("nice -n 10 bun test", "/var/lib/ifso-gate/release/app", {"TMPDIR": "/var/lib/ifso-gate/release.tmp"})
+        finally:
+            R.CFG["gate_user"] = old
+            os.environ.pop("IFSO_ALLOW_REAL_DEPLOY")
+        self.assertEqual(argv[:7], ["sudo", "-n", "-u", "ifso-gate-test", "--", "env", "-i"])
+        self.assertEqual(argv[-3:-1], ["bash", "-c"])
+        self.assertTrue(argv[-1].startswith("cd /var/lib/ifso-gate/release/app && "))
+        envs = [a for a in argv[7:-3]]
+        self.assertEqual(sorted(e.split("=", 1)[0] for e in envs), ["HOME", "LANG", "PATH", "TMPDIR"])
+        self.assertIn("HOME=/var/lib/ifso-gate", envs)
+        self.assertFalse(any("IFSO_" in a or "RELEASE_HOME" in a or "ALLOWED_SIGNERS" in a for a in argv))
+
+    def test_no_gate_user_runs_as_the_runner(self):
+        self.assertEqual(R.gate_shell("true", "/tmp")[:1], ["env"])
+
+    def test_installs_ignore_scripts(self):
+        self.assertIn("--ignore-scripts", R.CFG["gate_install"])
+        self.assertIn("--ignore-scripts", R.CFG["gate_web_install"])
+
+
 if __name__ == "__main__":
     unittest.main()

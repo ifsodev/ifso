@@ -26,7 +26,7 @@ Unarmed = log only: with no launchAt, or without the root-owned ALLOW_REAL_DEPLO
 every alert goes to logs/notify-log-only.log (never Telegram). Everything is configured by environment variables so the
 sandbox proof can run the real code against local bare repos.
 """
-import datetime as dt, fcntl, hashlib, json, os, re, shlex, shutil, subprocess, sys, time, urllib.request
+import datetime as dt, fcntl, hashlib, json, os, pwd, re, shlex, shutil, subprocess, sys, time, urllib.request
 
 LIB = os.path.dirname(os.path.abspath(__file__))
 E = os.environ.get
@@ -45,7 +45,16 @@ CFG = {
     "public_url": E("PUBLIC_COMMIT_URL", "{sha}"),
     "allow_file": E("ALLOW_FILE", "/etc/ifso-release/ALLOW_REAL_DEPLOY"),
     "gate_dir": E("GATE_DIR", f"{HOME}/gate"),
-    "gate_install": E("GATE_INSTALL", "bun install --frozen-lockfile"),
+    # The gate runs the queued trees' tests and their dependencies' code. It runs as GATE_USER (install.sh: ifso-gate), a user
+    # with no access to the release user's ~/.ssh (deploy and signing keys), through `sudo -n -u ifso-gate`, with a clean
+    # environment (nothing of paths.conf or the service's env). The tree is exported with `git archive` into GATE_DIR (owned
+    # by the gate user), so the gate never sees a .git of the runner. Empty = run as the runner itself (local sandbox only;
+    # arm-check refuses it on a server). Audit M-2.
+    "gate_user": E("GATE_USER", ""),
+    "gate_home": E("GATE_HOME", "/var/lib/ifso-gate"),
+    # no dependency's install script runs in the gate (none is needed: proven with the full app suite, the web tests and the
+    # web production build, README "Install scripts"). Audit M-2.
+    "gate_install": E("GATE_INSTALL", "bun install --frozen-lockfile --ignore-scripts"),
     "gate_typecheck": E("GATE_TYPECHECK", "bun run typecheck"),
     "gate_test": E("GATE_TEST", "bun test --timeout 90000"),
     # web/: an update that changes it also gets the web tests and the PRODUCTION build (a page dropped only by the production
@@ -53,11 +62,13 @@ CFG = {
     # (alert, gate result webUngated), not held. GATE_WEB=off turns the web steps off on purpose (also flagged).
     "gate_web": E("GATE_WEB", "auto"),
     "gate_web_runtime": E("GATE_WEB_RUNTIME", "node"),
-    "gate_web_install": E("GATE_WEB_INSTALL", "bun install --frozen-lockfile"),
+    "gate_web_install": E("GATE_WEB_INSTALL", "bun install --frozen-lockfile --ignore-scripts"),
     "gate_web_test": E("GATE_WEB_TEST", "bun run test"),
     "gate_web_build": E("GATE_WEB_BUILD", "bun run build"),
     "gate_anvil": E("GATE_ANVIL", "anvil"),                       # tests that start a local chain need it (install.sh installs it)
     "gate_always": [x for x in E("GATE_ALWAYS_TESTS", "test/bannedWords.test.ts").split(",") if x],
+    # OWNER keys only (audit M-2): the server's own signing key is never in it, so a commit signed on this server is accepted
+    # only as a runner commit whose trailer names an owner-signed commit with the same (or the inverse) patch.
     "allowed_signers": E("ALLOWED_SIGNERS", "/etc/ifso-release/allowed_signers"),
     "forbidden_file": E("FORBIDDEN_FILE", "/etc/ifso-release/forbidden.txt"),
     "infra_backoff": [int(x) for x in E("INFRA_RETRY_S", "10,30,60").split(",") if x.strip()],
@@ -315,9 +326,63 @@ def next_pending(st, sched, any_time=False):
 
 # ------------------------------------------------------------------ git steps
 def signature_ok(sha, repo=None):
+    """Signed by an OWNER key (allowed_signers holds owner keys only)."""
     c, out = run(["git", "-c", "safe.directory=*", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={CFG['allowed_signers']}",
                   "-C", repo or CFG["repo"], "log", "-1", "--format=%G?", sha])
     return c == 0 and out.strip() == "G"
+
+
+# the LAST of these lines in a runner commit's message names its source (git cherry-pick -x and git revert write them last)
+TRAILER = re.compile(r"^(?:\(cherry picked from commit ([0-9a-f]{40})\)|This reverts commit ([0-9a-f]{40})\.)$", re.M)
+
+
+def patch_id(a, b, repo=None):
+    """git patch-id --verbatim of the diff a..b (binary content included, no renames, no external diff): line numbers do not
+    count, every other byte does. The root wrapper computes the same (common.sh pid_of)."""
+    d = subprocess.run(["git", "-c", "safe.directory=*", "-C", repo or CFG["repo"], "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+                        "--binary", "--full-index", a, b], capture_output=True)
+    if d.returncode:
+        return ""
+    p = subprocess.run(["git", "patch-id", "--verbatim"], input=d.stdout, capture_output=True)
+    return p.stdout.split()[0].decode() if p.returncode == 0 and p.stdout.strip() else ""
+
+
+def runner_commit_problem(c, repo=None, depth=0):
+    """None when the root deploy wrapper will accept commit c: signed by an owner key, OR a runner commit (one parent) whose
+    last trailer names a source X that is accepted: `(cherry picked from commit X)` with X owner-signed and the same patch,
+    or `This reverts commit X.` with X an ancestor of c, itself accepted, and the inverse patch. Else the reason. Mirrors
+    common.sh commit_ok, so the runner holds an update BEFORE the push instead of the root wrapper refusing it after."""
+    repo = repo or CFG["repo"]
+    if signature_ok(c, repo):
+        return None
+    if depth >= 4:
+        return f"{c[:10]}: runner commits nested too deep"
+    parents = (git("rev-list", "--parents", "-n", "1", c, repo=repo, ok=True) or "").split()[1:]
+    if len(parents) != 1:
+        return f"{c[:10]} is not signed by an owner key and is not a runner commit (it has {len(parents)} parents)"
+    found = TRAILER.findall(git("log", "-1", "--format=%B", c, repo=repo) or "")
+    if not found:
+        return f"{c[:10]} is not signed by an owner key and names no owner-signed source (no cherry-pick or revert trailer)"
+    pick, rev_of = found[-1]
+    x = pick or rev_of
+    if git("cat-file", "-e", x + "^{commit}", repo=repo, ok=True) is None:
+        return f"{c[:10]} names {x[:10]}, which is not in this repository"
+    if pick:
+        if not signature_ok(x, repo):
+            return f"{c[:10]} is a cherry-pick of {x[:10]}, which is not signed by an owner key"
+        a, b = patch_id(x + "^", x, repo), patch_id(c + "^", c, repo)
+        if not a or a != b:
+            return f"{c[:10]} is not the same patch as {x[:10]}, the owner-signed commit it says it picks (patch-id differs)"
+        return None
+    if git("merge-base", "--is-ancestor", x, c + "^", repo=repo, ok=True) is None:
+        return f"{c[:10]} reverts {x[:10]}, which is not an ancestor of it"
+    why = runner_commit_problem(x, repo, depth + 1)
+    if why:
+        return f"{c[:10]} reverts {x[:10]}, which is not accepted itself: {why}"
+    a, b = patch_id(x + "^", x, repo), patch_id(c, c + "^", repo)
+    if not a or a != b:
+        return f"{c[:10]} is not the exact inverse patch of {x[:10]}, the commit it says it reverts (patch-id differs)"
+    return None
 
 
 def find_landed(u, st):
@@ -352,9 +417,15 @@ def sync_main(log):
 
 
 def apply_commit(st, t, u, log):
+    # the queued commit itself must carry an OWNER signature (audit M-2): the server key re-signs only what the owner signed
+    if not signature_ok(u["sha"]):
+        raise Fail(f"queued commit {u['sha'][:10]} is not signed by an owner key in {CFG['allowed_signers']}: refusing to apply it")
     landed = find_landed(u, st)
     if landed:
         t["landedSha"] = landed
+        why = runner_commit_problem(landed)
+        if why:
+            raise Fail(f"landed commit would be refused by the deploy wrapper: {why}")
         return
     main = git("rev-parse", "main", log=log)
     parent = git("rev-parse", u["sha"] + "^", log=log)
@@ -375,8 +446,9 @@ def apply_commit(st, t, u, log):
             run(["git", "-c", "safe.directory=*", "cherry-pick", "--abort"], cwd=CFG["repo"], log=log)
             raise Fail(f"does not apply on current main: {out.strip()[-200:]}")
     t["landedSha"] = git("rev-parse", "main", log=log)
-    if not signature_ok(t["landedSha"]):
-        raise Fail(f"landed commit {t['landedSha'][:10]} has no good signature")
+    why = runner_commit_problem(t["landedSha"])
+    if why:  # before the push: the update is held, nothing reaches main (a context change can alter a cherry-pick's patch)
+        raise Fail(f"landed commit would be refused by the deploy wrapper: {why}")
 
 
 def push_main(log):
@@ -391,8 +463,8 @@ def push_main(log):
 
 
 # ------------------------------------------------------------------ gate
-def changed_tests(g, parent, landed, log):
-    files = git("diff", "--name-only", parent, landed, repo=g, log=log).splitlines()
+def changed_tests(g, parent, landed, log, source_repo=None):
+    files = git("diff", "--name-only", parent, landed, repo=source_repo or g, log=log).splitlines()
     tests = []
     for f in files:
         if f.startswith("app/") and f.endswith(".ts"):
@@ -411,18 +483,49 @@ def anvil_tests(g, tests):
     return [t for t in tests if "anvil" in open(os.path.join(g, "app", t), errors="ignore").read().lower()]
 
 
+def gate_user_on():
+    u = CFG["gate_user"]
+    return bool(u) and u != pwd.getpwuid(os.getuid()).pw_name
+
+
+def gate_shell(cmd, cwd, env=None):
+    """argv that runs the shell command `cmd` in `cwd` as the gate user with a CLEAN environment (PATH, HOME, TMPDIR and the
+    given extras only); without GATE_USER (local sandbox) as the runner itself with its environment plus the extras."""
+    line = f"cd {shlex.quote(cwd)} && {cmd}"
+    if not gate_user_on():
+        return ["env", *[f"{k}={v}" for k, v in (env or {}).items()], "bash", "-c", line]
+    e = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": CFG["gate_home"], "LANG": "C.UTF-8", **(env or {})}
+    return ["sudo", "-n", "-u", CFG["gate_user"], "--", "env", "-i", *[f"{k}={v}" for k, v in e.items()], "bash", "-c", line]
+
+
+def gate_tree(g, source_repo, landed, log):
+    """Put the tree of `landed` (from the runner's repo, read by the runner) into the gate dir `g`, owned and written by the gate
+    user: everything but app/node_modules and web/node_modules (the install cache) is removed first."""
+    wipe = (f"mkdir -p {shlex.quote(g)} {shlex.quote(g + '.tmp')} && cd {shlex.quote(g)} && "
+            "find . -mindepth 1 -maxdepth 1 ! -name app ! -name web -exec rm -rf {} + && "
+            "for d in app web; do if [ -d \"$d\" ]; then find \"$d\" -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +; fi; done")
+    must(gate_shell(wipe, "/"), "gate clean", log=log)
+    arc = subprocess.Popen(["git", "-c", "safe.directory=*", "-C", source_repo, "archive", "--format=tar", landed],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    untar = subprocess.run(gate_shell(f"tar -x -f - -C {shlex.quote(g)}", "/"), stdin=arc.stdout, capture_output=True)
+    arc.stdout.close()
+    if arc.wait() or untar.returncode:
+        raise Fail(f"gate checkout of {landed[:10]} failed (archive exit {arc.returncode}, extract exit {untar.returncode}): "
+                   f"{untar.stderr.decode(errors='replace').strip()[-160:]}")
+
+
 def gate_at(g, source_repo, parent, landed, log, label=""):
-    """Light server gate on the checkout `g` at `landed` (a clone of its own, so the runner's clone is never touched).
-    Called with a log PATH string, exactly as the runner calls it (an earlier project incident 35)."""
+    """Light server gate on the tree of `landed` exported into the gate dir `g` (the runner's clone is never touched, and the gate
+    user never sees a .git). Called with a log PATH string, exactly as the runner calls it (an earlier project incident 35)."""
     assert isinstance(log, str), "gate_at wants a log path, not a file handle"
-    if not os.path.isdir(os.path.join(g, ".git")):
-        must(["git", "clone", "-q", source_repo, g], "gate clone", log=log)
-    must(["git", "-C", g, "fetch", "-q", source_repo, "+refs/heads/*:refs/remotes/src/*"], "gate fetch", log=log)
-    must(["git", "-C", g, "checkout", "-q", "-f", "--detach", landed], "gate checkout", log=log)
-    must(["git", "-C", g, "clean", "-qfdx", "-e", "node_modules"], "gate clean", log=log)
-    files, tests = changed_tests(g, parent, landed, log)
+    gate_tree(g, source_repo, landed, log)
+    files, tests = changed_tests(g, parent, landed, log, source_repo)
     app = os.path.join(g, "app")
-    res = {"gateKind": "light", "tests": tests, "changed": len(files), "seconds": {}}
+    genv = {"TMPDIR": g + ".tmp", "GATE_COMMIT_SUBJECT": git("log", "-1", "--format=%s", landed, repo=source_repo, ok=True) or ""}
+    if not gate_user_on() and os.environ.get("TMPDIR"):
+        genv["TMPDIR"] = os.environ["TMPDIR"]  # the preflight's own temp dir (its throwaway Postgres) when the gate is the runner
+    res = {"gateKind": "light", "tests": tests, "changed": len(files), "seconds": {},
+           "gateUser": CFG["gate_user"] if gate_user_on() else pwd.getpwuid(os.getuid()).pw_name}
     need = anvil_tests(g, tests)
     if need and not shutil.which(CFG["gate_anvil"]):
         raise Fail(f"gate: {len(need)} changed test(s) start anvil ({', '.join(need[:3])}) and there is no {CFG['gate_anvil']} on this "
@@ -430,7 +533,7 @@ def gate_at(g, source_repo, parent, landed, log, label=""):
     t0 = time.time()
 
     def once():
-        c, o = run(f"nice -n 10 {CFG['gate_install']}", cwd=app, log=log, timeout=2400)
+        c, o = run(gate_shell(f"nice -n 10 {CFG['gate_install']}", app, genv), log=log, timeout=2400)
         return c == 0, o
     ok, out = retrying(once, "gate install", log)
     if not ok:
@@ -447,7 +550,7 @@ def gate_at(g, source_repo, parent, landed, log, label=""):
             res["web"], res["webUngated"] = f"NOT GATED: no {CFG['gate_web_runtime']} on this server for the web production build", True
         else:
             def web_once():
-                c, o = run(f"nice -n 10 {CFG['gate_web_install']}", cwd=web, log=log, timeout=2400)
+                c, o = run(gate_shell(f"nice -n 10 {CFG['gate_web_install']}", web, genv), log=log, timeout=2400)
                 return c == 0, o
             ok, out = retrying(web_once, "gate web install", log)
             if not ok:
@@ -456,9 +559,9 @@ def gate_at(g, source_repo, parent, landed, log, label=""):
             res["web"] = "tests + production build"
     for name, cmd, cwd in steps:
         t1 = time.time()
-        code, out = run(f"nice -n 10 {cmd}", cwd=cwd, log=log, timeout=2400)
+        code, out = run(gate_shell(f"nice -n 10 {cmd}", cwd, genv), log=log, timeout=2400)
         if code:  # one re-run: a flaky first run is recorded, a failing second one holds the update
-            code, out = run(f"nice -n 10 {cmd}", cwd=cwd, log=log, timeout=2400)
+            code, out = run(gate_shell(f"nice -n 10 {cmd}", cwd, genv), log=log, timeout=2400)
             if code == 0:
                 res.setdefault("flakyPassedOnRerun", []).append(name)
         res["seconds"][name] = round(time.time() - t1, 1)
@@ -602,6 +705,9 @@ def rollback(st, u, t, reason, log):
                             cwd=CFG["repo"], log=log, inp=msg)
             if code:
                 problems.append(f"revert commit failed: {out.strip()[-160:]}")
+            elif runner_commit_problem(git("rev-parse", "main")):
+                problems.append(f"the revert would be refused by the deploy wrapper: {runner_commit_problem(git('rev-parse', 'main'))}")
+                git("reset", "-q", "--hard", landed, log=log, ok=True)
             else:
                 t["revertSha"] = git("rev-parse", "main")
                 st.setdefault("reverted", {}).setdefault(u["sha"], []).append(t["revertSha"])

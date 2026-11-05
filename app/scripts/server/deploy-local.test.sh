@@ -119,7 +119,7 @@ run "$S1"
 check "first deploy exits 0" test "$RC" = 0
 check "current points at the sha" test "$(cur)" = "$S1"
 check "the release is the committed tree" grep -qx one "$T/opt/releases/$S1/app/src/main.ts"
-check "bun install --frozen-lockfile ran in the release" has "bun install --frozen-lockfile (in $S1)" "$(calls)"
+check "bun install --frozen-lockfile --ignore-scripts ran in the release (no dependency install script runs as ifso; audit M-2)" has "bun install --frozen-lockfile --ignore-scripts (in $S1)" "$(calls)"
 check "migrations ran (ifso-migrate.service started)" has "systemctl start ifso-migrate.service" "$(calls)"
 check "the release is marked healthy" test -e "$T/opt/releases/$S1/.healthy"
 check "current.sha was recorded" test "$(cat "$T/state/current.sha")" = "$S1"
