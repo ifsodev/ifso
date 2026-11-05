@@ -1620,6 +1620,9 @@ def arm_problems(results_path):
                    "dependencies with access to the release user's keys. Run install.sh again (it makes ifso-gate) (audit M-2)")
     if r.get("sfp") != sched_fp(sched):
         out.append("preflight results belong to another schedule (schedule.json changed since): run sudo ifso-release-preflight again")
+    stip = (sched["updates"][-1]["sha"] if sched.get("updates") else sched.get("tip", ""))
+    if r.get("tip") != stip:
+        out.append(f"preflight results name queue tip {str(r.get('tip'))[:12]}, the schedule's tip is {stip[:12]} (audit I-19): run sudo ifso-release-preflight again")
     want = [u["id"] for u in sched["updates"] if st["updates"][u["id"]]["status"] in ("pending", "held", "in_progress")]
     res = r.get("results") or {}
     missing = [k for k in want if k not in res or res[k].get("skipped")]

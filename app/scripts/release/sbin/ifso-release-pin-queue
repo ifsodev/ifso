@@ -4,11 +4,19 @@
 # "<base> <tip>" (base = its merge-base with private main as root fetches it) to /etc/ifso-release/queue-pin. The root deploy
 # wrapper accepts a runner cherry-pick only of a commit on base..tip, and a runner revert only of the running release when it
 # carries such an update. arm.sh pins (replaces) it; after a rebuilt queue (README "Rebuilt queue") run it with --add.
-#   sudo ifso-release-pin-queue [--add]
+# The tip must be the one schedule.json records (audit I-19); --expect <sha> also requires that exact tip.
+#   sudo ifso-release-pin-queue [--add] [--expect <sha>]
 LIB="${IFSO_RELEASE_LIB:-/usr/local/lib/ifso-release}"
 [[ -n "${SUDO_UID:-}" ]] && LIB=/usr/local/lib/ifso-release
 # shellcheck disable=SC1091
 . "$LIB/common.sh"
-[[ $# == 0 || ( $# == 1 && "$1" == --add ) ]] || die "usage: ifso-release-pin-queue [--add]"
-out="$(pin_queue "$@")" || die "$out"
+args=("$@")
+while (( $# )); do
+  case "$1" in
+    --add) shift ;;
+    --expect) [[ $# -ge 2 && "$2" =~ ^[0-9a-f]{40}$ ]] || die "usage: ifso-release-pin-queue [--add] [--expect <sha>]"; shift 2 ;;
+    *) die "usage: ifso-release-pin-queue [--add] [--expect <sha>]" ;;
+  esac
+done
+out="$(pin_queue ${args[@]+"${args[@]}"})" || die "$out"
 say "$out"

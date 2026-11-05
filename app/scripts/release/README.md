@@ -86,7 +86,8 @@ sudo -u ifso-release bash -c 'set -a; . /etc/ifso-release/paths.conf; set +a;
 # 4. Server: the runner follows tu-queue, and the schedule tip must equal it
 sudo -u ifso-release git -C "$Q" update-ref refs/heads/tu-queue refs/heads/queue-r1
 #    root pins the rebuilt queue next to the old one (audit L-13: root accepts runner commits only from a pinned queue;
-#    --add keeps the old line, so updates released from the old queue can still roll back)
+#    --add keeps the old line, so updates released from the old queue can still roll back; it refuses unless tu-queue's
+#    tip is the tip schedule.json records, audit I-19, and prints the full base and tip shas and the pinned subjects)
 sudo ifso-release-pin-queue --add
 # 5. Server: prove every pending and held update on the new main, then retry the fixed held ones, then resume
 sudo ifso-release-preflight                  # must end "N of N PASS"

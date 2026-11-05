@@ -240,22 +240,59 @@ commit_ok() {
   a="$(pid_of "$x^" "$x")"; b="$(pid_of "$c" "$c^")"
   [[ -n "$a" && "$a" == "$b" ]] || { echo "not the exact inverse patch of ${x:0:12}, the commit it says it reverts"; return 1; }
 }
-# pin_queue [--add]: root pins the queue repo's tu-queue (QUEUE_REF) as "<base> <tip>" in $QUEUE_PIN: tip owner-signed, base =
-# its merge-base with private main as root fetches it. --add keeps the earlier lines (a rebuilt queue; old releases still roll back).
+# sched_tip: the queue tip schedule.json records (its last update, else its "tip"), read the safe way (rel_read) and parsed by
+# root's own python3 -I. preflight_tip: the queue tip the LAST preflight tested, only when that run passed every update (no
+# failure, not stale). Both print one sha or the reason.
+sched_tip() {
+  local raw
+  raw="$(rel_read schedule.json 8000000)" || { echo "cannot read schedule.json in $RELEASE_HOME"; return 1; }
+  python3 -I -c 'import json, sys
+try:
+    s = json.loads(sys.stdin.read()); u = s.get("updates") or []; print(u[-1]["sha"] if u else s.get("tip", ""))
+except Exception as e:
+    print("schedule.json is not readable JSON (%s)" % type(e).__name__); sys.exit(1)' <<<"$raw"
+}
+preflight_tip() {
+  local raw
+  raw="$(rel_read preflight/results.json 8000000)" || { echo "no preflight results in $RELEASE_HOME/preflight: run sudo ifso-release-preflight"; return 1; }
+  python3 -I -c 'import json, sys
+try:
+    r = json.loads(sys.stdin.read())
+except Exception as e:
+    print("preflight results are not readable JSON (%s)" % type(e).__name__); sys.exit(1)
+bad = r.get("failing") or sorted(k for k, v in (r.get("results") or {}).items() if not v.get("ok"))
+if r.get("stale") or bad or not r.get("results") or not r.get("tip"):
+    print("the last preflight did not pass every update on a recorded queue tip: run sudo ifso-release-preflight"); sys.exit(1)
+print(r["tip"])' <<<"$raw"
+}
+# pin_queue [--add] [--expect <sha>]: root pins the queue repo's tu-queue (QUEUE_REF) as "<base> <tip>" in $QUEUE_PIN: tip
+# owner-signed, equal to the tip schedule.json records and (--expect, arm.sh passes the passing preflight's tip) to that one too
+# (audit I-19), base = its merge-base with private main as root fetches it. --add keeps the earlier lines (a rebuilt queue; old
+# releases still roll back). Prints the full base and tip shas and the pinned subjects.
 pin_queue() {
-  local add=0 ref="${QUEUE_REF:-refs/heads/tu-queue}" main tip base tmp
+  local add=0 expect="" ref="${QUEUE_REF:-refs/heads/tu-queue}" main tip base tmp stip
   [[ "$ref" == refs/* ]] || ref="refs/heads/$ref"
-  [[ "${1:-}" == --add ]] && add=1
+  while (( $# )); do
+    case "$1" in
+      --add) add=1; shift ;;
+      --expect) [[ $# -ge 2 ]] || { echo "--expect needs a sha"; return 1; }; expect="$2"; shift 2 ;;
+      *) echo "pin_queue: unknown argument $1"; return 1 ;;
+    esac
+  done
+  [[ -z "$expect" ]] || is_sha "$expect" || { echo "--expect must be a 40-hex sha"; return 1; }
   [[ -n "$QUEUE_REPO" ]] || { echo "QUEUE_REPO is not set"; return 1; }
   main="$(root_fetch_main 2>&1)" || { echo "${main##*$'\n'}"; return 1; }; main="${main##*$'\n'}"
   root_fetch_local "$QUEUE_REPO" "+$ref:refs/pinned/fetch" || { echo "cannot fetch $ref from $QUEUE_REPO"; return 1; }
   tip="$(sgit rev-parse --verify refs/pinned/fetch)" || return 1
+  stip="$(sched_tip)" || { echo "$stip: not pinned"; return 1; }
+  [[ "$tip" == "$stip" ]] || { echo "the queue tip $tip is not the tip schedule.json records (${stip:-none}): not pinned"; return 1; }
+  [[ -z "$expect" || "$tip" == "$expect" ]] || { echo "the queue tip $tip is not the tip the passing preflight tested ($expect): not pinned"; return 1; }
   owner_signed "$tip" >/dev/null || { echo "the queue tip ${tip:0:12} is not signed by an owner key: not pinned"; return 1; }
   base="$(sgit merge-base "$tip" "$main")" || { echo "the queue tip ${tip:0:12} shares no history with private main"; return 1; }
   sgit update-ref "refs/pinned/$tip" "$tip"
   tmp="$(mktemp "$QUEUE_PIN.XXXXXX")"
   { [[ $add == 1 && -r "$QUEUE_PIN" ]] && grep -vx "$base $tip" "$QUEUE_PIN"; printf '%s %s\n' "$base" "$tip"; } >"$tmp" || true
   chmod 0644 "$tmp"; mv -f "$tmp" "$QUEUE_PIN"
-  echo "pinned the queue: $(sgit rev-list --first-parent --count "$base..$tip") update(s), ${base:0:12}..${tip:0:12}"
+  echo "pinned the queue: $(sgit rev-list --first-parent --count "$base..$tip") update(s), base $base, tip $tip"
+  sgit log --first-parent --reverse --format='  %h %s' "$base..$tip" | LC_ALL=C tr -cd '\n\40-\176' | head -n 120 || true
 }
-

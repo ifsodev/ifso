@@ -530,9 +530,15 @@ ok "remap: every pending update now points at the rebuilt commit with the same s
   diff <(python3 -c 'import json; [print(u[\"sha\"]) for u in json.load(open(\"$W/home/schedule.json\"))[\"updates\"]]') <(git -C '$W/queue.git' rev-list --reverse '$M1..queue-r1') && test -s '$W/home/schedule.json.pre-r1'"
 rpre run >"$W/pf-stale-r1.out" 2>&1
 ok "before tu-queue moves, the schedule is STALE (one clear line)" grep -q "STALE schedule.json" "$W/pf-stale-r1.out"
+cp "$ETC/queue-pin.w4" "$W/pin-before-r1"
+"$SBIN/ifso-release-pin-queue" --add >"$W/pin-early.out" 2>&1; PRC=$?
+ok "I-19: root refuses to pin a tu-queue tip that is not the schedule's tip (pin file untouched)" bash -c "test $PRC -ne 0 && grep -q 'not the tip schedule.json records' '$W/pin-early.out' && cmp -s '$W/pin-before-r1' '$ETC/queue-pin.w4'"
 as_rel git -C "$W/queue.git" update-ref refs/heads/tu-queue-pre-r1 refs/heads/tu-queue
 as_rel git -C "$W/queue.git" update-ref refs/heads/tu-queue refs/heads/queue-r1
+"$SBIN/ifso-release-pin-queue" --add --expect "$QTIP" >"$W/pin-expect.out" 2>&1; PRC=$?
+ok "I-19: root refuses to pin when the tip differs from the one the passing preflight tested (--expect)" bash -c "test $PRC -ne 0 && grep -q 'not the tip the passing preflight tested' '$W/pin-expect.out' && cmp -s '$W/pin-before-r1' '$ETC/queue-pin.w4'"
 "$SBIN/ifso-release-pin-queue" --add >"$W/pin-r1.out" 2>&1
+ok "I-19: the pin prints the full base and tip shas and the pinned subjects" bash -c "grep -q \"tip \$(git -C '$W/queue.git' rev-parse queue-r1)\" '$W/pin-r1.out' && grep -q \"base $M1\" '$W/pin-r1.out' && grep -q 'TU0[0-9] sandbox update' '$W/pin-r1.out'"
 ok "L-13: root pins the rebuilt queue next to the old one (--add; README 'Rebuilt queue')" bash -c "test \$(wc -l <'$ETC/queue-pin.w4') -eq 2 && grep -q \" \$(git -C '$W/queue.git' rev-parse queue-r1)\$\" '$ETC/queue-pin.w4' && grep -q ' $QTIP\$' '$ETC/queue-pin.w4'"
 as_ops "$SBIN/ifso-release-preflight" >"$W/pf-w4b.out" 2>&1
 cp "$W/home/preflight/results.json" "$W/pf-good.json"

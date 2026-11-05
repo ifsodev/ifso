@@ -7,7 +7,7 @@
 # CURRENT schedule (results.main == origin/main, results.sfp == the schedule's fingerprint), tested every pending and held
 # update and passed them all; public CI on the public main tip finished with 0 non-success (release.py arm-check, anonymous
 # GitHub API); no url.*.insteadOf in the release user's git config, origin answers the clone's main, and the server RUNS that main
-# (root's own fetch of private main agrees; incidents 47, 48); the server's signing key is not in allowed_signers; root pins tu-queue (owner-signed tip) in queue-pin (audit L-13,
+# (root's own fetch of private main agrees; incidents 47, 48); the server's signing key is not in allowed_signers; root pins tu-queue (owner-signed tip, the tip the passing preflight tested: audit I-19) in queue-pin (audit L-13,
 # common.sh pin_queue); the release token created and deleted a draft Release (ifso-release-ghrelease --check-token). Going without
 # GitHub Releases needs ALLOW_NO_RELEASE_TOKEN=1 and prints a WARNING. Then it writes the 72 slots (hourly from LAUNCH_AT), creates the flag file ALLOW_REAL_DEPLOY and enables
 # the timer. Disarm = delete the flag file (the timer may stay on; a pass without the flag does nothing and alerts nobody).
@@ -46,7 +46,8 @@ srvkey="$(cut -d' ' -f2 "$srvpub")"
   || die "the server's own signing key is in $ALLOWED_SIGNERS: remove it (owner keys only; audit M-2), or everything the runner signs is deployable"
 say "allowed_signers holds no server key"
 say "2c/5 root pins the queue (audit L-13): runner cherry-picks and reverts are accepted only for commits of this queue"
-pin="$(pin_queue)" || die "the queue could not be pinned: $pin"
+pftip="$(preflight_tip)" || die "the queue could not be pinned: $pftip"
+pin="$(pin_queue --expect "$pftip")" || die "the queue could not be pinned: $pin"
 say "$pin"
 say "2b/5 release token (GitHub Releases with posters)"
 if ! tok="$("$SBIN_DIR/ifso-release-ghrelease" --check-token 2>&1)"; then

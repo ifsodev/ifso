@@ -132,7 +132,10 @@ def run_all(only=None, quiet=False):
         if not quiet:
             print(f"{u['id']}: {'PASS' if results[u['id']]['ok'] else 'FAIL ' + results[u['id']].get('reason', '')[:120]}")
     bad = sorted(k for k, v in results.items() if not v["ok"])
-    out = {"at": R.iso(R.now()), "main": main, "sfp": sched_fp(sched), "results": results, "failing": bad}
+    ups_all = sched.get("updates") or []
+    # the queue tip this run tested: root pins only this tip at arming (audit I-19, common.sh preflight_tip)
+    out = {"at": R.iso(R.now()), "main": main, "sfp": sched_fp(sched), "tip": ups_all[-1]["sha"] if ups_all else sched.get("tip", ""),
+           "results": results, "failing": bad}
     R.save(RESULTS, out)
     ok_n = sum(1 for v in results.values() if v["ok"])
     open(STATUS, "w").write(f"preflight: {ok_n} of {len(results)} PASS on main {main[:10]} at {out['at']}" + (f"; FAILING {', '.join(bad)}" if bad else "") + "\n")
