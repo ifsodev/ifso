@@ -132,7 +132,7 @@
   "test/bundle.test.ts": 3,
   "test/claim.picker.test.tsx": 1,
   "test/claim.test.tsx": 4,
-  "test/config.test.ts": 6,
+  "test/config.test.ts": 7,
   "test/copy.test.ts": 4,
   "test/create.test.ts": 6,
   "test/csp.test.ts": 6,
