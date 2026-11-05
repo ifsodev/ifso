@@ -8,6 +8,7 @@
     release.py make-schedule --queue-repo P --base SHA [--ref tu-queue] [--manifest F] [--count 72]
     release.py remap --queue-repo P --ref NEWBRANCH [--tag T]   re-point pending AND held updates at a rebuilt queue
     release.py scan-queue             forbidden-word scan of every queue tree (arming precondition)
+    release.py sync-dry-run           the real sync-public.py --dry-run at the queue tip in a scratch clone (arming precondition)
     release.py arm-check              arming preconditions: schedule current, preflight of the current main and schedule all
                                       PASS, public CI on the public main tip finished with 0 non-success (anonymous API)
     release.py notify-test            one test alert through the notify wrapper
@@ -26,7 +27,7 @@ Unarmed = log only: with no launchAt, or without the root-owned ALLOW_REAL_DEPLO
 every alert goes to logs/notify-log-only.log (never Telegram). Everything is configured by environment variables so the
 sandbox proof can run the real code against local bare repos.
 """
-import datetime as dt, fcntl, hashlib, json, os, pwd, re, shlex, shutil, subprocess, sys, time, urllib.request
+import datetime as dt, fcntl, hashlib, json, os, pwd, re, shlex, shutil, subprocess, sys, tempfile, time, urllib.request
 
 LIB = os.path.dirname(os.path.abspath(__file__))
 E = os.environ.get
@@ -1682,6 +1683,40 @@ def cmd_scan_queue():
     return 1 if bad else 0
 
 
+def cmd_sync_dry_run():
+    """Incident 39: the REAL publish step (sync-public.py with every scan: built-in words, the state's forbidden regex, the
+    backend denylist, AI-credit lines, skip paths) over every queued tree and commit message, before arming. Runs in a scratch
+    bare clone of the runner's clone, never in the release checkout: privateRef = the queue tip, the public remote = the URL the
+    runner pushes to (fetched only). Passes only on 'dry run: not pushed'; the real state file is never written."""
+    sched = schedule()
+    tip = sched["updates"][-1]["sha"] if sched["updates"] else ""
+    if not tip:
+        sys.exit("REFUSED: the schedule has no updates")
+    st = load(CFG["sync_state"], None)
+    if not st:
+        sys.exit(f"REFUSED: no public-sync state at {CFG['sync_state']} (run sync-public.py --init first)")
+    work = tempfile.mkdtemp(prefix=".sync-dry-run.", dir=RELEASE_HOME)
+    try:
+        r = os.path.join(work, "repo")
+        must(["git", "-c", "safe.directory=*", "clone", "-q", "--bare", "--no-local", CFG["repo"], r], "scratch clone of the release clone")
+        run(["git", "-C", r, "fetch", "-q", CFG["repo"], "+refs/replace/*:refs/replace/*"])  # the bootstrap grafts, when any
+        must(["git", "-C", r, "fetch", "-q", CFG["queue_repo"], "+refs/heads/*:refs/queue/*"], "fetch of the queue")
+        url = git("remote", "get-url", st.get("publicRemote") or "public")
+        must(["git", "-C", r, "remote", "add", "public", url], "public remote in the scratch clone")
+        state = os.path.join(work, "state.json")
+        save(state, dict(st, privateRef=tip, publicRemote="public"))
+        code, out = run([sys.executable, CFG["sync_py"], state, "--dry-run"], cwd=r, timeout=3600)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    lines = [x for x in out.strip().splitlines() if x.strip()]
+    print("\n".join(x for x in lines if x.startswith(("report:", "hits in", "dry run", "nothing to sync"))) or "\n".join(lines[-3:]))
+    if code or "dry run: not pushed" not in out:
+        print(f"REFUSED: sync-public dry run at the queue tip {tip[:10]} failed (exit {code}): {' | '.join(lines[-2:])[:400]}")
+        return 1
+    print(f"sync-public dry run at the queue tip {tip[:10]}: every queued tree and message passes the publish scans")
+    return 0
+
+
 def cmd_pause(reason):
     with open(PAUSE, "w") as f:
         f.write(f"{iso(now())} paused by {os.environ.get('SUDO_USER') or 'an operator'}: {reason[:200]}\n")
@@ -1757,6 +1792,8 @@ def main():
             return cmd_arm_check(a)
         if cmd == "scan-queue":
             return cmd_scan_queue()
+        if cmd == "sync-dry-run":
+            return cmd_sync_dry_run()
         if cmd == "pause":
             return cmd_pause(" ".join(a[1:]) or "planned pause")
         if cmd == "abort":

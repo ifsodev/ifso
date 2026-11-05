@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ARMING: the last step before launch, one command, on the server as root.
 #     sudo LAUNCH_AT=2026-11-17T14:00:00Z bash arm.sh
-# Refuses unless: LAUNCH_AT is UTC ISO with a Z and in the future; the forbidden-word scan of every queue tree finds nothing;
+# Refuses unless: LAUNCH_AT is UTC ISO with a Z and in the future; the forbidden-word scan of every queue tree finds nothing and
+# the REAL sync-public.py --dry-run at the queue tip passes (release.py sync-dry-run; incident 39);
 # schedule.json is current (base in main, tip == queue branch); the last preflight ran on the CURRENT private main and the
 # CURRENT schedule (results.main == origin/main, results.sfp == the schedule's fingerprint), tested every pending and held
 # update and passed them all; public CI on the public main tip finished with 0 non-success (release.py arm-check, anonymous
@@ -24,6 +25,8 @@ export IFSO_RELEASE_CONF="${IFSO_RELEASE_CONF:-$PREFIX/etc/ifso-release/paths.co
   || [[ "${ALLOW_PAST_LAUNCH:-0}" == 1 && -n "$PREFIX" ]] || die "LAUNCH_AT is not in the future"
 say "1/5 queue clean"
 release_py scan-queue || die "forbidden text in the queue: fix it, rebuild, replace schedule.json"
+say "1b/5 the real publish step (sync-public.py --dry-run) over every queued tree and message (incident 39)"
+release_py sync-dry-run || die "the public copy of a queued update would be refused: fix the queue (or add a scrub rule / forbiddenSkipPaths), rebuild, replace schedule.json"
 say "2/5 schedule current, preflight of the CURRENT main and schedule all PASS"
 release_py arm-check || die "not armed: fix what is REFUSED above (sudo ifso-release-preflight after any change to main or schedule.json)"
 say "2a/5 root's own fetch of private main agrees (incidents 47, 48; audit L-12)"

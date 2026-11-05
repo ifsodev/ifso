@@ -505,6 +505,13 @@ printf '[{"id":1,"name":"app","status":"in_progress","conclusion":null,"head_sha
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh refuses a public CI that is still running (0 non-success means finished and green)" bash -c "test $ARC -ne 0 && grep -q 'public CI' '$W/arm.out'"
 rm -f "$CTL/ci.json"
+# 39: the REAL publish step on every queued tree and message: sync-public's own scans (state "forbidden") catch what forbidden.txt does not
+cp "$W/home/public-sync.json" "$W/sync-state.good"
+python3 -c 'import json,sys; p=sys.argv[1]; s=json.load(open(p)); s["forbidden"]="sandbox update 02"; json.dump(s, open(p,"w"))' "$W/home/public-sync.json"
+runarm ARM_TEST=1; ARC=$?
+cp "$W/sync-state.good" "$W/home/public-sync.json"; chown "$RUSER" "$W/home/public-sync.json" 2>/dev/null || true
+ok "39: arm.sh step 1 runs sync-public.py --dry-run at the queue tip and refuses on its hit (a queued commit message)" bash -c "test $ARC -ne 0 && grep -q 'sync-public dry run' '$W/arm.out' && grep -qi 'forbidden' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
+ok "39: the dry run pushed nothing and left the release clone and the state as they were" bash -c "cmp -s '$W/sync-state.good' '$W/home/public-sync.json' && test \"\$(git -C '$W/public.git' rev-parse main)\" = \"\$(python3 -c 'import json; print(json.load(open(\"$W/home/public-sync.json\"))[\"publicSha\"])')\""
 runarm ARM_TEST=1; ARC=$?
 ok "48: arm.sh refuses while the server runs an older release than private main (and names both)" bash -c "test $ARC -ne 0 && grep -q 'the server runs' '$W/arm.out' && grep -q '${M1:0:12}' '$W/arm.out' && test ! -e '$W/ALLOW_REAL_DEPLOY'"
 # 47: a stand-in origin left in the release user's git config (an earlier project armed with one)
@@ -527,6 +534,7 @@ rm -f "$W/ALLOW_REAL_DEPLOY" "$CTL/gh-token-bad"
 runarm ARM_TEST=1; ARC=$?
 ok "arm.sh: public CI green (0 non-success) and the token made and deleted a draft" bash -c "grep -q 'public CI: 0 non-success' '$W/arm.out' && grep -q 'draft Release created and deleted' '$W/arm.out' && grep -q 'DELETE' '$CTL/requests.jsonl'"
 ok "arm.sh arms on a preflight of the current main and the rebuilt queue's schedule" bash -c "test $ARC -eq 0 && test -e '$W/ALLOW_REAL_DEPLOY' && grep -q ARMED '$W/arm.out'"
+ok "39: arming ran the real publish dry run over the whole queue and it reached 'dry run: not pushed'" bash -c "grep -q 'sync-public dry run at the queue tip' '$W/arm.out' && grep -q 'dry run: not pushed' '$W/arm.out'"
 ok "47/48: arming said the server runs private main, origin answers it, and root's own fetch of main agrees" bash -c "grep -q 'running release = private main' '$W/arm.out' && grep -q \"root's own fetch of private main\" '$W/arm.out'"
 ok "arming wrote LAUNCH_AT and the slots" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/schedule.json\")); sys.exit(0 if s[\"launchAt\"]==\"$FUTURE\" and all(u[\"slot\"] for u in s[\"updates\"]) else 1)'"
 rm -f "$W/ALLOW_REAL_DEPLOY"
