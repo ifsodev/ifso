@@ -5,6 +5,10 @@
 // fork's owner Safe and panel Safe, which exists only on the fork.
 //
 //   bun run app/scripts/fork/exercise.ts [--report <path>]      (needs fork-up.sh to be running)
+//
+// Football is off at launch (DECISIONS row 44): the API refuses sports conditions without ODDS_API_KEY. The fork API takes
+// its key from $FORK_DIR/env.json (scripts/fork/setup.ts writes the fixture key). When that key is empty the football
+// steps print SKIP and are recorded as SKIPPED, not as failures.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPublicClient, createWalletClient, defineChain, hashTypedData, http, parseAbi, getAddress, decodeEventLog, toHex, encodeAbiParameters, keccak256, type Address, type Hex } from "viem";
@@ -18,6 +22,15 @@ import { paramsFromJson } from "../../src/core/paramsJson";
 
 const FORK_DIR = process.env.FORK_DIR ?? join(import.meta.dir, "../../.fork");
 const A = JSON.parse(readFileSync(join(FORK_DIR, "actors.json"), "utf8"));
+const FORK_ENV: Record<string, string> = (() => {
+  try {
+    return JSON.parse(readFileSync(join(FORK_DIR, "env.json"), "utf8"));
+  } catch {
+    return {};
+  }
+})();
+const SPORTS = !!String(FORK_ENV.ODDS_API_KEY ?? "").trim();
+const SPORTS_SKIP = "SKIPPED: football is off (ODDS_API_KEY is empty; the API refuses sports conditions without it)";
 const reportPath = process.argv.includes("--report") ? process.argv[process.argv.indexOf("--report") + 1]! : join(FORK_DIR, "fork-run.md");
 const CHAIN_ID = A.chainId as number;
 const chain = defineChain({ id: CHAIN_ID, name: "fork", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [A.rpc] } } });
@@ -53,7 +66,7 @@ const pauseWorker = async (name: string) => { await admin("/worker", { name, on:
 const admin = (path: string, body?: unknown) => fetch(`${A.admin}${path}`, body ? { method: "POST", body: JSON.stringify(body) } : undefined).then((r) => r.json());
 
 // ------------------------------------------------------------------ report plumbing
-interface Row { area: string; name: string; ok: boolean; hashes: Hex[]; note: string; expectedFailure?: boolean }
+interface Row { area: string; name: string; ok: boolean; hashes: Hex[]; note: string; expectedFailure?: boolean; skipped?: boolean }
 const rows: Row[] = [];
 const bugs: string[] = [];
 let cur: Row | undefined;
@@ -68,6 +81,12 @@ async function step(area: string, name: string, fn: () => Promise<string | void>
   }
   rows.push(cur);
   console.log(`${cur.ok ? "PASS" : "FAIL"} [${area}] ${name}${cur.ok ? "" : " :: " + cur.note}`);
+}
+/** A football step: run when the fork API has ODDS_API_KEY, else recorded as SKIPPED (not a failure). */
+async function sportsStep(area: string, name: string, fn: () => Promise<string | void>) {
+  if (SPORTS) return step(area, name, fn);
+  rows.push({ area, name, ok: false, skipped: true, hashes: [], note: SPORTS_SKIP });
+  console.log(`SKIP [${area}] ${name} :: ${SPORTS_SKIP}`);
 }
 /** An expected failure path passes only when the call is refused and the message matches. */
 async function refused(area: string, name: string, fn: () => Promise<unknown>, match: RegExp) {
@@ -511,7 +530,7 @@ await step("Price", "stock (SPY) price condition created through the site flow f
 });
 // outcome payments: four fixtures kick off 40..70 minutes from now
 const oc: Record<string, Made> = {};
-await step("Outcome", "sports result payments built and created through the API (arsenal, man utd, ipswich/liverpool)", async () => {
+await sportsStep("Outcome", "sports result payments built and created through the API (arsenal, man utd, ipswich/liverpool)", async () => {
   oc.win = await apiCreate("alice", `/ifso ${bobA} 20 if arsenal win`);
   oc.dispute = await apiCreate("alice", `/ifso ${carolA} 20 if manchester united win`);
   oc.timeout = await apiCreate("alice", `/ifso ${daveA} 20 if liverpool win`);
@@ -564,7 +583,7 @@ await step("Claim", "passkey-style account and counterfactual account were paid 
 await pauseWorker("resolver"); // so a stranger can propose first on two questions
 const eplT = await (async () => {
   const rows = await q<any[]>("mine", { address: adr("alice") });
-  return rows.find((r) => r.id === oc.win!.id.toString());
+  return oc.win ? rows.find((r) => r.id === oc.win!.id.toString()) : undefined;
 })();
 await step("Time", "advance to 3h40m after the start (price deadlines passed, first question open for resolution)", async () => {
   await warpTo(t0 + 3 * 3600 + 40 * 60 + 60);
@@ -584,7 +603,7 @@ const strangerPropose = async (who: string, qid: Hex, outcome: number) => {
   await send(who, USDG, usdgAbi, "approve", [RESOLVER, 2n ** 200n]);
   return send(who, RESOLVER, resolverAbi, "propose", [qid, outcome, ("0x" + "ab".repeat(32)) as Hex]);
 };
-await step("Outcome", "wait until the questions are registered on the resolver (funded escrows exist)", async () => {
+await sportsStep("Outcome", "wait until the questions are registered on the resolver (funded escrows exist)", async () => {
   for (const k of ["win", "dispute", "timeout"]) {
     const qid = await qOf(oc[k]!);
     const info = await qinfo(qid);
@@ -592,24 +611,24 @@ await step("Outcome", "wait until the questions are registered on the resolver (
   }
 });
 let qWin: Hex, qDis: Hex, qTim: Hex;
-await step("Outcome", "wait for the earliest-resolve time on the other two questions", async () => {
+await sportsStep("Outcome", "wait for the earliest-resolve time on the other two questions", async () => {
   qWin = await qOf(oc.win!); qDis = await qOf(oc.dispute!); qTim = await qOf(oc.timeout!);
   const er = Number((await qinfo(qTim)).earliestResolve);
   await warpTo(er + 30);
 });
-await step("Outcome", "stranger proposes WRONG results on two questions while the service is paused", async () => {
+await sportsStep("Outcome", "stranger proposes WRONG results on two questions while the service is paused", async () => {
   await strangerPropose("dave", qDis, 2).then((h) => hashes(h));
   await strangerPropose("dave", qTim, 1).then((h) => hashes(h));
   eq(Number((await qinfo(qDis)).state), 2, "state proposed");
 });
 await admin("/worker", { name: "resolver", on: true });
-await step("Outcome", "resolver service proposes the confirmed result (arsenal win => HOME) and disputes both wrong proposals", async () => {
+await sportsStep("Outcome", "resolver service proposes the confirmed result (arsenal win => HOME) and disputes both wrong proposals", async () => {
   await until("service proposal on win", async () => Number((await qinfo(qWin)).state) === 2, 120_000);
   eq(Number((await qinfo(qWin)).proposed), 1, "proposed outcome");
   await until("dispute on dis", async () => Number((await qinfo(qDis)).state) === 3, 120_000);
   await until("dispute on tim", async () => Number((await qinfo(qTim)).state) === 3, 120_000);
 });
-await step("Outcome", "panel (owner Safe fork stand-in) resolves the disputed question; escrow settles by the panel answer", async () => {
+await sportsStep("Outcome", "panel (owner Safe fork stand-in) resolves the disputed question; escrow settles by the panel answer", async () => {
   const h = await asSafe(A.panelSafe, (w) => w.writeContract({ address: RESOLVER, abi: resolverAbi, functionName: "panelResolve", args: [qDis, 1], chain } as never));
   await confirm(h);
   eq(Number((await qinfo(qDis)).state), 4, "final");
@@ -617,7 +636,7 @@ await step("Outcome", "panel (owner Safe fork stand-in) resolves the disputed qu
   await waitStatus(oc.dispute!.id, S.RELEASED, 90_000);
   eq((await bal(carolA)) - before, U(20), "carol received (panel said HOME)");
 });
-await step("Outcome", "undisputed result: after the 2 h dispute window the service finalizes; escrow pays", async () => {
+await sportsStep("Outcome", "undisputed result: after the 2 h dispute window the service finalizes; escrow pays", async () => {
   const p = Number((await qinfo(qWin)).proposedAt);
   await warpTo(p + 2 * 3600 + 60);
   await until("final win", async () => Number((await qinfo(qWin)).state) === 4, 120_000);
@@ -625,7 +644,7 @@ await step("Outcome", "undisputed result: after the 2 h dispute window the servi
   await waitStatus(oc.win!.id, S.RELEASED, 90_000);
   eq((await bal(bobA)) - before, U(20), "bob received");
 });
-await step("Outcome", "panel silent for 72 h: question times out as VOID; the payment returns to the sender", async () => {
+await sportsStep("Outcome", "panel silent for 72 h: question times out as VOID; the payment returns to the sender", async () => {
   const d = Number((await qinfo(qTim)).disputedAt);
   await warpTo(d + 72 * 3600 + 120);
   await until("void", async () => Number((await qinfo(qTim)).state) === 5, 120_000);
@@ -817,7 +836,8 @@ await step("Books", "no alerts raised by the workers except the expected foreign
 
 // ================================================================== report
 const pass = rows.filter((r) => r.ok).length;
-const failed = rows.filter((r) => !r.ok);
+const skipped = rows.filter((r) => r.skipped);
+const failed = rows.filter((r) => !r.ok && !r.skipped);
 const txs: { hash: Hex; gas: bigint; ok: boolean }[] = [];
 for (const r of rows) for (const h of r.hashes) {
   try {
@@ -829,7 +849,7 @@ const gasOf = (r: Row) => r.hashes.reduce((s, h) => s + (txs.find((t) => t.hash 
 const md: string[] = [];
 md.push(`# Fork run, ${startedAt.slice(0, 10)}`);
 md.push("");
-md.push(`**Result: ${pass}/${rows.length} passed** (${rows.filter((r) => r.expectedFailure).length} of them are expected-refusal checks).`);
+md.push(`**Result: ${pass}/${rows.length} passed, ${skipped.length} skipped** (${rows.filter((r) => r.expectedFailure).length} of them are expected-refusal checks).`);
 md.push("");
 md.push(`- Chain: anvil fork of Robinhood Chain 4663 at block ${A.forkBlock} (chain id stays 4663 on the fork; the deployer, escrow and every key are throwaway, so nothing signed here replays on mainnet)`);
 md.push(`- Commit: ${A.commit}`);
@@ -843,13 +863,13 @@ let area = "";
 for (const r of rows) {
   if (r.area !== area) { area = r.area; md.push("", `## ${area}`, "", "| # | Step | Result | Gas | Transactions | Note |", "|---|---|---|---|---|---|"); }
   const idx = rows.indexOf(r) + 1;
-  md.push(`| ${idx} | ${r.name} | ${r.ok ? "PASS" : "**FAIL**"}${r.expectedFailure ? " (refusal)" : ""} | ${gasOf(r) || ""} | ${r.hashes.map((h) => "`" + h + "`").join("<br>")} | ${r.note.replace(/\|/g, "/").slice(0, 200)} |`);
+  md.push(`| ${idx} | ${r.name} | ${r.ok ? "PASS" : r.skipped ? "SKIPPED" : "**FAIL**"}${r.expectedFailure ? " (refusal)" : ""} | ${gasOf(r) || ""} | ${r.hashes.map((h) => "`" + h + "`").join("<br>")} | ${r.note.replace(/\|/g, "/").slice(0, 200)} |`);
 }
 md.push("", "## Failures", "");
 md.push(failed.length ? failed.map((r) => `- [${r.area}] ${r.name}: ${r.note}`).join("\n") : "None.");
 md.push("", "## Bugs found", "", bugs.length ? bugs.join("\n") : "(see the section below; filled in by hand after the run)");
 md.push("", `Transactions recorded: ${txs.length}, total gas ${txs.reduce((a, t) => a + t.gas, 0n)}.`);
 writeFileSync(reportPath, md.join("\n") + "\n");
-writeFileSync(reportPath.replace(/\.md$/, ".json"), JSON.stringify({ pass, total: rows.length, rows: rows.map((r) => ({ ...r })) }, null, 1));
-console.log(`\n${pass}/${rows.length} passed. report: ${reportPath}`);
+writeFileSync(reportPath.replace(/\.md$/, ".json"), JSON.stringify({ pass, skipped: skipped.length, total: rows.length, rows: rows.map((r) => ({ ...r })) }, null, 1));
+console.log(`\n${pass}/${rows.length} passed, ${skipped.length} skipped. report: ${reportPath}`);
 process.exit(failed.length ? 1 : 0);

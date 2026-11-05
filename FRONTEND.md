@@ -205,7 +205,7 @@ CI scans every string the API and bot produce. The site must follow the same rul
 - Locked premium features say "hold N $IFSO to unlock". No "buy", price talk, or return talk. Always show the line "Perks have no cash value and are not a promise of any amount" (it is the `note` field of `perks`).
 - `import { findBannedWords } from "@ifso/client"` and run it over every string in your own tests.
 
-The preview text the user confirms must be the one the API produced: render `preview`, `notes` and `fee`/`expiryText` from `build` (or `parse`) as they come. The same sentence appears in the bot, so both channels say the same thing. `describe` returns just the condition sentence (for example "Arsenal win (Sat, 1 Nov)") for lists and history.
+The preview text the user confirms must be the one the API produced: render `preview`, `notes` and `fee`/`expiryText` from `build` (or `parse`) as they come. The same sentence appears in the bot, so both channels say the same thing. `describe` returns just the condition sentence (for example "the Polymarket question will-eth-reach-5000-in-2026 resolves YES") for lists and history.
 
 ## 11. `parse` ambiguities and questions
 

@@ -13,6 +13,9 @@
 //
 //   bun run app/scripts/testnet/exercise.ts [--report <path>] [--resume]
 //   env: API (default https://api.ifso.tech), RPC (default public testnet RPC), PEOPLE_DIR, SAFE_EXEC (path to the helper)
+//        ODDS_API_KEY: set it (any value; only whether it is set is read) when the API runs with football on. Empty or
+//        unset = football is off (DECISIONS row 44, the API refuses sports conditions), so the football step is recorded
+//        as PENDING "SKIPPED" and is not counted as a failure.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
@@ -35,6 +38,8 @@ const PEOPLE_DIR = process.env.PEOPLE_DIR ?? join(IFSO, ".testnet-people");
 const SAFE_EXEC = process.env.SAFE_EXEC ?? join(IFSO, "docs/tools/testnet-safe-exec.sh");
 const ARTIFACTS = process.env.ARTIFACTS ?? join(import.meta.dir, "../../../contracts/out");
 const RESUME = process.argv.includes("--resume");
+const SPORTS = !!process.env.ODDS_API_KEY?.trim();
+const SPORTS_SKIP = "SKIPPED: football is off (ODDS_API_KEY is empty; the API refuses sports conditions without it)";
 const reportPath = process.argv.includes("--report") ? process.argv[process.argv.indexOf("--report") + 1]! : join(PEOPLE_DIR, "testnet-run.md");
 const STATE = join(PEOPLE_DIR, "state.json");
 
@@ -480,6 +485,7 @@ async function advanceOutcome(p: PendingCheck): Promise<number> {
 async function outcomeSteps(track: (x: Made) => Made) {
 const bobA = adr("bob");
 await step("Outcome", "sports result payment built through the API ('arsenal win')", async () => {
+  if (!SPORTS) throw new Pending(SPORTS_SKIP);
   const r = await apiBuild("alice", `/ifso ${bobA} 20 if arsenal win`).then(() => "built").catch((e) => String(e.message));
   if (r !== "built") throw new Error(`the API cannot build a sports payment on this server: ${r}`);
 });
