@@ -1,3 +1,5 @@
+import { offered } from "./features";
+
 /** Builds the command text the API parses from the composer's fields. */
 export interface ComposerFields {
   kind: string;
@@ -8,7 +10,9 @@ export interface ComposerFields {
   counter?: string;
 }
 
-export const KINDS: [value: string, label: string, hint: string][] = [
+export type Kind = [value: string, label: string, hint: string];
+
+export const ALL_KINDS: Kind[] = [
   ["date", "A date arrives", "nov 1, or 9am friday, or in 3 days"],
   ["price", "A price moves", "eth at or above 4000 by friday"],
   ["approval", "Both people approve", "we both approve"],
@@ -16,6 +20,10 @@ export const KINDS: [value: string, label: string, hint: string][] = [
   ["match", "A match ends", "arsenal win"],
   ["market", "A question resolves", "polymarket the-market-slug resolves yes"],
 ];
+
+/** The kinds the composer offers; "match" only when NEXT_PUBLIC_SPORTS_ENABLED=1. */
+export const offeredKinds = (sportsEnabled?: boolean): Kind[] => offered(ALL_KINDS, ([value]) => value, sportsEnabled);
+export const KINDS: Kind[] = offeredKinds();
 
 const CONNECTIVE = /^(if|when|on|at|in|once)\s+/i;
 

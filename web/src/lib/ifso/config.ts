@@ -7,6 +7,7 @@ import { getAddress, isAddress } from "viem";
 import mainnetDeployment from "@/config/deployments/4663.json";
 import testnetDeployment from "@/config/deployments/46630.json";
 import forkDeployment from "@/config/deployments/31337.json";
+import { FEATURE_ENV, sportsEnabledFrom, type FeatureEnv } from "./features";
 
 export type ChainId = 4663 | 46630 | 31337;
 
@@ -33,7 +34,7 @@ interface DeploymentFile {
 }
 const DEPLOYMENTS: Record<ChainId, DeploymentFile> = { 4663: mainnetDeployment, 46630: testnetDeployment, 31337: forkDeployment };
 
-export interface SiteEnv {
+export interface SiteEnv extends FeatureEnv {
   NEXT_PUBLIC_API_URL?: string;
   NEXT_PUBLIC_CHAIN_ID?: string;
   NEXT_PUBLIC_RPC_URL?: string;
@@ -52,6 +53,8 @@ export interface IfsoConfig {
   walletConnectProjectId?: string;
   /** Origins the strict-CSP pages may talk to. */
   connectOrigins: string[];
+  /** NEXT_PUBLIC_SPORTS_ENABLED=1: the match-result condition is offered. Off by default (DECISIONS row 44). */
+  sportsEnabled: boolean;
 }
 
 const clean = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
@@ -81,7 +84,7 @@ export function loadConfig(env: SiteEnv): IfsoConfig {
   const usdg = addr(env.NEXT_PUBLIC_USDG_ADDRESS, "NEXT_PUBLIC_USDG_ADDRESS") ?? fromFile("MockUSDG") ?? fromFile("USDG") ?? chain.usdg;
   const apiUrl = (clean(env.NEXT_PUBLIC_API_URL) ?? "").replace(/\/+$/, "");
   const connectOrigins = [apiUrl && origin(apiUrl), origin(chain.rpcUrl)].filter((x): x is string => !!x);
-  return { apiUrl, chain, escrow, usdg, walletConnectProjectId: clean(env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID), connectOrigins: [...new Set(connectOrigins)] };
+  return { apiUrl, chain, escrow, usdg, walletConnectProjectId: clean(env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID), connectOrigins: [...new Set(connectOrigins)], sportsEnabled: sportsEnabledFrom(env) };
 }
 
 // Next inlines NEXT_PUBLIC_* only for literal `process.env.NAME` reads, so each one is spelled out.
@@ -93,6 +96,7 @@ export const config: IfsoConfig = loadConfig({
   NEXT_PUBLIC_ESCROW_ADDRESS: process.env.NEXT_PUBLIC_ESCROW_ADDRESS,
   NEXT_PUBLIC_USDG_ADDRESS: process.env.NEXT_PUBLIC_USDG_ADDRESS,
   NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID,
+  ...FEATURE_ENV,
 });
 
 export const explorerTx = (hash: string) => (config.chain.explorerUrl ? `${config.chain.explorerUrl}/tx/${hash}` : undefined);

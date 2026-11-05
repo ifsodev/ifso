@@ -8,6 +8,7 @@ import { api, friendlyError, type MineRow, type PerksAnswer } from "@/lib/ifso/a
 import { same, when } from "@/lib/ifso/status";
 import { subscribe, withOverlay } from "@/lib/ifso/optimistic";
 import { shortAddress } from "@/lib/ifso/wallet";
+import { offered } from "@/lib/ifso/features";
 import { PaymentComposer, type PaymentDraft } from "./composer";
 import { PaymentsView } from "./payments";
 import { WalletProvider, useWallet } from "./wallet-context";
@@ -452,15 +453,18 @@ function Dashboard() {
                 <PaymentsView mode={view as (typeof live)[number]} refreshKey={refreshKey} />
               ) : view === "Conditions" ? (
                 <section className="ws-condition-list">
-                  {[
-                    ["01", "Date", "A moment on the calendar."],
-                    ["02", "Price", "A feed crosses a level or is read at a deadline."],
-                    ["03", "Both approve", "The sender and recipient agree."],
-                    ["04", "Referee", "Someone you name decides."],
-                    ["05", "Match", "A supported fixture reaches a result."],
-                    ["06", "Market question", "A supported question reaches its final answer."],
-                  ].map(([n, t, d]) => (
-                    <Link href={`/conditions#${["date", "price", "approval", "referee", "match", "market"][Number(n) - 1]}`} key={n}>
+                  {offered(
+                    [
+                      ["date", "Date", "A moment on the calendar."],
+                      ["price", "Price", "A feed crosses a level or is read at a deadline."],
+                      ["approval", "Both approve", "The sender and recipient agree."],
+                      ["referee", "Referee", "Someone you name decides."],
+                      ["match", "Match", "A supported fixture reaches a result."],
+                      ["market", "Market question", "A supported question reaches its final answer."],
+                    ],
+                    ([id]) => id,
+                  ).map(([id, t, d], i) => [id, String(i + 1).padStart(2, "0"), t, d]).map(([id, n, t, d]) => (
+                    <Link href={`/conditions#${id}`} key={n}>
                       <span>{n}</span>
                       <b>{t}</b>
                       <p>{d}</p>

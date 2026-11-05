@@ -7,6 +7,7 @@
  */
 
 import { autumnCity, type ChapterContent } from "@/data/home/intro";
+import { offered } from "@/lib/ifso/features";
 import {
   skylineSequence,
   studentSequence,
@@ -159,15 +160,17 @@ export const cloudPassContent: CloudPassContent = {
 export const processContent: CaptionContent = {
  headlineLines: ["Set. Share.", "Let it unfold."], bodyLines: ["Choose the terms and sign.", "Your recipient claims the link.", "The condition decides what happens next."], chapter: toDraw,
 };
+// The match film is shown only when NEXT_PUBLIC_SPORTS_ENABLED=1; the numbers stay in sequence either way.
+const works = (films: Film[]): Film[] => offered(films, (f) => f.href.split("#")[1] ?? "").map((f, i) => ({ ...f, year: String(i + 1).padStart(2, "0") }));
 export const worksContent: WorksContent = {
- headlineLines: ["Choose your", "moment"], films: [
+ headlineLines: ["Choose your", "moment"], films: works([
  {title:"A date arrives",meta:"TIME · CHAIN TIME",year:"01",href:"/conditions#date",stills:[middle(skylineSequence.frames),middle(windowSequence.frames)]},
  {title:"A price moves",meta:"PRICE · CHAINLINK FEEDS",year:"02",href:"/conditions#price",stills:[last(windowSequence.frames),skylineSequence.frames[0]]},
  {title:"Both say yes",meta:"APPROVAL · AGREEMENT",year:"03",href:"/conditions#approval",stills:[studentSequence.frames[0],last(skylineSequence.frames)]},
  {title:"A referee decides",meta:"REFEREE · RELEASE OR RETURN",year:"04",href:"/conditions#referee",stills:[last(studentSequence.frames),middle(studentSequence.frames)]},
  {title:"A match ends",meta:"RESULT · BONDED RESOLVER",year:"05",href:"/conditions#match",stills:[windowSequence.frames[0],middle(skylineSequence.frames)]},
  {title:"A question resolves",meta:"MARKET · FINAL RESOLUTION",year:"06",href:"/conditions#market",stills:[middle(windowSequence.frames),studentSequence.frames[0]]},
- ], cloud, cloudBank, chapter: theWorks, hint: "Scroll to explore", watchLabel: "explore condition",
+ ]), cloud, cloudBank, chapter: theWorks, hint: "Scroll to explore", watchLabel: "explore condition",
 };
 export const contactContent: ContactContent = {
  background: skylineSequence.frames[0], runningLine: ["If this, then so.", "Money with a moment."], email: "",

@@ -18,7 +18,7 @@ export const RISK_NOTE =
 
 export function PaymentComposer({ draft, onSave, onCancel, onCreated }: { draft?: PaymentDraft; onSave: (d: PaymentDraft) => void; onCancel: () => void; onCreated: () => void }) {
   const wallet = useWallet();
-  const [kind, setKind] = useState(draft?.kind || "date");
+  const [kind, setKind] = useState(draft?.kind && KINDS.some(([k]) => k === draft.kind) ? draft.kind : "date");
   const [v, setV] = useState({ amount: draft?.amount || "", recipient: draft?.recipient || "", detail: draft?.detail || "", cancel: draft?.cancel || false, challenge: draft?.challenge || false, counter: draft?.counter || "" });
   const [pinned, setPinned] = useState<string>(); // text after a question was answered
   const [parsed, setParsed] = useState<ParseResult>();
