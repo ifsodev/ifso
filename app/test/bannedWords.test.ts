@@ -47,6 +47,14 @@ describe("banned words in user-facing copy", () => {
     const hits = lines.flatMap((l, i) => [...BANNED, ENDORSEMENT].filter((re) => re.test(l)).map((re) => `CHANGELOG.md:${i + 1} ${re}: ${l.trim()}`));
     expect(hits).toEqual([]);
   });
+  // README.md and SECURITY.md are the public repo's front page and policy (outsider review W1-W3).
+  for (const doc of ["README.md", "SECURITY.md"]) {
+    test(`${doc} (repo root, public) uses no banned or endorsement words`, () => {
+      const lines = readFileSync(join(import.meta.dir, "../..", doc), "utf8").split("\n");
+      const hits = lines.flatMap((l, i) => [...BANNED, ENDORSEMENT].filter((re) => re.test(l)).map((re) => `${doc}:${i + 1} ${re}: ${l.trim()}`));
+      expect(hits).toEqual([]);
+    });
+  }
   test("no endorsement wording in copy", () => {
     expect(strings.filter(([, s]) => ENDORSEMENT.test(s))).toEqual([]);
   });
