@@ -12,7 +12,8 @@
 // $PEOPLE_DIR (default ~/Documents/GitHub/Ifso/.testnet-people, outside every repo, mode 0600).
 //
 //   bun run app/scripts/testnet/exercise.ts [--report <path>] [--resume]
-//   env: API (default https://api.ifso.tech), RPC (default public testnet RPC), PEOPLE_DIR, SAFE_EXEC (path to the helper)
+//   env: API (default https://api.ifso.tech), RPC (default public testnet RPC), PEOPLE_DIR, SAFE_EXEC (path to the helper),
+//        DEPLOYMENT_FILE (default contracts/deployments/46630.json; ESCROW / RESOLVER override its addresses)
 //        ODDS_API_KEY: set it (any value; only whether it is set is read) when the API runs with football on. Empty or
 //        unset = football is off (DECISIONS row 44, the API refuses sports conditions), so the football step is recorded
 //        as PENDING "SKIPPED" and is not counted as a failure.
@@ -43,12 +44,15 @@ const SPORTS_SKIP = "SKIPPED: football is off (ODDS_API_KEY is empty; the API re
 const reportPath = process.argv.includes("--report") ? process.argv[process.argv.indexOf("--report") + 1]! : join(PEOPLE_DIR, "testnet-run.md");
 const STATE = join(PEOPLE_DIR, "state.json");
 
-const ESCROW = getAddress("0x7FFf1cE34532f76A6aFEb53E503891e671f891d6");
+// The contracts under test come from the committed deployment record (env ESCROW / RESOLVER override it).
+const DEPLOYMENT = JSON.parse(readFileSync(process.env.DEPLOYMENT_FILE ?? join(import.meta.dir, "../../../contracts/deployments/46630.json"), "utf8"));
+if (DEPLOYMENT.chainId !== CHAIN_ID) throw new Error(`deployment record is for chain ${DEPLOYMENT.chainId}, not ${CHAIN_ID}`);
+const ESCROW = getAddress(process.env.ESCROW ?? DEPLOYMENT.contracts.IfsoEscrow.address);
 const USDG = getAddress("0x857315614841c5d537a5F395f020fc5bCa0fdaC6");
 const ETH_FEED = getAddress("0x6ba540c3638cac8047599dA9fB09c03BE834b725");
 const OWNER_SAFE = getAddress("0xdAdC7f6694F214d3Ba250275e296Edd2DF6c5995");
 const PANEL_SAFE = getAddress("0x56A07C4571859278996BE577c82785cD6943e2cd");
-const RESOLVER = getAddress("0x26dB66f4AA5D4Ca365464bfc2425b27805F34A98");
+const RESOLVER = getAddress(process.env.RESOLVER ?? DEPLOYMENT.contracts.IfsoOutcomeResolver.address);
 const SERVICE_KEYS = ["0x8aB1F0895B2012Db89Caf62e5b67E81137853ad0", "0xB2Ebe6323Aea29042985A7aB743d0F17A2175Fdc", "0x773B7Bc00Ec82753FCca6AF3C051b7Ddf2c7451b"].map((a) => a.toLowerCase());
 
 const chain = { ...robinhoodTestnet, rpcUrls: { default: { http: [RPC] } } };
