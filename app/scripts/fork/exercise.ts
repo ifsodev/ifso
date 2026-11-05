@@ -150,7 +150,7 @@ interface Made { id: bigint; txHash: Hex; secret?: Uint8Array; answer: any; send
 async function apiBuild(sender: string, text: string, o: { link?: boolean; cancellable?: boolean; altRefundTo?: Address; headers?: Record<string, string> } = {}) {
   const secret = o.link ? randomSecret() : undefined;
   const answer = await m("build", { text, sender: adr(sender), linkKey: secret ? linkKeyAddress(secret) : undefined, cancellable: o.cancellable, altRefundTo: o.altRefundTo }, o.headers);
-  verifyBuildAnswer(answer, { from: adr(sender), chainId: CHAIN_ID, escrow: ESCROW, usdg: USDG });
+  verifyBuildAnswer(answer, { from: adr(sender), chainId: CHAIN_ID, escrow: ESCROW, usdg: USDG, asked: o.altRefundTo ? { altRefundTo: o.altRefundTo } : undefined }); // audit L-10
   return { secret, answer };
 }
 async function apiCreate(sender: string, text: string, o: { link?: boolean; cancellable?: boolean; altRefundTo?: Address; headers?: Record<string, string> } = {}): Promise<Made> {

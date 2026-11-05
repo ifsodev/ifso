@@ -59,7 +59,7 @@ browser                                         API                             
 import { randomSecret, linkKeyAddress, buildClaimUrl, verifyBuildAnswer } from "@ifso/client";
 
 const secret = randomSecret();
-const answer = await api.build.mutate({ text: "/ifso link 20 if arsenal win", sender: account, linkKey: linkKeyAddress(secret) });
+const answer = await api.build.mutate({ text: "/ifso link 20 if polymarket fed-decision-in-december resolves yes", sender: account, linkKey: linkKeyAddress(secret) });
 verifyBuildAnswer(answer as any, { from: account, chainId: 4663, escrow, usdg, asked: { linkKey: linkKeyAddress(secret) } });
 const signature = await walletClient.signTypedData({ account, ...(answer as any).authorization.typedData });
 const { id } = await api.submit.mutate({
@@ -229,7 +229,7 @@ Queries are `GET /trpc/<name>?input=<urlencoded json>`; mutations are `POST /trp
 ### `parse`
 Query. Input `{ text: string(3..300), tzOffsetMin?: int }`. Output: `{ ok, twoSided, recipient?, amountUsdg?, counterAmountUsdg?, condition?, ambiguities: string[], questions: Question[], notes: string[], errors: string[], preview?, feeUsdg?, expiry? }`. Use it to preview while typing. `errors` is non-empty when the request cannot proceed (including the region message).
 ```ts
-await api.parse.query({ text: "/ifso @jake 20 if arsenal win" }); // { ok: true, preview: "Send 20 USDG to @jake. It unlocks if ...", ... }
+await api.parse.query({ text: "/ifso @jake 20 if polymarket fed-decision-in-december resolves yes" }); // { ok: true, preview: "Send 20 USDG to @jake. It unlocks if ...", ... }
 ```
 
 ### `describe`

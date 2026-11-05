@@ -209,6 +209,7 @@ check "provision.sh hands relayer keys to ifso-api and keeper/resolver keys to i
   grep -q "relayer.json | relayer.password) owner=ifso-api" "$p" &&
   grep -q "keeper.json | keeper.password | resolver.json | resolver.password) owner=ifso-worker" "$p" &&
   grep -q "for u in ifso-api ifso-bot ifso-worker" "$p" && grep -q "install -d -o root -g root -m 0711 \"\$KEYS_DIR\"" "$p"' _ "$HERE"
+check "env.example sets the mainnet resolver float alert MIN_RESOLVER_USDG=200 (two 100 USDG bonds)" grep -qx "MIN_RESOLVER_USDG=200" "$HERE/env.example"
 check "env.example holds no real secret values" bash -c '! grep -E "^(TELEGRAM_BOT_TOKEN|OPS_BOT_TOKEN|ODDS_API_KEY|PYTH_API_KEY|ALCHEMY_KEY|TELEGRAM_WEBHOOK_SECRET|ZERODEV_PROJECT_ID)=.+" "$1/env.example"' _ "$HERE"
 check "no leftovers from the project these scripts were adapted from" bash -c 'w="lem""niscate"; ! grep -rIil "$w" "$1" --exclude=deploy-local.test.sh' _ "$HERE"
 

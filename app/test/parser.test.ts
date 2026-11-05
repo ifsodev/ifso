@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { copy } from "../src/core/copy";
 import { parseCommand, parseWhen } from "../src/core/parser";
 
 // Wed 2026-10-21 12:00 UTC (08:00 New York, EDT)
@@ -30,6 +31,15 @@ describe("parser: heads", () => {
     const r = parseCommand("/ifso hello", ctx);
     expect(r.ok).toBe(false);
     expect(r.errors[0]).toContain("Try:");
+  });
+
+  test("bot examples are Polymarket / price / date / referee, never football (DECISIONS #44: football OFF at launch)", () => {
+    const shown = [copy.parse.usage, copy.bot.help, copy.bot.wrongBot, copy.oneLiner].join(" ");
+    expect(shown).not.toMatch(/arsenal|match result/i);
+    const examples = copy.parse.usage.replace(/^Try: /, "").split(" · ");
+    for (const ex of examples) expect(parseCommand(ex, ctx).condition?.kind).not.toBe("SPORTS");
+    expect(parseCommand(examples[0]!, ctx).condition).toMatchObject({ kind: "MARKET", venue: "polymarket", answer: "YES" });
+    expect(parseCommand(copy.bot.wrongBot.replace(/^.*like /, "").replace(/\.$/, ""), ctx).condition?.kind).toBe("MARKET");
   });
 
   test("minimum amount", () => {

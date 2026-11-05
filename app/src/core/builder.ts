@@ -28,7 +28,7 @@ export const DEFAULTS = {
    * and lets a challenge on a deadline a little over 1 h 10 min away be built.
    */
   challengeMaxStale: 3600,
-  holdWindow: 3 * 86400, //     covers a weekend (+ one holiday) if the feed paused
+  holdWindow: 4 * 86400, //     the contract cap (HOLD_CAP): a holiday long weekend with a paused feed does not VOID (DECISIONS #46)
   timeClaimWindow: 7 * 86400,
   priceSettleWindow: 4 * 86400, // after deadline + hold
   touchGrace: 86400,

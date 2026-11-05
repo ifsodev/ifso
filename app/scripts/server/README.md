@@ -59,7 +59,7 @@ Create the key files on your own computer (never on a screen share or in a chat)
 ```bash
 scp relayer.json relayer.password keeper.json keeper.password resolver.json resolver.password root@<address>:/etc/ifso/keys/
 ```
-Then on the server run `bash /root/ifso-server/provision.sh --fix-key-perms`. It hands each file to the one service user that needs it (relayer: `ifso-api`; keeper and resolver: `ifso-worker`; the bot gets none) and makes it readable by no one else. Keep the file names above: `deploy.sh` refuses to start when a key is owned by the wrong user. Send a little gas (and, for the resolver, a little USDG) to the three addresses; the API's `/readyz` stays red until the balances are above the minimums.
+Then on the server run `bash /root/ifso-server/provision.sh --fix-key-perms`. It hands each file to the one service user that needs it (relayer: `ifso-api`; keeper and resolver: `ifso-worker`; the bot gets none) and makes it readable by no one else. Keep the file names above: `deploy.sh` refuses to start when a key is owned by the wrong user. Send a little gas (and, for the resolver, a little USDG) to the three addresses; the API's `/readyz` stays red until the balances are above the minimums. On mainnet keep `MIN_RESOLVER_USDG=200` (the env.example value: two 100 USDG bonds) and fund the resolver with at least that much USDG.
 
 ### 6. First deploy
 On your computer: `git rev-parse HEAD` (after you pushed) gives the sha. On the server:

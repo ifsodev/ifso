@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { DEFAULTS, buildParams } from "../src/core/builder";
 import { feedUnitsToUnderlying, underlyingToFeedUnits } from "../src/core/condition";
 import { feeFor, formatUsdg, parseUsdg } from "../src/core/money";
@@ -36,6 +37,14 @@ describe("multiplier applied exactly once", () => {
     expect(p.condition.maxStale).toBe(DEFAULTS.maxStale);
     expect(p.expiry).toBe(BigInt(NOW + 86400 + DEFAULTS.holdWindow + DEFAULTS.priceSettleWindow));
     expect(p.amount).toBe(100_000000n);
+    expect(p.condition.holdWindow).toBe(4 * 86400); // DECISIONS #46
+  });
+
+  test("default hold window is the evaluator's HOLD_CAP (4 days), never above it (DECISIONS #46)", () => {
+    const sol = readFileSync(new URL("../../contracts/src/IfsoConditionEvaluator.sol", import.meta.url), "utf8");
+    const cap = sol.match(/HOLD_CAP = (\d+) days;/);
+    expect(cap).not.toBeNull();
+    expect(DEFAULTS.holdWindow).toBe(Number(cap![1]) * 86400);
   });
 
   test("TOUCH params start now, short grace", () => {

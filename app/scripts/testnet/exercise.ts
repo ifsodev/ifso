@@ -380,6 +380,22 @@ async function bondFor(who: string) {
   return bond;
 }
 const QS = { OPEN: 1, PROPOSED: 2, DISPUTED: 3, FINAL: 4, VOID: 5 } as const;
+/**
+ * Audit M-1 bond split: a panel answer forfeits ceil(bond / 2) of the loser's bond, panel silence forfeits
+ * ceil(bond / 2) of each side's (both to the FeeRouter). Checks the BondForfeited amount, then that the keeper's
+ * forwardForfeits() empties the resolver's `forfeited` (anyone may call it: dave does if the keeper is late).
+ */
+async function checkForfeit(qid: Hex, role: "panel" | "timeout") {
+  const bond = BigInt((await qinfo(qid)).bond);
+  const ev = ifsoOutcomeResolverAbi.find((x: any) => x.type === "event" && x.name === "BondForfeited") as any;
+  const logs = await pc.getLogs({ address: RESOLVER, event: ev, args: { questionId: qid } as any, fromBlock: (await pc.getBlockNumber()) - 5_000_000n });
+  const got = logs.reduce((a, l: any) => a + BigInt(l.args.amount), 0n);
+  eq(got, (bond - bond / 2n) * (role === "timeout" ? 2n : 1n), `${role}: forfeited bond units`);
+  const forfeited = async () => (await pc.readContract({ address: RESOLVER, abi: ifsoOutcomeResolverAbi, functionName: "forfeited" })) as bigint;
+  const forwarded = await until("keeper forwards forfeits", async () => (await forfeited()) === 0n, 600_000, 15_000).catch(() => false);
+  if (!forwarded && (await forfeited()) > 0n) await send("dave", RESOLVER, ifsoOutcomeResolverAbi, "forwardForfeits", []);
+  onChain(`${role}: ${got} bond units forfeited to the FeeRouter${forwarded ? " (forwarded by the keeper)" : " (forwarded by dave)"}`);
+}
 /** settles the escrow per the question's end state and checks chain + API */
 async function outcomeSettled(p: PendingCheck) {
   const q = await qinfo(p.outcome!.qid);
@@ -427,6 +443,7 @@ async function advanceOutcome(p: PendingCheck): Promise<number> {
   }
   if (st === QS.PROPOSED) {
     // the service disputes proposals its sources contradict; give it two ticks, then erin disputes so the path is certain
+    // (audit M-1: the contract refuses a dispute from the proposer, so the disputer is never dave)
     const by = await until("service dispute", async () => Number((await qinfo(o.qid)).state) === QS.DISPUTED, 180_000, 15_000).then(() => "the service").catch(async () => {
       await bondFor("erin");
       await send("erin", RESOLVER, ifsoOutcomeResolverAbi, "dispute", [o.qid, keccak256(toHex(`testnet-run ${o.role} dispute`))]);
@@ -444,6 +461,7 @@ async function advanceOutcome(p: PendingCheck): Promise<number> {
       await assertTestnet();
       onChain(`panel Safe decides ${ans}: ${safeExec(PANEL_SAFE, RESOLVER, encodeFunctionData({ abi: ifsoOutcomeResolverAbi, functionName: "panelResolve", args: [o.qid, ans] }))}`);
       eq(Number((await qinfo(o.qid)).state), QS.FINAL, "final after the panel");
+      await checkForfeit(o.qid, "panel");
       await outcomeSettled(p);
       return 0;
     }
@@ -452,6 +470,7 @@ async function advanceOutcome(p: PendingCheck): Promise<number> {
     const done = await until("panel timeout VOID", async () => Number((await qinfo(o.qid)).state) === QS.VOID, 600_000, 15_000).catch(() => false);
     if (!done) await send("dave", RESOLVER, ifsoOutcomeResolverAbi, "finalizeTimedOut", [o.qid]);
     st = QS.VOID;
+    await checkForfeit(o.qid, "timeout");
   }
   if (st >= QS.FINAL) { await outcomeSettled(p); return 0; }
   throw new Error(`${o.role} path found the question in state ${st}`);
