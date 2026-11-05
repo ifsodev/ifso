@@ -91,7 +91,39 @@ export const chainLagProbe = (deps: Deps): LagProbe => ({
     return Number(state);
   },
 });
-const LAG_SCAN = 50; // open rows past the cutoff looked at per run (oldest deadline first)
+/** Candidate rows fetched per query (oldest deadline first); the scan pages through all of them (rescore lead, d6b7a57). */
+export const LAG_PAGE = 50;
+/** Rows probed per run at most (each probe is one or two chain reads). A run that reaches it alerts keeper-lag-scan. */
+export const LAG_PROBE_BUDGET = 500;
+export interface LagCandidate extends LagRow {
+  deadline: Date;
+}
+/**
+ * keeper-lag over EVERY open row past the cutoff, not only the oldest page: rows undecidable for a long time (open
+ * OUTCOME questions, AT_DEADLINE prices inside their hold window) must not hide a later real lag. Keyset pages on
+ * (deadline, id); stops at 5 lagging rows (the alert names at most 5) or at the probe budget, which it reports.
+ */
+export async function scanKeeperLag(
+  fetchPage: (after: { deadline: Date; id: string } | null, limit: number) => Promise<LagCandidate[]>,
+  probe: LagProbe,
+  nowSec: bigint,
+): Promise<{ lagging: LagCandidate[]; probed: number; incomplete: boolean }> {
+  const lagging: LagCandidate[] = [];
+  let probed = 0;
+  let after: { deadline: Date; id: string } | null = null;
+  for (;;) {
+    const page = await fetchPage(after, LAG_PAGE);
+    for (const r of page) {
+      if (lagging.length >= 5) return { lagging, probed, incomplete: false };
+      if (probed >= LAG_PROBE_BUDGET) return { lagging, probed, incomplete: true };
+      probed++;
+      if (await keeperCanSettleNow(r, nowSec, probe)) lagging.push(r);
+    }
+    if (page.length < LAG_PAGE || lagging.length >= 5) return { lagging, probed, incomplete: false };
+    const last = page[page.length - 1]!;
+    after = { deadline: last.deadline, id: last.id };
+  }
+}
 
 export const lowBalance = (wei: bigint, minEth: number) => Number(formatEther(wei)) < minEth;
 
@@ -99,19 +131,25 @@ export async function runMonitors(deps: Deps, alert: AlertFn, now = new Date()) 
   const { db, clients, env } = deps;
   // keeper lag: an escrow whose deadline passed more than 10 minutes ago is still open
   const cutoff = new Date(now.getTime() - KEEPER_LAG_MS);
-  const candidates = await db
-    .select({ id: escrows.id, kind: escrows.kind, condition: escrows.condition, questionId: escrows.questionId, twoSided: escrows.twoSided, accepted: escrows.accepted, activeFrom: escrows.activeFrom })
-    .from(escrows)
-    .where(and(eq(escrows.status, Status.OPEN), lt(escrows.deadline, cutoff), sql`not (${escrows.kind} = ${Kind.PRICE} and ${escrows.condition}->>'mode' = ${String(PRICE_TOUCH)})`))
-    .orderBy(asc(escrows.deadline))
-    .limit(LAG_SCAN);
-  const probe = chainLagProbe(deps);
-  const nowSec = BigInt(Math.floor(now.getTime() / 1000));
-  const lagging: LagRow[] = [];
-  for (const r of candidates) {
-    if (lagging.length >= 5) break;
-    if (await keeperCanSettleNow(r, nowSec, probe)) lagging.push(r); // includes keeperShouldHaveSettled (SQL above)
-  }
+  // cheap exclusions in SQL (an untouched TOUCH, an unaccepted challenge, an OUTCOME with no question), so they never
+  // spend the probe budget; keeperCanSettleNow checks each again
+  const lagWhere = and(
+    eq(escrows.status, Status.OPEN),
+    lt(escrows.deadline, cutoff),
+    sql`not (${escrows.kind} = ${Kind.PRICE} and ${escrows.condition}->>'mode' = ${String(PRICE_TOUCH)})`,
+    sql`not (${escrows.twoSided} and not ${escrows.accepted})`,
+    sql`not (${escrows.kind} = ${Kind.OUTCOME} and ${escrows.questionId} is null)`,
+  );
+  const fetchPage = async (after: { deadline: Date; id: string } | null, limit: number) =>
+    (await db
+      .select({ id: escrows.id, kind: escrows.kind, condition: escrows.condition, questionId: escrows.questionId, twoSided: escrows.twoSided, accepted: escrows.accepted, activeFrom: escrows.activeFrom, deadline: escrows.deadline })
+      .from(escrows)
+      .where(after ? and(lagWhere, sql`(${escrows.deadline}, ${escrows.id}) > (${after.deadline.toISOString()}::timestamptz, ${after.id})`) : lagWhere)
+      .orderBy(asc(escrows.deadline), asc(escrows.id))
+      .limit(limit)) as LagCandidate[]; // deadline is never null here (lt(deadline, cutoff)) and whole seconds (from chain), so the key round-trips
+  const scan = await scanKeeperLag(fetchPage, chainLagProbe(deps), BigInt(Math.floor(now.getTime() / 1000)));
+  const lagging = scan.lagging;
+  if (scan.incomplete) await alert("keeper-lag-scan", `keeper-lag looked at ${scan.probed} open escrows past their deadline and stopped (probe budget); later ones were not checked this run`);
   if (lagging.length) await alert("keeper-lag", `escrows decidable for over 10 minutes and not settled: ${lagging.map((r) => r.id).join(", ")}`);
 
   const earliest = new Date(now.getTime() - RESOLVER_UNPROPOSED_MS);
