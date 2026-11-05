@@ -106,7 +106,7 @@ Follow `SECURITY.md`. Please do not open a public issue for a vulnerability and 
 | Network | Chain id | Status |
 |---|---|---|
 | Robinhood Chain | 4663 | not deployed |
-| Robinhood Chain testnet | 46630 | rehearsal deployment, escrow `0x7FFf1cE34532f76A6aFEb53E503891e671f891d6` (Sourcify match on all 4 contracts; test tokens only, to be redeployed after a contract fix) |
+| Robinhood Chain testnet | 46630 | rehearsal deployment v2 (commit 2cd783d), escrow `0x154Fb83621180f9Dfe80EC3382107C864e79626F` (Sourcify match on all 4 contracts; test tokens only) |
 
 Addresses, deploy block, transaction hashes, constructor arguments and the commit of every deployment are recorded
 in `contracts/deployments/<chainid>.json` (today only `46630.json`, the testnet; the site keeps an equal copy in
