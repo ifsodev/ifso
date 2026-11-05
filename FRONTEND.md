@@ -59,7 +59,8 @@ browser                                         API                             
 import { randomSecret, linkKeyAddress, buildClaimUrl, verifyBuildAnswer } from "@ifso/client";
 
 const secret = randomSecret();
-const answer = await api.build.mutate({ text: "/ifso link 20 if polymarket fed-decision-in-december resolves yes", sender: account, linkKey: linkKeyAddress(secret) });
+// the-market-slug is a placeholder: use a real open market's slug, the last part of its polymarket.com link.
+const answer = await api.build.mutate({ text: "/ifso link 20 if polymarket the-market-slug resolves yes", sender: account, linkKey: linkKeyAddress(secret) });
 verifyBuildAnswer(answer as any, { from: account, chainId: 4663, escrow, usdg, asked: { linkKey: linkKeyAddress(secret) } });
 const signature = await walletClient.signTypedData({ account, ...(answer as any).authorization.typedData });
 const { id } = await api.submit.mutate({
@@ -205,7 +206,7 @@ CI scans every string the API and bot produce. The site must follow the same rul
 - Locked premium features say "hold N $IFSO to unlock". No "buy", price talk, or return talk. Always show the line "Perks have no cash value and are not a promise of any amount" (it is the `note` field of `perks`).
 - `import { findBannedWords } from "@ifso/client"` and run it over every string in your own tests.
 
-The preview text the user confirms must be the one the API produced: render `preview`, `notes` and `fee`/`expiryText` from `build` (or `parse`) as they come. The same sentence appears in the bot, so both channels say the same thing. `describe` returns just the condition sentence (for example "the Polymarket question will-eth-reach-5000-in-2026 resolves YES") for lists and history.
+The preview text the user confirms must be the one the API produced: render `preview`, `notes` and `fee`/`expiryText` from `build` (or `parse`) as they come. The same sentence appears in the bot, so both channels say the same thing. `describe` returns just the condition sentence (for example "the Polymarket question the-market-slug resolves YES") for lists and history.
 
 ## 11. `parse` ambiguities and questions
 
@@ -229,7 +230,8 @@ Queries are `GET /trpc/<name>?input=<urlencoded json>`; mutations are `POST /trp
 ### `parse`
 Query. Input `{ text: string(3..300), tzOffsetMin?: int }`. Output: `{ ok, twoSided, recipient?, amountUsdg?, counterAmountUsdg?, condition?, ambiguities: string[], questions: Question[], notes: string[], errors: string[], preview?, feeUsdg?, expiry? }`. Use it to preview while typing. `errors` is non-empty when the request cannot proceed (including the region message).
 ```ts
-await api.parse.query({ text: "/ifso @jake 20 if polymarket fed-decision-in-december resolves yes" }); // { ok: true, preview: "Send 20 USDG to @jake. It unlocks if ...", ... }
+// the-market-slug is a placeholder: put a real open market's slug (the last part of its polymarket.com link).
+await api.parse.query({ text: "/ifso @jake 20 if polymarket the-market-slug resolves yes" }); // { ok: true, preview: "Send 20 USDG to @jake. It unlocks if ...", ... }
 ```
 
 ### `describe`

@@ -13,7 +13,7 @@ export const copy = {
 
   parse: {
     usage:
-      "Try: /ifso @jake 20 if polymarket fed-decision-in-december resolves yes · /ifso link 50 on the 1st · /ifso @mia 100 if nvda closes above 200 by friday · /challenge @sam 10 if @ref says so",
+      "Try: /ifso @jake 20 if polymarket the-market-slug resolves yes · /ifso link 50 on the 1st · /ifso @mia 100 if nvda closes above 200 by friday · /challenge @sam 10 if @ref says so",
     minAmount: "The smallest if-so payment is 1 USDG.",
     counterOnlyForChallenges: "Two amounts only work with /challenge (where both of you chip in).",
     challengeNeedsOutcome: "A challenge needs something to decide it: a price, a result, or a referee.",
@@ -118,7 +118,7 @@ export const copy = {
     resolverPosted: (q: string, outcome: string) =>
       `Result posted for ${q}: ${outcome}. Anyone can challenge it for the next 2 hours. If our own sources can't confirm it in that time, we challenge it and a review panel decides.`,
     help:
-      "Commands: /ifso, /challenge, /mine, /tz, /help. Conditions: dates, stock prices (where available), Polymarket questions, both tapping OK, or a referee.",
+      "Commands: /ifso, /challenge, /mine, /tz, /help. Conditions: dates, stock prices (where available), Polymarket questions, both tapping OK, or a referee. For Polymarket, put the market name in place of the-market-slug: it is the last part of the market's polymarket.com link.",
     notAvailable: "That isn't available in your region.",
     noFixture: (team: string) => `I couldn't find an upcoming league fixture for ${team}. Check the spelling or add the opponent, like "arsenal beat chelsea".`,
     fixtureFound: (home: string, away: string, league: string, when: string) => `Matched fixture: ${home} vs ${away} (${league}), kickoff ${when}.`,
@@ -137,7 +137,7 @@ export const copy = {
     tzNone: "No time zone set yet, so times show in UTC.",
     tzSet: (z: string, off: string) => `Time zone set to ${z} (${off} right now).`,
     tzBad: (z: string) => `I don't know the time zone "${z}". Try a name like Europe/London.`,
-    wrongBot: "Send this as a command, like /ifso @jake 20 if polymarket fed-decision-in-december resolves yes.",
+    wrongBot: "Send this as a command, like /ifso @jake 20 if polymarket the-market-slug resolves yes.",
     busy: "Too many requests. Try again in a minute.",
     failed: "Something went wrong on our side. Try again in a moment.",
     incoming: (amt: string) => `An if-so payment of ${amt} USDG is waiting for you.`,
