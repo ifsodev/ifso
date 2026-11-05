@@ -5,7 +5,8 @@
 #   bash provision.sh --cohost --check          READ ONLY. Lists what would be done, confirms ports 3201 and 6380 are free
 #                                               and the other project's units are active, and stops with a FAIL line if
 #                                               anything of the other project would change. Run it before AND after.
-#   DOMAIN=api.<domain> bash provision.sh --cohost       the real setup (testnet only; PROFILE defaults to testnet)
+#   DOMAIN=api.<domain> bash provision.sh --cohost       the real setup (testnet; PROFILE defaults to testnet. PROFILE=mainnet
+#                                               only through convert-network.sh: CONVERT_NETWORK + CONVERT_ARCHIVE)
 #   DOMAIN=api.<domain> bash provision.sh --cohost --caddy-only    only the Caddy site file and the one import line
 #
 # The rules this mode keeps (each one has a check in deploy-local.test.sh):
@@ -79,7 +80,21 @@ esac
 if [[ "$TESTMODE" != 1 ]]; then [[ "$(id -u)" == 0 ]] || die "run as root" 64; fi
 
 PROFILE="${PROFILE:-testnet}"
-[[ "$PROFILE" == testnet ]] || die "co-hosting is for the testnet phase only (PROFILE=testnet); mainnet gets its own server" 64
+# Mainnet in this layout exists only as the conversion of THIS testnet box (convert-network.sh, owner's choice): it needs
+# CONVERT_NETWORK=testnet-to-mainnet AND CONVERT_ARCHIVE naming the testnet archive, whose MANIFEST must verify. Anything
+# else stays refused, so an accidental PROFILE=mainnet never changes a box's network.
+CONVERTING=0
+if [[ "$PROFILE" != testnet ]]; then
+  [[ "$PROFILE" == mainnet && "${CONVERT_NETWORK:-}" == testnet-to-mainnet ]] \
+    || die "co-hosting is for the testnet phase only (PROFILE=testnet). To turn THIS testnet box into mainnet use convert-network.sh (CONVERT_NETWORK=testnet-to-mainnet)" 64
+  arc="${CONVERT_ARCHIVE:-}"
+  [[ -n "$arc" && -f "$arc/MANIFEST" && -f "$arc/ifso_testnet.dump" && -f "$arc/INFO" ]] \
+    || die "PROFILE=mainnet needs CONVERT_ARCHIVE=<testnet archive dir> (MANIFEST, INFO, ifso_testnet.dump): convert-network.sh archive makes it" 64
+  if command -v sha256sum >/dev/null 2>&1; then sumc=(sha256sum -c --quiet); else sumc=(shasum -a 256 -c --quiet); fi
+  (cd "$arc" && "${sumc[@]}" MANIFEST) >/dev/null 2>&1 || die "the testnet archive $arc does not match its MANIFEST: refusing" 64
+  grep -qx "profile=testnet" "$arc/INFO" || die "$arc/INFO does not say profile=testnet" 64
+  CONVERTING=1
+fi
 DB_NAME="ifso_${PROFILE}"
 DOMAIN="${DOMAIN:-}"
 EDGE="${EDGE:-}"
@@ -123,7 +138,7 @@ snapshot() { local u; for u in "${PROTECTED[@]}"; do printf '%s %s\n' "$u" "$(un
 
 # ---------------------------------------------------------------- the preflight (reads only)
 preflight() {
-  local osid osver avail_kb free_kb cpus u missing=() sim line pkg cand n hba ver have_ifso_state=0
+  local osid osver avail_kb free_kb cpus u missing=() sim line pkg cand n hba ver have_ifso_state=0 own
   [[ -e "$ETC/db.env" ]] && have_ifso_state=1
   echo "--- system"
   if [[ -r "${IFSO_OS_RELEASE:-/etc/os-release}" ]]; then
@@ -149,7 +164,10 @@ preflight() {
   echo "--- ports (must be free)"
   for n in "$API_PORT" "$REDIS_PORT"; do
     if port_in_use "$n"; then
-      if ((have_ifso_state)) && { [[ "$n" == "$REDIS_PORT" ]] && unit_active ifso-redis.service || [[ "$n" == "$API_PORT" ]] && unit_active ifso-api.service; }; then
+      own=0  # (each port by its own unit: with `a && b || c && d` a stopped ifso-api made Redis's 6380 count as foreign)
+      if [[ "$n" == "$REDIS_PORT" ]] && unit_active ifso-redis.service; then own=1; fi
+      if [[ "$n" == "$API_PORT" ]] && unit_active ifso-api.service; then own=1; fi
+      if ((have_ifso_state && own)); then
         ok "port $n is in use by Ifso's own unit (re-run)"
       else bad "port $n is already in use"; fi
     else ok "port $n is free"; fi
@@ -221,7 +239,11 @@ preflight() {
     id "$u" >/dev/null 2>&1 && ok "user $u exists" || plan "create system user $u"
   done
   if [[ -r "$ETC/profile" && "$(tr -d '[:space:]' <"$ETC/profile")" != "$PROFILE" ]]; then
-    bad "this server's Ifso profile is $(tr -d '[:space:]' <"$ETC/profile"), not $PROFILE"
+    if [[ "$CONVERTING" == 1 && "$(tr -d '[:space:]' <"$ETC/profile")" == testnet ]]; then
+      plan "convert this server's Ifso profile testnet -> mainnet (archive ${CONVERT_ARCHIVE:-}; new database $DB_NAME)"
+    else
+      bad "this server's Ifso profile is $(tr -d '[:space:]' <"$ETC/profile"), not $PROFILE"
+    fi
   fi
   [[ -e "$BIN_DIR/bun" ]] && ok "$BIN_DIR/bun exists" || plan "install Bun $BUN_VERSION and cast $FOUNDRY_VERSION into $BIN_DIR (never /usr/local/bin)"
   plan "install units: ifso-api/bot/worker (MemoryMax 512M/256M/768M, CPUQuota 100%/50%/150%), ifso-redis (448M, 50%), migrate, backup"

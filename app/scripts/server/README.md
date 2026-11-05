@@ -99,14 +99,35 @@ Migrations only go forward. A rollback puts the old code back but does not undo 
 - **Security updates** install by themselves; the server may need a reboot now and then (`reboot`; the services come back on their own).
 - **Mainnet**: do not run the mainnet profile until the testnet one has been deployed, checked with `ifso-deploy --check`, and a rollback has been rehearsed once (deploy an older sha, then the newer one).
 
-## Sharing a server with another project (`--cohost`, testnet only)
+## Sharing a server with another project (`--cohost`, testnet; mainnet only by the conversion below)
 
 `bash provision.sh --cohost --check` only reads: it lists what it would do, confirms ports 3201 (API) and 6380 (Ifso's own Redis) are free and that the other project's units are active, and stops with a `FAIL` line if anything of theirs would change. `DOMAIN=api.<domain> bash provision.sh --cohost` then does the setup without installing, upgrading or restarting their Postgres, Caddy, fail2ban or ssh: a role and a database in their Postgres cluster, a separate Redis on 127.0.0.1:6380, Ifso's own Bun in `/opt/ifso/bin`, one `import` line in their Caddyfile plus `/etc/caddy/sites/ifso.caddy` (graceful reload only), and systemd limits on every Ifso unit. Afterwards `ifso-deploy` runs in co-host mode by itself (the file `/etc/ifso/cohost` switches it on) and exits 3 if one of their units changed during a deploy. The exact order of commands and the way back are in the private runbook for the night.
+
+## Turning a co-host testnet server into the mainnet one (`convert-network.sh`)
+
+Normally a server keeps the network it was set up with: `ifso-deploy` refuses `--profile mainnet` on a testnet server and
+`provision.sh` refuses to change the profile. When the owner decides to reuse the testnet server for mainnet,
+`convert-network.sh` does it in two owner-run steps, each refused unless `CONVERT_NETWORK=testnet-to-mainnet` is set:
+
+1. `archive` stops the three app services, then keeps the testnet database (`pg_dump`, with a row count per table), a
+   snapshot of Ifso's Redis, `/etc/ifso` and the testnet bot keys in `/var/backups/ifso/testnet-archive-<time>/` (root
+   only, with a sha256 `MANIFEST`). The keys are moved out of `/etc/ifso/keys` and Ifso's Redis is emptied, so nothing of
+   testnet can run on mainnet. No setting changes.
+2. The mainnet key files are copied in, then `apply --archive <dir> --values <file> --sha <sha>` checks the archive again
+   (including a full restore into a scratch database), the values (public addresses only; `convert-network.sh values`
+   makes the file from the deployment record), that the contracts have code on chain 4663 and that the three keystores
+   are the expected mainnet wallets. Only then it runs `provision.sh --cohost` with `PROFILE=mainnet` (a new empty
+   database `ifso_mainnet`), rewrites the network settings (secrets and every other line are kept), points the release
+   runner at the API's port, deploys and checks. `provision.sh --cohost` accepts `PROFILE=mainnet` only with the flag and
+   a testnet archive whose `MANIFEST` verifies.
+
+`bash app/scripts/server/convert-network.test.sh` proves it without a server (a temp folder and stand-ins).
 
 ## Trying the deploy logic on your computer
 
 ```bash
-bash app/scripts/server/deploy-local.test.sh        # 118 checks, a few seconds, touches nothing outside a temp folder
+bash app/scripts/server/deploy-local.test.sh        # 136 checks, a few seconds, touches nothing outside a temp folder
+bash app/scripts/server/convert-network.test.sh     # 78 checks: the testnet-to-mainnet conversion
 shellcheck app/scripts/server/*.sh                  # brew install shellcheck
 ```
 `deploy.sh --dry-run <sha>` does the same kind of rehearsal by hand: no root, systemd calls only printed.

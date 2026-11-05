@@ -134,7 +134,7 @@ case "$PROFILE" in
   *) die "profile must be testnet or mainnet (got '${PROFILE:-nothing}'): pass --profile or run provision.sh with PROFILE=..." ;;
 esac
 if [[ -r "$ETC/profile" && "$(tr -d '[:space:]' <"$ETC/profile")" != "$PROFILE" ]]; then
-  die "this server was provisioned as '$(tr -d '[:space:]' <"$ETC/profile")', not '$PROFILE': refusing to switch networks"
+  die "this server was provisioned as '$(tr -d '[:space:]' <"$ETC/profile")', not '$PROFILE': refusing to switch networks (an owner-run conversion is convert-network.sh, never this command)"
 fi
 
 UNITS=(ifso-api ifso-worker)

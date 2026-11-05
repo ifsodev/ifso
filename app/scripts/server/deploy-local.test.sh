@@ -367,6 +367,25 @@ pcreset; printf 'MemAvailable:    400000 kB\n' >"$C/meminfo"; pc --check
 check "cohost --check: too little free memory is a FAIL" test "$RC" = 1
 printf 'MemAvailable:    4718592 kB\n' >"$C/meminfo"
 pcreset; PROFILE=mainnet pc; check "cohost refuses the mainnet profile (64)" test "$RC" = 64
+# Converting THIS box to mainnet (convert-network.sh): only with the flag AND a testnet archive whose MANIFEST verifies
+ARC="$T/arc"; mkdir -p "$ARC"; echo PGDMP >"$ARC/ifso_testnet.dump"; printf 'profile=testnet\n' >"$ARC/INFO"
+(cd "$ARC" && shasum -a 256 ifso_testnet.dump INFO >MANIFEST)
+pcreset; PROFILE=mainnet CONVERT_NETWORK=testnet-to-mainnet pc --check
+check "cohost mainnet with the flag but no CONVERT_ARCHIVE is refused (64)" bash -c '[ "$1" = 64 ] && grep -q "CONVERT_ARCHIVE" <<<"$2"' _ "$RC" "$OUT"
+pcreset; PROFILE=mainnet CONVERT_ARCHIVE="$ARC" pc --check
+check "cohost mainnet with an archive but without the flag is refused (64)" test "$RC" = 64
+pcreset; echo changed >>"$ARC/INFO"; PROFILE=mainnet CONVERT_NETWORK=testnet-to-mainnet CONVERT_ARCHIVE="$ARC" pc --check
+check "cohost mainnet with an archive that fails its MANIFEST is refused (64)" test "$RC" = 64
+printf 'profile=testnet\n' >"$ARC/INFO"
+pcreset; echo testnet >"$C/etc/profile"; PROFILE=mainnet CONVERT_NETWORK=testnet-to-mainnet CONVERT_ARCHIVE="$ARC" pc --check
+check "cohost mainnet with the flag and a verified archive on a testnet box: CHECK OK, plans database ifso_mainnet" bash -c '[ "$1" = 0 ] && grep -q "create database ifso_mainnet" <<<"$2"' _ "$RC" "$OUT"
+pcreset; echo testnet >"$C/etc/profile"; PROFILE=testnet pc --check
+check "  ... while the plain testnet run on that box is unchanged (CHECK OK)" test "$RC" = 0
+# A re-run while ifso-api is stopped (the conversion stops it): Redis on 6380 is still Ifso's own, not a foreign port
+pcreset; touch "$C/etc/db.env"; echo 'LISTEN 0 511 127.0.0.1:6380 0.0.0.0:*' >>"$C/state/ports"; echo 'ifso-redis.service loaded active running R' >>"$C/state/units"; pc --check
+check "cohost --check re-run with ifso-api stopped: port 6380 of the active ifso-redis is Ifso's own, not a FAIL" bash -c '! grep -q "FAIL  port 6380" <<<"$1" && grep -q "port 6380 is in use by Ifso" <<<"$1"' _ "$OUT"
+pcreset; touch "$C/etc/db.env"; echo 'LISTEN 0 511 127.0.0.1:6380 0.0.0.0:*' >>"$C/state/ports"; pc --check
+check "  ... while 6380 used by something that is not an active ifso-redis is still a FAIL" bash -c 'grep -q "FAIL  port 6380" <<<"$1"' _ "$OUT"
 pcreset; DOMAIN='' pc; check "cohost real run without DOMAIN is refused (64)" test "$RC" = 64
 pcreset; DOMAIN='bad domain' pc --check; check "cohost refuses a malformed DOMAIN (64)" test "$RC" = 64
 

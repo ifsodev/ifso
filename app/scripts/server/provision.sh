@@ -125,7 +125,7 @@ SWAP_SIZE="${SWAP_SIZE:-2G}"
 domain_re='^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$'
 [[ -z "$DOMAIN" || "$DOMAIN" =~ $domain_re ]] || die "DOMAIN '$DOMAIN' is not a domain name"
 if [[ -r "$ETC/profile" && "$(tr -d '[:space:]' <"$ETC/profile")" != "$PROFILE" ]]; then
-  die "this server was provisioned as $(tr -d '[:space:]' <"$ETC/profile"): refusing to turn it into $PROFILE (use a new server)"
+  die "this server was provisioned as $(tr -d '[:space:]' <"$ETC/profile"): refusing to turn it into $PROFILE (use a new server, or convert-network.sh on a co-host testnet box)"
 fi
 if [[ -r /etc/os-release ]]; then
   # shellcheck disable=SC1091
