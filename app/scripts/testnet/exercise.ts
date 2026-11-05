@@ -224,7 +224,7 @@ interface BuildOpts { link?: boolean; cancellable?: boolean; altRefundTo?: Addre
 async function apiBuild(sender: string, text: string, o: BuildOpts = {}) {
   const secret = o.link ? randomSecret() : undefined;
   const answer = await m("build", { text, sender: adr(sender), linkKey: secret ? linkKeyAddress(secret) : undefined, cancellable: o.cancellable, altRefundTo: o.altRefundTo });
-  verifyBuildAnswer(answer, { from: adr(sender), chainId: CHAIN_ID, escrow: ESCROW, usdg: USDG });
+  verifyBuildAnswer(answer, { from: adr(sender), chainId: CHAIN_ID, escrow: ESCROW, usdg: USDG, asked: o.altRefundTo ? { altRefundTo: o.altRefundTo } : undefined });
   expect(findBannedWords(String(answer.preview ?? "")).length === 0, "banned words in the preview");
   return { secret, answer };
 }

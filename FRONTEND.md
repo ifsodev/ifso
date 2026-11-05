@@ -48,7 +48,7 @@ browser                                         API                             
   |  linkKeyAddress(secret) -> linkKey
   |-- build({ text, sender, linkKey }) ---------->|   parse + exact params + typed data
   |<-- { id, params, total, authorization } ------|
-  |  verifyBuildAnswer(answer, { from, chainId, escrow, usdg })   (throws on any mismatch)
+  |  verifyBuildAnswer(answer, { from, chainId, escrow, usdg, asked })   (throws on any mismatch)
   |  wallet.signTypedData(answer.authorization.typedData)         (ONE signature, EIP-3009)
   |-- submit({ params, from, validAfter, validBefore, signature }) ->|  relayer pays gas -> createWithAuthorization
   |<-- { txHash, id } ----------------------------|
@@ -60,7 +60,7 @@ import { randomSecret, linkKeyAddress, buildClaimUrl, verifyBuildAnswer } from "
 
 const secret = randomSecret();
 const answer = await api.build.mutate({ text: "/ifso link 20 if arsenal win", sender: account, linkKey: linkKeyAddress(secret) });
-verifyBuildAnswer(answer as any, { from: account, chainId: 4663, escrow, usdg });
+verifyBuildAnswer(answer as any, { from: account, chainId: 4663, escrow, usdg, asked: { linkKey: linkKeyAddress(secret) } });
 const signature = await walletClient.signTypedData({ account, ...(answer as any).authorization.typedData });
 const { id } = await api.submit.mutate({
   params: (answer as any).params, from: account,
@@ -70,6 +70,7 @@ const url = buildClaimUrl(location.origin, BigInt(id), secret); // the secret ex
 ```
 
 Notes:
+- `asked` is what the page knows on its own: pass every field it has (`amount`, `counterAmount`, `recipient` or `linkKey`, `referee`, `kind`, `op`, `mode`, `threshold`, `deadline`, `expiry`, `acceptBy`, `feed`, `stockToken`, `outcomeKey`, `outcomeMask`, `refundTo`, `altRefundTo`, `twoSided`, `cancellable`). Each given field must match the answer; a field left out is not compared. The refund addresses are always checked: unless `asked` names them, `refundTo` and `altRefundTo` must be 0 or the sender, so money never comes back to anyone else.
 - If the recipient is a named address (the text has `0x...`) leave `linkKey` out; the payment is bound to that address.
 - A wallet that cannot do a gasless signature (or prefers one transaction) uses `createWithPermit` on the escrow: build the permit with `createPermitTypedData` (USDG `nonces(owner)` for the nonce), sign it, then send `createWithPermit(params, deadline, v, r, s)` from the wallet. `build` still gives the exact `params`.
 - For an outcome payment (sports, market question), `submit` registers the question for a sender that holds the funds. If the wallet sends the transaction itself, call `prepareQuestion` first.
