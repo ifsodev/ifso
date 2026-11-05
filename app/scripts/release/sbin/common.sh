@@ -148,11 +148,11 @@ in_pinned_queue() {
   return 1
 }
 # from_queue <sha> [depth]: X carries a pinned queued update: X is one, or a matching cherry-pick of one ("add"), or a matching
-# revert of such a commit (a rollback, "remove"), or a revert of a rollback (a re-apply, "add"), and so on. Prints "add" or
-# "remove" (what X does to the update), or the reason when X carries none.
+# revert of such a commit (a rollback, "remove"), or a revert of a rollback (a re-apply, "add"), and so on. Prints "add <src>" or
+# "remove <src>" (what X does to the update, and the pinned queued commit <src> that carries it), or the reason when X carries none.
 from_queue() {
-  local x="$1" d="${2:-0}" line y a b pol
-  if in_pinned_queue "$x"; then owner_signed "$x" >/dev/null && { echo add; return 0; }; echo "${x:0:12} is pinned but not owner-signed"; return 1; fi
+  local x="$1" d="${2:-0}" line y a b pol src
+  if in_pinned_queue "$x"; then owner_signed "$x" >/dev/null && { echo "add $x"; return 0; }; echo "${x:0:12} is pinned but not owner-signed"; return 1; fi
   (( d < 6 )) || { echo "runner commits nested too deep"; return 1; }
   line="$(sgit log -1 --format=%B "$x" | grep -E '^(\(cherry picked from commit [0-9a-f]{40}\)|This reverts commit [0-9a-f]{40}\.)$' | tail -1 || true)"
   [[ -n "$line" && "$(sgit rev-list --parents -n 1 "$x" | wc -w | tr -d ' ')" == 2 ]] || { echo "${x:0:12} is not a commit of the pinned queue (arm.sh / ifso-release-pin-queue pin it)"; return 1; }
@@ -160,15 +160,44 @@ from_queue() {
   ensure_commit "$y" || { echo "${x:0:12} names ${y:0:12}, which root cannot find"; return 1; }
   if [[ "$line" == "(cherry picked"* ]]; then
     { in_pinned_queue "$y" && owner_signed "$y" >/dev/null; } || { echo "cherry-pick of ${y:0:12}, which is not an owner-signed commit of the pinned queue"; return 1; }
-    a="$(pid_of "$y^" "$y")"; b="$(pid_of "$x^" "$x")"; pol=add
+    a="$(pid_of "$y^" "$y")"; b="$(pid_of "$x^" "$x")"; pol=add; src="$y"
   else
     sgit merge-base --is-ancestor "$y" "$x^" || { echo "${x:0:12} reverts ${y:0:12}, which is not an ancestor of it"; return 1; }
     pol="$(from_queue "$y" $((d + 1)))" || { echo "${x:0:12} reverts ${y:0:12}, which carries no pinned queued update"; return 1; }
+    src="${pol#* }"; pol="${pol%% *}"
     [[ $pol == add ]] && pol=remove || pol=add
     a="$(pid_of "$y^" "$y")"; b="$(pid_of "$x" "$x^")"
   fi
   [[ -n "$a" && "$a" == "$b" ]] || { echo "${x:0:12} is not the same (or the exact inverse) patch as ${y:0:12}"; return 1; }
-  echo "$pol"
+  echo "$pol $src"
+}
+# owner_pulled <src> <sha>: the owner took the pinned queued update <src> out (audit L-15): on the first-parent chain from the pin
+# base to <sha>^, the LAST owner-signed revert that concerns <src> removes it (an owner-signed `git revert` of a commit that adds
+# it, or an owner-signed copy of the same patch from another pinned line, as a rebuilt queue holds). Prints that revert's sha.
+# A later owner-signed revert of the pull (the owner putting it back) clears it.
+owner_pulled() {
+  local src="$1" c="$2" base tip h line y fq s spid last=""
+  [[ -r "$QUEUE_PIN" ]] || return 1
+  spid="$(pid_of "$src^" "$src")"
+  while read -r base tip _ <&4; do
+    { is_sha "$base" && is_sha "$tip"; } || continue
+    sgit rev-list --first-parent "$base..$tip" 2>/dev/null | grep -qx "$src" || continue
+    last=""
+    while read -r h <&3; do
+      [[ -n "$h" ]] || continue
+      line="$(sgit log -1 --format=%B "$h" | grep -E '^(\(cherry picked from commit [0-9a-f]{40}\)|This reverts commit [0-9a-f]{40}\.)$' | tail -1 || true)"
+      [[ "$line" == "This reverts commit "* ]] || continue
+      owner_signed "$h" >/dev/null </dev/null || continue
+      y="$(grep -oE '[0-9a-f]{40}' <<<"$line")"
+      ensure_commit "$y" </dev/null || continue
+      fq="$(from_queue "$y" </dev/null)" || continue
+      s="${fq#* }"   # the same update, or an owner-signed copy of its patch from another pinned (rebuilt) queue
+      [[ "$s" == "$src" || ( -n "$spid" && "$(pid_of "$s^" "$s")" == "$spid" ) ]] || continue
+      if [[ "${fq%% *}" == add ]]; then last="$h"; else last=""; fi
+    done 3< <(sgit log --first-parent --reverse --format=%H -E --grep='^This reverts commit [0-9a-f]{40}\.$' "$base..$c^" 2>/dev/null)
+    [[ -n "$last" ]] && { echo "$last"; return 0; }
+  done 4<"$QUEUE_PIN"
+  return 1
 }
 # commit_ok <sha>: may this first-parent commit (between the running revision $CUR and the sha being deployed) reach production?
 # Yes when it is signed by an owner key, or when it is a runner commit (one parent; the server key's signature counts for nothing)
@@ -176,8 +205,9 @@ from_queue() {
 #   (cherry picked from commit X)   X an owner-signed commit of the PINNED queue ($QUEUE_PIN), and the same patch
 #   This reverts commit X.          X an ancestor that carries a pinned queued update (from_queue), and the exact inverse
 #                                   patch: a rollback (X adds the update) only of the running release ($CUR) or of a commit
-#                                   in $CUR..sha (this deploy); a re-apply (X is a rollback) of any earlier rollback.
-#                                   Never an owner fix or any other commit on main.
+#                                   in $CUR..sha (this deploy); a re-apply (X is a rollback) of an earlier RUNNER rollback,
+#                                   never of an owner-signed one (audit L-15). Never an owner fix or any other commit on main.
+# A pick or a re-apply is also refused when an owner-signed revert on main (pin base..sha) has pulled that update (L-15).
 # Prints the reason when refused. lib/release.py runner_commit_problem is the same rule (the runner checks before it pushes).
 commit_ok() {
   local c="$1" sig line x n a b
@@ -194,15 +224,19 @@ commit_ok() {
     sig="$(owner_signed "$x")" || { echo "cherry-pick of ${x:0:12}, which is not signed by an owner key ($sig)"; return 1; }
     a="$(pid_of "$x^" "$x")"; b="$(pid_of "$c^" "$c")"
     [[ -n "$a" && "$a" == "$b" ]] || { echo "not the same patch as ${x:0:12}, the owner-signed commit it says it picks"; return 1; }
+    sig="$(owner_pulled "$x" "$c")" && { echo "cherry-pick of ${x:0:12}, which the owner-signed revert ${sig:0:12} pulled from main"; return 1; }
     return 0
   fi
   sgit merge-base --is-ancestor "$x" "$c^" || { echo "reverts ${x:0:12}, which is not an ancestor of it"; return 1; }
   sig="$(from_queue "$x")" || { echo "reverts ${x:0:12}: $sig"; return 1; }
-  if [[ "$sig" == add ]]; then   # c takes an update out (a rollback): only the running release or a commit of this deploy
+  if [[ "${sig%% *}" == add ]]; then   # c takes an update out (a rollback): only the running release or a commit of this deploy
     is_sha "${CUR:-}" || { echo "reverts ${x:0:12}, but the running revision is unknown"; return 1; }
     [[ "$x" == "$CUR" ]] || sgit rev-list --first-parent "$CUR..$c^" | grep -qx "$x" \
       || { echo "reverts ${x:0:12}, which is neither the running release ${CUR:0:12} nor in this deploy"; return 1; }
-  fi   # else c puts a rolled-back queued update back (a re-apply after a retry): any earlier rollback
+  else   # c puts a rolled-back queued update back (a re-apply after a retry): only of a runner rollback the owner did not make
+    owner_signed "$x" >/dev/null && { echo "re-applies ${x:0:12}, an owner-signed revert: the owner pulled this update"; return 1; }
+    sig="$(owner_pulled "${sig#* }" "$c")" && { echo "re-applies an update that the owner-signed revert ${sig:0:12} pulled from main"; return 1; }
+  fi
   a="$(pid_of "$x^" "$x")"; b="$(pid_of "$c" "$c^")"
   [[ -n "$a" && "$a" == "$b" ]] || { echo "not the exact inverse patch of ${x:0:12}, the commit it says it reverts"; return 1; }
 }

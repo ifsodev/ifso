@@ -393,41 +393,74 @@ def _trailer(c, repo):
 
 
 def from_queue(x, repo, pins, depth=0):
-    """(None, "add"|"remove") when x carries a pinned queued update: x is one (owner-signed) or a matching cherry-pick of one
-    ("add"), a matching revert of such a commit (a rollback, "remove"), a revert of a rollback (a re-apply, "add"), and so on.
-    (reason, None) otherwise. Mirrors common.sh from_queue."""
+    """(None, "add"|"remove", src) when x carries a pinned queued update: x is one (owner-signed) or a matching cherry-pick of
+    one ("add"), a matching revert of such a commit (a rollback, "remove"), a revert of a rollback (a re-apply, "add"), and so on;
+    src is the pinned queued commit that carries the update. (reason, None, None) otherwise. Mirrors common.sh from_queue."""
     if in_pins(x, pins, repo):
-        return (None, "add") if signature_ok(x, repo) else (f"{x[:10]} is pinned but not owner-signed", None)
+        return (None, "add", x) if signature_ok(x, repo) else (f"{x[:10]} is pinned but not owner-signed", None, None)
     if depth >= 6:
-        return f"{x[:10]}: runner commits nested too deep", None
+        return f"{x[:10]}: runner commits nested too deep", None, None
     tr, n = _trailer(x, repo)
     if not tr or n != 1:
-        return f"{x[:10]} is not a commit of the pinned queue (arm.sh / ifso-release-pin-queue pin it)", None
+        return f"{x[:10]} is not a commit of the pinned queue (arm.sh / ifso-release-pin-queue pin it)", None, None
     pick, rev_of = tr
     y = pick or rev_of
     if pick:
         if not (in_pins(y, pins, repo) and signature_ok(y, repo)):
-            return f"cherry-pick of {y[:10]}, which is not an owner-signed commit of the pinned queue", None
-        a, b, pol = patch_id(y + "^", y, repo), patch_id(x + "^", x, repo), "add"
+            return f"cherry-pick of {y[:10]}, which is not an owner-signed commit of the pinned queue", None, None
+        a, b, pol, src = patch_id(y + "^", y, repo), patch_id(x + "^", x, repo), "add", y
     else:
         if git("merge-base", "--is-ancestor", y, x + "^", repo=repo, ok=True) is None:
-            return f"{x[:10]} reverts {y[:10]}, which is not an ancestor of it", None
-        why, p = from_queue(y, repo, pins, depth + 1)
+            return f"{x[:10]} reverts {y[:10]}, which is not an ancestor of it", None, None
+        why, p, src = from_queue(y, repo, pins, depth + 1)
         if why:
-            return f"{x[:10]} reverts {y[:10]}, which carries no pinned queued update", None
+            return f"{x[:10]} reverts {y[:10]}, which carries no pinned queued update", None, None
         a, b, pol = patch_id(y + "^", y, repo), patch_id(x, x + "^", repo), ("remove" if p == "add" else "add")
     if not a or a != b:
-        return f"{x[:10]} is not the same (or the exact inverse) patch as {y[:10]}", None
-    return None, pol
+        return f"{x[:10]} is not the same (or the exact inverse) patch as {y[:10]}", None, None
+    return None, pol, src
+
+
+def owner_pulled(src, c, repo, pins):
+    """The owner-signed revert that took the pinned queued update src out of main (audit L-15), or None. On the first-parent
+    chain from the pin base to c^, the LAST owner-signed revert concerning src decides: one that removes the update is a pull;
+    one that puts it back (the owner reverting the pull) clears it. An update matches by sha or by patch-id (an owner-signed
+    copy of the same patch in a rebuilt queue). Mirrors common.sh owner_pulled."""
+    spid = patch_id(src + "^", src, repo)
+    for base, tip in pins:
+        if not (re.fullmatch(r"[0-9a-f]{40}", base or "") and re.fullmatch(r"[0-9a-f]{40}", tip or "")):
+            continue
+        if src not in (git("rev-list", "--first-parent", f"{base}..{tip}", repo=repo, ok=True) or "").split():
+            continue
+        last = None
+        hs = git("log", "--first-parent", "--reverse", "--format=%H", "-E", r"--grep=^This reverts commit [0-9a-f]{40}\.$", f"{base}..{c}^",
+                 repo=repo, ok=True) or ""
+        for h in hs.split():
+            tr, _n = _trailer(h, repo)
+            if not tr or not tr[1] or not signature_ok(h, repo):
+                continue
+            y = tr[1]
+            if git("cat-file", "-e", y + "^{commit}", repo=repo, ok=True) is None:
+                continue
+            why, pol, s = from_queue(y, repo, pins)
+            # the same update, or an owner-signed copy of its patch from another pinned (rebuilt) queue
+            if why or (s != src and not (spid and patch_id(s + "^", s, repo) == spid)):
+                continue
+            last = h if pol == "add" else None
+        if last:
+            return last
+    return None
 
 
 def runner_commit_problem(c, repo=None, depth=0, cur=None, pins=None):
     """None when the root deploy wrapper will accept commit c: signed by an owner key, OR a runner commit (one parent) whose
     last trailer names a source X: `(cherry picked from commit X)` with X an owner-signed commit of the PINNED queue and the
     same patch, or `This reverts commit X.` with X an ancestor carrying a pinned queued update and the inverse patch: a rollback
-    only of the running release (cur) or a commit between it and c, a re-apply of any earlier rollback (audit M-2, L-13). Else the reason. Mirrors common.sh commit_ok, so the
-    runner holds an update BEFORE the push instead of the root wrapper refusing it after. `pins` defaults to the root-owned
-    QUEUE_PIN file, `cur` to the running revision."""
+    only of the running release (cur) or a commit between it and c, a re-apply only of an earlier RUNNER rollback, never of an
+    owner-signed one (audit M-2, L-13, L-15). A pick or a re-apply is also refused when an owner-signed revert between the pin
+    base and c pulled that update (L-15). Else the reason. Mirrors common.sh commit_ok, so the runner holds an update BEFORE
+    the push instead of the root wrapper refusing it after. `pins` defaults to the root-owned QUEUE_PIN file, `cur` to the
+    running revision."""
     repo = repo or CFG["repo"]
     if signature_ok(c, repo):
         return None
@@ -451,10 +484,13 @@ def runner_commit_problem(c, repo=None, depth=0, cur=None, pins=None):
         a, b = patch_id(x + "^", x, repo), patch_id(c + "^", c, repo)
         if not a or a != b:
             return f"{c[:10]} is not the same patch as {x[:10]}, the owner-signed commit it says it picks (patch-id differs)"
+        pulled = owner_pulled(x, c, repo, pins)
+        if pulled:
+            return f"{c[:10]} is a cherry-pick of {x[:10]}, which the owner-signed revert {pulled[:10]} pulled from main"
         return None
     if git("merge-base", "--is-ancestor", x, c + "^", repo=repo, ok=True) is None:
         return f"{c[:10]} reverts {x[:10]}, which is not an ancestor of it"
-    why, pol = from_queue(x, repo, pins)
+    why, pol, src = from_queue(x, repo, pins)
     if why:
         return f"{c[:10]} reverts {x[:10]}: {why}"
     if pol == "add":  # c takes an update out (a rollback): only the running release or a commit of this deploy
@@ -463,7 +499,12 @@ def runner_commit_problem(c, repo=None, depth=0, cur=None, pins=None):
             return f"{c[:10]} reverts {x[:10]}, but the running revision is unknown"
         if x != cur and x not in (git("rev-list", "--first-parent", f"{cur}..{c}^", repo=repo, ok=True) or "").split():
             return f"{c[:10]} reverts {x[:10]}, which is neither the running release {cur[:10]} nor in this deploy"
-    # else c puts a rolled-back queued update back (a re-apply after a retry): any earlier rollback
+    else:  # c puts a rolled-back queued update back (a re-apply after a retry): only of a runner rollback the owner did not make
+        if signature_ok(x, repo):
+            return f"{c[:10]} re-applies {x[:10]}, an owner-signed revert: the owner pulled this update"
+        pulled = owner_pulled(src, c, repo, pins)
+        if pulled:
+            return f"{c[:10]} re-applies an update that the owner-signed revert {pulled[:10]} pulled from main"
     a, b = patch_id(x + "^", x, repo), patch_id(c, c + "^", repo)
     if not a or a != b:
         return f"{c[:10]} is not the exact inverse patch of {x[:10]}, the commit it says it reverts (patch-id differs)"

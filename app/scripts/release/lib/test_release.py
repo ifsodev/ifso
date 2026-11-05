@@ -867,6 +867,104 @@ class OwnerOnlySigners(unittest.TestCase):
         self.assertNotEqual(rc, 0, out)
 
 
+    # ---- audit L-15 (rescore of d6b7a57): docs/reviews/poc_rescore2_* test_c and test_d, now REFUSED on both sides
+    def _owner_pull(self, landed):
+        """The OWNER pulls a released queued update: an owner-signed `git revert` of the commit that carries it, pushed to main,
+        and the server runs it. Returns the pull's sha."""
+        O = {"GIT_CONFIG_GLOBAL": self.ocfg}
+        self.sh("git", "push", "-q", "-f", self.origin, f"{landed}:refs/heads/main", cwd=self.clone)
+        wo = self.work
+        self.sh("git", "fetch", "-q", "origin", cwd=wo, env=O)
+        self.sh("git", "checkout", "-q", "--detach", landed, cwd=wo, env=O)
+        self.sh("git", "revert", "--no-edit", landed, cwd=wo, env=O)
+        pull = self.sh("git", "rev-parse", "HEAD", cwd=wo)
+        self.sh("git", "push", "-q", "-f", "origin", f"{pull}:refs/heads/main", cwd=wo, env=O)
+        self._run(pull)
+        self.sh("git", "fetch", "-q", "origin", cwd=self.clone)
+        self.sh("git", "reset", "-q", "--hard", pull, cwd=self.clone)
+        return pull
+
+    def _run(self, sha):
+        cur = os.path.join(self.T, "opt/current")
+        os.makedirs(os.path.join(self.T, "opt/releases", sha), exist_ok=True)
+        os.remove(cur)
+        os.symlink(os.path.join(self.T, "opt/releases", sha), cur)
+        self.addCleanup(lambda: (os.remove(cur), os.symlink(os.path.join(self.T, "opt/releases", self.M), cur)))
+
+    def _land_tu02(self):
+        t = {}
+        R.apply_commit({}, t, {"sha": self.Q_owner, "id": "TU02"}, os.path.join(self.T, "log"))
+        return t["landedSha"]
+
+    def test_l15_poc_c_reapply_of_an_owner_signed_pull_is_refused(self):
+        pull = self._owner_pull(self._land_tu02())
+        self.sh("git", "revert", "--no-edit", pull, cwd=self.clone)   # server-key signed: "This reverts commit <pull>."
+        c = self.sh("git", "rev-parse", "HEAD", cwd=self.clone)
+        self.assertIn("owner", R.runner_commit_problem(c, cur=pull) or "")
+        rc, out = self.root_validate(c)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("owner", out)
+
+    def test_l15_poc_d_new_cherry_pick_of_an_update_the_owner_pulled_is_refused(self):
+        pull = self._owner_pull(self._land_tu02())
+        self.sh("git", "cherry-pick", "-x", self.Q_owner, cwd=self.clone)   # the same owner-signed queued commit, picked again
+        c = self.sh("git", "rev-parse", "HEAD", cwd=self.clone)
+        self.assertIn("owner-signed revert", R.runner_commit_problem(c, cur=pull) or "")
+        rc, out = self.root_validate(c)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("owner-signed revert", out)
+
+    def test_l15_reapply_of_an_older_runner_rollback_after_an_owner_pull_is_refused(self):
+        # rollback R1 and retry R2 (both runner commits), then the owner pulls the update: re-reverting R1 must not bring it back
+        landed, w = self._land_tu02(), self.clone
+        self.sh("git", "revert", "--no-edit", landed, cwd=w)
+        r1 = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.sh("git", "revert", "--no-edit", r1, cwd=w)
+        r2 = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIsNone(R.runner_commit_problem(r2, cur=r1))         # the normal retry is still accepted
+        pull = self._owner_pull(r2)
+        self.sh("git", "revert", "--no-edit", r1, cwd=w)
+        c = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIn("owner-signed revert", R.runner_commit_problem(c, cur=pull) or "")
+        rc, out = self.root_validate(c)
+        self.assertNotEqual(rc, 0, out)
+
+    def test_l15_pick_of_a_rebuilt_copy_of_a_pulled_update_is_refused(self):
+        # a rebuilt queue (README "Rebuilt queue", pinned with --add) can hold an owner-signed copy of the same patch under
+        # another sha: the owner's pull of the original must cover the copy too (matched by patch-id)
+        O = {"GIT_CONFIG_GLOBAL": self.ocfg}
+        wo = self.work
+        self.sh("git", "checkout", "-q", "--detach", self.M, cwd=wo, env=O)
+        open(os.path.join(wo, "tu02"), "w").write("feat(api): TU02 owner-signed queued update\n")
+        self.sh("git", "add", "tu02", cwd=wo, env=O)
+        self.sh("git", "commit", "-q", "-m", "feat(api): TU02 owner-signed queued update (rebuilt)", cwd=wo, env=O)
+        q2 = self.sh("git", "rev-parse", "HEAD", cwd=wo)
+        self.sh("git", "push", "-q", self.queue, f"{q2}:refs/heads/queue-r1", cwd=wo, env=O)
+        pin2 = os.path.join(self.T, "queue-pin-r1")
+        open(pin2, "w").write(f"{self.B} {self.Q_owner}\n{self.M} {q2}\n")
+        pins = [(self.B, self.Q_owner), (self.M, q2)]
+        pull = self._owner_pull(self._land_tu02())
+        self.sh("git", "fetch", "-q", self.queue, "+refs/heads/*:refs/queue/*", cwd=self.clone)
+        self.sh("git", "cherry-pick", "-x", q2, cwd=self.clone)
+        c = self.sh("git", "rev-parse", "HEAD", cwd=self.clone)
+        self.assertIn("owner-signed revert", R.runner_commit_problem(c, cur=pull, pins=pins) or "")
+        rc, out = self.root_validate(c, pin=pin2)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("owner-signed revert", out)
+
+    def test_l15_rollback_and_retry_without_an_owner_pull_stay_accepted(self):
+        landed, w = self._land_tu02(), self.clone
+        self.sh("git", "revert", "--no-edit", landed, cwd=w)
+        r1 = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIsNone(R.runner_commit_problem(r1, cur=landed))
+        self.sh("git", "revert", "--no-edit", r1, cwd=w)
+        r2 = self.sh("git", "rev-parse", "HEAD", cwd=w)
+        self.assertIsNone(R.runner_commit_problem(r2, cur=r1))
+        self._run(r1)
+        rc, out = self.root_validate(r2)
+        self.assertEqual(rc, 0, out)
+
+
 class GateUser(unittest.TestCase):
     """Audit M-2: the gate runs as GATE_USER (no access to the release user's keys) with a clean environment, and installs
     without running any dependency's install script."""
