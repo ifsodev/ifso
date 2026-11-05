@@ -91,7 +91,9 @@ contract OutcomeResolverTest is IfsoFixture {
         resolver.panelResolve(qid, 1);
         escrow.settle(id, "", false);
         assertTrue(_status(id) == Status.RELEASED, "panel outcome HOME");
-        assertEq(resolver.claimableBond(recipient), 200e6, "disputer receives both bonds");
+        assertEq(resolver.claimableBond(recipient), 150e6, "disputer: own bond + half the proposer's (M-1)");
+        assertEq(resolver.claimableBond(keeper), 0, "losing proposer gets nothing");
+        assertEq(resolver.forfeited(), 50e6, "other half forfeited to the FeeRouter");
     }
 
     function test_Dispute_AfterWindowReverts() public {
@@ -104,7 +106,7 @@ contract OutcomeResolverTest is IfsoFixture {
         resolver.dispute(qid, bytes32(0));
     }
 
-    function test_PanelTimeout_VoidsAndBondsReturn_TwoSidedVoided() public {
+    function test_PanelTimeout_VoidsAndHalfBondsReturn_TwoSidedVoided() public {
         CreateParams memory p = _params(_outcome(qid, HOME), recipient, address(0), 20e6, uint64(T0 + 10 days));
         p.twoSided = true;
         p.counterAmount = 30e6;
@@ -131,8 +133,9 @@ contract OutcomeResolverTest is IfsoFixture {
         escrow.settle(id, "", false);
         assertEq(usdg.balanceOf(sender) - sb, 20e6, "sender own stake");
         assertEq(usdg.balanceOf(recipient) - rb, 30e6, "acceptor own stake");
-        assertEq(resolver.claimableBond(keeper), 100e6, "proposer bond back");
-        assertEq(resolver.claimableBond(recipient), 100e6, "disputer bond back");
+        assertEq(resolver.claimableBond(keeper), 50e6, "proposer half bond back (M-1)");
+        assertEq(resolver.claimableBond(recipient), 50e6, "disputer half bond back (M-1)");
+        assertEq(resolver.forfeited(), 100e6, "both other halves forfeited to the FeeRouter");
     }
 
     function test_Validate_OutcomeMaskAndExpiry() public {

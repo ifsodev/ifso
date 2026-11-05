@@ -129,6 +129,10 @@ abstract contract TestBase {
         if (a <= b) fail(what);
     }
 
+    function assertGe(uint256 a, uint256 b, string memory what) internal pure {
+        if (a < b) fail(what);
+    }
+
     function bound(uint256 x, uint256 lo, uint256 hi) internal pure returns (uint256) {
         if (lo > hi) fail("bound");
         if (x >= lo && x <= hi) return x;

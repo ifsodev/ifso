@@ -93,9 +93,11 @@ contract Deploy is DeployBase {
         (x.feeds, x.feedTokens) = _feeds();
 
         d.evaluator = new IfsoConditionEvaluator(x.deployer, IPyth(x.pyth), AggregatorV3Interface(x.seqFeed));
-        d.resolver = new IfsoOutcomeResolver(x.deployer, x.usdg, x.disputeWindow, x.panelWindow, x.bond, x.panel);
         d.router = new FeeRouter(
             x.deployer, x.usdg, x.feeRecipients[0], x.feeRecipients[1], x.feeRecipients[2], x.feeRecipients[3]
+        );
+        d.resolver = new IfsoOutcomeResolver(
+            x.deployer, x.usdg, x.disputeWindow, x.panelWindow, x.bond, x.panel, address(d.router)
         );
         d.escrow = new IfsoEscrow(
             x.deployer,

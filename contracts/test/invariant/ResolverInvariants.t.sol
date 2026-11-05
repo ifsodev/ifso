@@ -8,7 +8,8 @@ import {MockUSDG} from "../../src/mocks/MockUSDG.sol";
 
 /// @notice Drives IfsoOutcomeResolver through every path: create, propose, dispute, finalize, panel answer, panel
 ///         time-out, bond withdraw (to self and to another address), owner bond changes between a proposal and its
-///         dispute, stray USDG donations and time warps. Every success updates ghost books written from the spec
+///         dispute, stray USDG donations, time warps, self-disputes (proposer == disputer, audit M-1) and forwarding
+///         forfeited bond halves to the FeeRouter. Every success updates ghost books written from the spec
 ///         (contract header), never from the contract's own storage, so the invariants compare two independent
 ///         accounts.
 contract ResolverHandler {
@@ -34,6 +35,12 @@ contract ResolverHandler {
     uint256 public bondsIn;
     mapping(bytes32 => bool) public resolvedOnce; // a terminal call (finalize / panel / time-out) succeeded
     bool public secondCredit; // a second terminal call on the same question succeeded
+    uint256 public forfeitedSpec; // forfeited halves per the spec (panel: loser's ceil half; silence: both ceil halves)
+    uint256 public forwarded; // forfeits forwarded to the FeeRouter
+    bool public selfDisputed; // a dispute from the proposer's own address succeeded (M-1)
+    bool public cheapDispute; // a disputed question resolved with less than bond / 2 forfeited (M-1)
+    uint256 public nSelfDisputeRefused;
+    uint256 public nForward;
 
     function _resolved(bytes32 id) internal {
         if (resolvedOnce[id]) secondCredit = true;
@@ -133,13 +140,40 @@ contract ResolverHandler {
     function dispute(uint256 qSeed, uint256 actorSeed) external {
         (bytes32 id, bool ok) = _q(qSeed);
         if (!ok) return;
+        address a = actors[actorSeed % 4];
+        address p = resolver.getQuestion(id).proposer;
         uint256 bal = usdg.balanceOf(address(resolver));
-        vm.prank(actors[actorSeed % 4]);
+        vm.prank(a);
         try resolver.dispute(id, keccak256("evidence")) {
             ++nDispute;
+            if (a == p) selfDisputed = true;
             bondsIn += usdg.balanceOf(address(resolver)) - bal;
         } catch {}
         _observeAll();
+    }
+
+    /// @dev M-1: the proposer itself tries to dispute its own live proposal (inside the window).
+    function selfDispute(uint256 qSeed) external {
+        (bytes32 id, bool ok) = _q(qSeed);
+        if (!ok) return;
+        IfsoOutcomeResolver.Question memory q = resolver.getQuestion(id);
+        if (q.state != IIfsoOutcomeResolver.State.PROPOSED) return;
+        if (block.timestamp >= uint256(q.proposedAt) + resolver.disputeWindow()) return;
+        vm.prank(q.proposer);
+        try resolver.dispute(id, keccak256("self")) {
+            selfDisputed = true;
+        } catch {
+            ++nSelfDisputeRefused;
+        }
+        _observeAll();
+    }
+
+    function forward() external {
+        uint256 f = resolver.forfeited();
+        try resolver.forwardForfeits() {
+            ++nForward;
+            forwarded += f;
+        } catch {}
     }
 
     function finalize(uint256 qSeed, bool jump) external {
@@ -162,10 +196,13 @@ contract ResolverHandler {
         if (!ok) return;
         IfsoOutcomeResolver.Question memory q = resolver.getQuestion(id);
         uint8 o = agree ? q.proposed : uint8(outcome % (q.numOutcomes + 1));
+        uint256 f0 = resolver.forfeited();
         vm.prank(panel);
         try resolver.panelResolve(id, o) {
+            if (resolver.forfeited() - f0 < q.bond / 2) cheapDispute = true; // measured on the contract
             _resolved(id);
-            uint256 pot = uint256(q.bond) * 2;
+            uint256 lost = (uint256(q.bond) + 1) / 2; // the loser's forfeited half, rounded up
+            uint256 pot = uint256(q.bond) * 2 - lost; // winner: own bond + the loser's other half
             if (o == q.proposed) {
                 expectedCredit[q.proposer] += pot;
                 ++nPanelProposer;
@@ -174,6 +211,7 @@ contract ResolverHandler {
                 ++nPanelDisputer;
             }
             totalCreditedSpec += pot;
+            forfeitedSpec += lost;
         } catch {}
         _observeAll();
     }
@@ -184,12 +222,16 @@ contract ResolverHandler {
         IfsoOutcomeResolver.Question memory q = resolver.getQuestion(id);
         uint256 due = uint256(q.disputedAt) + resolver.panelWindow();
         if (jump && q.state == IIfsoOutcomeResolver.State.DISPUTED && block.timestamp < due) vm.warp(due);
+        uint256 f0 = resolver.forfeited();
         try resolver.finalizeTimedOut(id) {
+            if (resolver.forfeited() - f0 < q.bond / 2) cheapDispute = true; // measured on the contract
             ++nTimeout;
             _resolved(id);
-            expectedCredit[q.proposer] += q.bond;
-            expectedCredit[q.disputer] += q.bond;
-            totalCreditedSpec += uint256(q.bond) * 2;
+            uint256 back = uint256(q.bond) / 2; // each side gets half its bond back
+            expectedCredit[q.proposer] += back;
+            expectedCredit[q.disputer] += back;
+            totalCreditedSpec += back * 2;
+            forfeitedSpec += uint256(q.bond) * 2 - back * 2;
         } catch {}
         _observeAll();
     }
@@ -239,11 +281,12 @@ contract ResolverInvariantsTest is TestBase {
     address internal constant OWNER = address(0x0E1);
     address internal constant CREATOR = address(0xC0E);
     address internal constant PANEL = address(0x9A9E1);
+    address internal constant FEE_ROUTER = address(0xFEE5);
 
     function setUp() public {
         vm.warp(1_800_000_000);
         usdg = new MockUSDG();
-        resolver = new IfsoOutcomeResolver(OWNER, address(usdg), 2 hours, 72 hours, 100e6, PANEL);
+        resolver = new IfsoOutcomeResolver(OWNER, address(usdg), 2 hours, 72 hours, 100e6, PANEL, FEE_ROUTER);
         handler = new ResolverHandler(resolver, usdg, OWNER, CREATOR, PANEL);
         vm.prank(OWNER);
         resolver.setCreator(CREATOR, true);
@@ -256,7 +299,7 @@ contract ResolverInvariantsTest is TestBase {
     }
 
     function targetSelectors() public view returns (FuzzSelector[] memory s) {
-        bytes4[] memory sel = new bytes4[](13);
+        bytes4[] memory sel = new bytes4[](15);
         sel[0] = ResolverHandler.create.selector;
         sel[1] = ResolverHandler.propose.selector;
         sel[2] = ResolverHandler.dispute.selector;
@@ -270,6 +313,8 @@ contract ResolverInvariantsTest is TestBase {
         sel[10] = ResolverHandler.create.selector; // weighted: runs hold many questions
         sel[11] = ResolverHandler.propose.selector;
         sel[12] = ResolverHandler.dispute.selector;
+        sel[13] = ResolverHandler.selfDispute.selector;
+        sel[14] = ResolverHandler.forward.selector;
         s = new FuzzSelector[](1);
         s[0] = FuzzSelector(address(handler), sel);
     }
@@ -290,13 +335,15 @@ contract ResolverInvariantsTest is TestBase {
     }
 
     /// @notice OR1: the resolver's USDG balance equals every claimable bond plus every live bond (one bond for a
-    ///         PROPOSED question, two for a DISPUTED one), plus USDG sent to it by mistake (never owed to anyone).
+    ///         PROPOSED question, two for a DISPUTED one), plus forfeits not yet forwarded, plus USDG sent to it by
+    ///         mistake (never owed to anyone). Forwarded forfeits reached the FeeRouter and nobody else.
     function invariant_ResolverBalanceEqualsBonds() public view {
         assertEq(
             usdg.balanceOf(address(resolver)),
-            _sumClaimable() + _sumLive() + handler.donated(),
-            "OR1: balance != claimable + live bonds + stray"
+            _sumClaimable() + _sumLive() + resolver.forfeited() + handler.donated(),
+            "OR1: balance != claimable + live bonds + forfeits + stray"
         );
+        assertEq(usdg.balanceOf(FEE_ROUTER), handler.forwarded(), "OR1: FeeRouter got != forwarded forfeits");
     }
 
     /// @notice OR2: no double credit. Everything ever credited (still claimable + already withdrawn) equals the sum
@@ -306,11 +353,16 @@ contract ResolverInvariantsTest is TestBase {
         assertFalse(handler.secondCredit(), "OR2: a question was credited twice");
         uint256 credited = _sumClaimable() + handler.totalWithdrawn();
         assertEq(credited, handler.totalCreditedSpec(), "OR2: credited != pots of resolved questions");
-        assertTrue(credited + _sumLive() == handler.bondsIn(), "OR2: credited + live != bonds posted");
+        assertTrue(
+            credited + _sumLive() + resolver.forfeited() + handler.forwarded() == handler.bondsIn(),
+            "OR2: credited + live + forfeits != bonds posted"
+        );
+        assertEq(resolver.forfeited() + handler.forwarded(), handler.forfeitedSpec(), "OR2: forfeits != spec");
     }
 
     /// @notice OR3: each pot goes to the right party: undisputed FINAL -> proposer; panel agrees -> proposer gets
-    ///         both bonds; panel disagrees -> disputer gets both; panel silent -> each side gets its own bond back.
+    ///         its bond + half the disputer's; panel disagrees -> disputer gets its bond + half the proposer's;
+    ///         panel silent -> each side gets half its own bond back.
     function invariant_ResolverCreditsRightParty() public view {
         for (uint256 i; i < 4; ++i) {
             address a = handler.actors(i);
@@ -331,6 +383,19 @@ contract ResolverInvariantsTest is TestBase {
             bytes32 id = handler.qs(i);
             (IIfsoOutcomeResolver.State st,) = resolver.outcomeOf(id);
             assertEq(uint256(st), uint256(handler.seenState(id)), "OR4: state changed outside an observed call");
+        }
+    }
+
+    /// @notice OR5 (audit M-1): no question is ever disputed by its own proposer, and every disputed question that
+    ///         resolves forfeits at least bond / 2 to the FeeRouter, so two addresses of one owner cannot make a
+    ///         dispute free (panel for, against, VOID or silent).
+    function invariant_ResolverNoFreeSelfDispute() public view {
+        assertFalse(handler.selfDisputed(), "OR5: a proposer disputed its own proposal");
+        assertFalse(handler.cheapDispute(), "OR5: a disputed question forfeited less than bond / 2");
+        uint256 n = handler.qCount();
+        for (uint256 i; i < n; ++i) {
+            IfsoOutcomeResolver.Question memory q = resolver.getQuestion(handler.qs(i));
+            if (q.disputer != address(0)) assertTrue(q.disputer != q.proposer, "OR5: proposer == disputer");
         }
     }
 
@@ -356,15 +421,21 @@ contract ResolverInvariantsTest is TestBase {
         handler.donate(7);
         handler.propose(4, 3, 1, true); //                     stays live
         handler.propose(5, 0, 1, true);
+        handler.selfDispute(5); //                             refused (M-1)
+        handler.dispute(5, 0); //                              same actor as proposer: refused
         handler.dispute(5, 1); //                              stays disputed
+        handler.forward(); //                                  forfeits to the FeeRouter
         assertTrue(handler.nCreate() == 6 && handler.nFinalize() == 1 && handler.nPanelProposer() == 1, "paths a");
         assertTrue(handler.nPanelDisputer() == 1 && handler.nTimeout() == 1 && handler.nWithdraw() == 2, "paths b");
         assertEq(handler.nPropose(), 6, "paths propose");
         assertEq(handler.nDispute(), 4, "paths dispute");
         assertEq(handler.nSetBond(), 1, "paths setBond");
+        assertTrue(handler.nSelfDisputeRefused() == 1 && handler.nForward() == 1, "paths self-dispute / forward");
+        assertTrue(handler.forwarded() > 0, "forfeits reached the FeeRouter");
         invariant_ResolverBalanceEqualsBonds();
         invariant_ResolverNoDoubleCredit();
         invariant_ResolverCreditsRightParty();
         invariant_ResolverStatesOnlyMoveForward();
+        invariant_ResolverNoFreeSelfDispute();
     }
 }

@@ -17,7 +17,10 @@ import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
 ///         from >= 2 agreeing independent sources, committing their hash as `sourcesHash`). During the dispute
 ///         window ANYONE may dispute by matching the bond. Undisputed => FINAL with the proposed outcome.
 ///         Disputed => the fallback panel (a Safe multisig) picks the outcome within `panelWindow`; the side the
-///         panel agrees with receives both bonds. Panel silent => VOID (escrows refund), bonds returned.
+///         panel agrees with gets its own bond back plus half the loser's; the loser's other half goes to the
+///         FeeRouter (audit M-1: a self-dispute through a second address costs at least bond / 2). Panel silent =>
+///         VOID (escrows refund) and each side gets only half its bond back; the other halves go to the FeeRouter,
+///         so a dispute nobody answers is never free. A proposer cannot dispute its own proposal.
 ///
 ///         Outcome 0 is always VOID (postponed / abandoned / invalid / ambiguous). Bonds are paid by pull
 ///         (`withdrawBond`) so a screened or blocklisted address cannot block finalization.
@@ -37,12 +40,15 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     error BondOutOfBounds();
     error NothingToWithdraw();
     error NoPendingPanel();
+    error SelfDispute();
 
     // ------------------------------------------------------------------ events
     event CreatorSet(address indexed creator, bool allowed);
     event BondAmountSet(uint96 bondAmount);
     event PanelChangeQueued(address indexed panel, uint64 executableAt);
     event PanelChanged(address indexed panel);
+    event BondForfeited(bytes32 indexed questionId, uint256 amount);
+    event ForfeitsForwarded(address indexed feeRouter, uint256 amount);
 
     struct Question {
         bytes32 specHash;
@@ -67,6 +73,7 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     uint8 public constant MAX_OUTCOMES = 32;
 
     address public immutable bondToken; // USDG
+    address public immutable feeRouter; // receives forfeited bond halves (FeeRouter, 80/10/5/5)
     uint64 public immutable override disputeWindow; // e.g. 2 hours
     uint64 public immutable override panelWindow; //   e.g. 72 hours
 
@@ -78,6 +85,7 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
     mapping(address => bool) public isCreator;
     mapping(bytes32 => Question) internal _q;
     mapping(address => uint256) public claimableBond;
+    uint256 public forfeited; // forfeited bond halves not yet forwarded to feeRouter
 
     constructor(
         address owner_,
@@ -85,13 +93,15 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
         uint64 disputeWindow_,
         uint64 panelWindow_,
         uint96 bond_,
-        address panel_
+        address panel_,
+        address feeRouter_
     ) Owned2Step(owner_) {
-        if (bondToken_ == address(0) || panel_ == address(0)) revert ZeroAddress();
+        if (bondToken_ == address(0) || panel_ == address(0) || feeRouter_ == address(0)) revert ZeroAddress();
         if (disputeWindow_ < 30 minutes || disputeWindow_ > 7 days) revert BadQuestion();
         if (panelWindow_ < 1 days || panelWindow_ > 14 days) revert BadQuestion();
         if (bond_ < MIN_BOND || bond_ > MAX_BOND) revert BondOutOfBounds();
         bondToken = bondToken_;
+        feeRouter = feeRouter_;
         disputeWindow = disputeWindow_;
         panelWindow = panelWindow_;
         bondAmount = bond_;
@@ -182,13 +192,14 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
         emit Proposed(questionId, msg.sender, outcome, sourcesHash, bond);
     }
 
-    /// @notice Anyone may dispute inside the window by matching the proposer's bond.
+    /// @notice Anyone except the proposer may dispute inside the window by matching the proposer's bond.
     /// @param questionId Question id (see questionIdFor).
     /// @param evidenceHash keccak256 of the disputer's evidence.
     function dispute(bytes32 questionId, bytes32 evidenceHash) external nonReentrant {
         Question storage q = _q[questionId];
         if (q.state != State.PROPOSED) revert WrongState();
         if (block.timestamp >= uint256(q.proposedAt) + disputeWindow) revert WindowClosed();
+        if (msg.sender == q.proposer) revert SelfDispute();
         q.state = State.DISPUTED;
         q.disputer = msg.sender;
         q.disputedAt = uint64(block.timestamp);
@@ -208,7 +219,8 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
         emit Finalized(questionId, q.proposed, false);
     }
 
-    /// @notice Fallback panel decides a disputed question (outcome 0 = VOID allowed).
+    /// @notice Fallback panel decides a disputed question (outcome 0 = VOID allowed). The side it agrees with gets
+    ///         its bond plus half the loser's; the loser's other half is forfeited to the FeeRouter.
     /// @param questionId Question id (see questionIdFor).
     /// @param outcome Outcome index proposed or decided.
     function panelResolve(bytes32 questionId, uint8 outcome) external {
@@ -219,20 +231,25 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
         if (outcome > q.numOutcomes) revert BadOutcome();
         q.state = State.FINAL;
         q.finalOutcome = outcome;
-        uint256 pot = uint256(q.bond) * 2;
-        _credit(outcome == q.proposed ? q.proposer : q.disputer, pot);
+        uint256 bond = q.bond;
+        uint256 lost = bond - bond / 2; // loser's forfeited half, rounded up
+        _credit(outcome == q.proposed ? q.proposer : q.disputer, bond * 2 - lost);
+        _forfeit(questionId, lost);
         emit Finalized(questionId, outcome, true);
     }
 
-    /// @notice Anyone voids a disputed question the panel did not decide in time; bonds go back.
+    /// @notice Anyone voids a disputed question the panel did not decide in time; each side gets half its bond
+    ///         back and the other halves are forfeited to the FeeRouter.
     /// @param questionId Question id (see questionIdFor).
     function finalizeTimedOut(bytes32 questionId) external {
         Question storage q = _q[questionId];
         if (q.state != State.DISPUTED) revert WrongState();
         if (block.timestamp < uint256(q.disputedAt) + panelWindow) revert TooEarly();
         q.state = State.VOID;
-        _credit(q.proposer, q.bond);
-        _credit(q.disputer, q.bond);
+        uint256 half = q.bond / 2;
+        _credit(q.proposer, half);
+        _credit(q.disputer, half);
+        _forfeit(questionId, (uint256(q.bond) - half) * 2);
         emit PanelTimedOut(questionId);
     }
 
@@ -244,6 +261,20 @@ contract IfsoOutcomeResolver is IIfsoOutcomeResolver, Owned2Step, ReentrancyGuar
         claimableBond[msg.sender] = 0;
         bondToken.safeTransfer(to == address(0) ? msg.sender : to, amt);
         emit BondWithdrawn(msg.sender, to == address(0) ? msg.sender : to, amt);
+    }
+
+    /// @notice Anyone forwards the forfeited bond halves to the FeeRouter.
+    function forwardForfeits() external nonReentrant {
+        uint256 amt = forfeited;
+        if (amt == 0) revert NothingToWithdraw();
+        forfeited = 0;
+        bondToken.safeTransfer(feeRouter, amt);
+        emit ForfeitsForwarded(feeRouter, amt);
+    }
+
+    function _forfeit(bytes32 questionId, uint256 amt) private {
+        forfeited += amt;
+        emit BondForfeited(questionId, amt);
     }
 
     function _credit(address who, uint256 amt) private {

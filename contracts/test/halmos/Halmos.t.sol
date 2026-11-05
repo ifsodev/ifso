@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {IfsoEscrow} from "../../src/IfsoEscrow.sol";
 import {IfsoConditionEvaluator} from "../../src/IfsoConditionEvaluator.sol";
 import {FeeRouter} from "../../src/FeeRouter.sol";
+import {IfsoOutcomeResolver} from "../../src/IfsoOutcomeResolver.sol";
 import {IUSDG} from "../../src/interfaces/IUSDG.sol";
 import {IPyth} from "../../src/interfaces/IPyth.sol";
 import {AggregatorV3Interface} from "../../src/interfaces/AggregatorV3Interface.sol";
@@ -48,6 +49,11 @@ contract IfsoHalmosTest {
     IfsoConditionEvaluator internal evaluator;
     FeeRouter internal router;
     IfsoEscrow internal escrow;
+    IfsoOutcomeResolver internal resolver;
+    address internal constant PANEL = address(0x9A9E1);
+    address internal constant CREATOR = address(0xC0E);
+    address internal constant PA = address(0xA11); // proposer
+    address internal constant PB = address(0xB22); // disputer (same owner as PA in the M-1 attack)
 
     function setUp() public {
         vm.warp(T0);
@@ -61,6 +67,44 @@ contract IfsoHalmosTest {
         );
         vm.prank(OWNER);
         evaluator.setFeed(address(feed), true, address(stock));
+        resolver = new IfsoOutcomeResolver(OWNER, address(usdg), 2 hours, 72 hours, 100e6, PANEL, address(router));
+        vm.prank(OWNER);
+        resolver.setCreator(CREATOR, true);
+    }
+
+    // ------------------------------------------------------------------ resolver bond split (audit M-1)
+    /// @notice For every bond the owner may set and every panel answer or panel silence, a disputed question
+    ///         conserves both bonds (winner + loser + forfeits == 2 * bond) and the two sides together lose at
+    ///         least bond / 2 to the FeeRouter: a self-dispute through a second address is never free.
+    function check_ResolverDisputeSplit(uint96 bond, uint8 answer, bool silent) public {
+        vm.assume(bond >= 10e6 && bond <= 10_000e6);
+        vm.assume(answer <= 3);
+        vm.prank(OWNER);
+        resolver.setBondAmount(bond);
+        usdg.mint(PA, bond);
+        usdg.mint(PB, bond);
+        vm.prank(PA);
+        usdg.approve(address(resolver), bond);
+        vm.prank(PB);
+        usdg.approve(address(resolver), bond);
+        vm.prank(CREATOR);
+        bytes32 id = resolver.createQuestion(bytes32(uint256(1)), uint64(T0 + 1), uint64(T0 + 2), 3, "");
+        vm.warp(T0 + 2);
+        vm.prank(PA);
+        resolver.propose(id, 1, bytes32(0));
+        vm.prank(PB);
+        resolver.dispute(id, bytes32(0));
+        if (silent) {
+            vm.warp(T0 + 2 + 72 hours);
+            resolver.finalizeTimedOut(id);
+        } else {
+            vm.prank(PANEL);
+            resolver.panelResolve(id, answer);
+        }
+        uint256 back = resolver.claimableBond(PA) + resolver.claimableBond(PB);
+        assert(back + resolver.forfeited() == uint256(bond) * 2);
+        assert(resolver.forfeited() >= uint256(bond) / 2);
+        assert(usdg.balanceOf(address(resolver)) == uint256(bond) * 2);
     }
 
     // ------------------------------------------------------------------ FeeRouter split

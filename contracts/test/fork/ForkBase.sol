@@ -103,8 +103,8 @@ abstract contract ForkBase is TestBase {
 
         sender = vm.addr(senderPk);
         evaluator = new IfsoConditionEvaluator(owner, IPyth(PYTH), AggregatorV3Interface(address(0)));
-        resolver = new IfsoOutcomeResolver(owner, USDG, 2 hours, 72 hours, 100e6, panel);
         router = new FeeRouter(owner, USDG, address(0xF1), address(0xF2), address(0xF3), address(0xF4));
+        resolver = new IfsoOutcomeResolver(owner, USDG, 2 hours, 72 hours, 100e6, panel, address(router));
         escrow = new IfsoEscrow(owner, usdg, IIfsoConditionEvaluator(address(evaluator)), address(router), FEE, RFEE);
 
         vm.startPrank(owner);

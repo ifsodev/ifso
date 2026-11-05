@@ -341,8 +341,8 @@ contract MutationKillersTest is IfsoFixture {
         vm.expectRevert(IfsoOutcomeResolver.WindowClosed.selector);
         resolver.panelResolve(q, 1);
         resolver.finalizeTimedOut(q);
-        assertEq(resolver.claimableBond(keeper), 100e6, "proposer bond back");
-        assertEq(resolver.claimableBond(recipient), 100e6, "disputer bond back");
+        assertEq(resolver.claimableBond(keeper), 50e6, "proposer half bond back");
+        assertEq(resolver.claimableBond(recipient), 50e6, "disputer half bond back");
     }
 
     /// kills R-withdraw-reset: a credited bond is withdrawn once

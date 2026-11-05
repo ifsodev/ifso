@@ -4,11 +4,13 @@ pragma solidity 0.8.28;
 import {TestBase, Vm} from "../utils/TestBase.sol";
 import {FeeRouter} from "../../src/FeeRouter.sol";
 import {MockUSDG} from "../../src/mocks/MockUSDG.sol";
+import {IfsoOutcomeResolver} from "../../src/IfsoOutcomeResolver.sol";
 
 /// @notice Drives FeeRouter: fee inflows of any size (including amounts that do not divide by 20, so rounding is
 ///         exercised), permissionless distribute, owner recipient changes (including one address in two roles),
 ///         an issuer freeze on a recipient (distribute must revert as a whole, never pay part), sweeps of a stray
-///         token and attempted sweeps of USDG. Expected transfers are computed here from the documented 80/10/5/5
+///         token, attempted sweeps of USDG, and forfeited dispute bonds forwarded by a REAL IfsoOutcomeResolver
+///         wired to this router (audit M-1 inflow: panel answer or panel silence). Expected transfers are computed here from the documented 80/10/5/5
 ///         rule, never read back from the router.
 contract FeeRouterHandler {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
@@ -29,6 +31,48 @@ contract FeeRouterHandler {
     uint256 public nSetRecipients;
     uint256 public nSweep;
     uint256 public nFund;
+    uint256 public nForfeit;
+    IfsoOutcomeResolver public resolver;
+    address public constant R_CREATOR = address(0xC0E);
+    address public constant R_PANEL = address(0x9A9E1);
+    address public constant R_A = address(0xA11); // proposer
+    address public constant R_B = address(0xB22); // disputer
+    uint256 internal qn;
+
+    function setResolver(IfsoOutcomeResolver r) external {
+        resolver = r;
+        address[2] memory who = [R_A, R_B];
+        for (uint256 i; i < 2; ++i) {
+            usdg.mint(who[i], 1e15);
+            vm.prank(who[i]);
+            usdg.approve(address(r), type(uint256).max);
+        }
+    }
+
+    /// @dev One disputed question on the real resolver, then forwardForfeits: the forfeited halves are new inflow.
+    function forfeit(uint8 answer, bool silent) external {
+        uint64 close = uint64(block.timestamp) + 1;
+        vm.prank(R_CREATOR);
+        bytes32 id = resolver.createQuestion(keccak256(abi.encode(++qn)), close, close + 1, 3, "");
+        vm.warp(close + 1);
+        vm.prank(R_A);
+        resolver.propose(id, 1, bytes32(0));
+        vm.prank(R_B);
+        resolver.dispute(id, bytes32(0));
+        if (silent) {
+            vm.warp(block.timestamp + 72 hours);
+            resolver.finalizeTimedOut(id);
+        } else {
+            vm.prank(R_PANEL);
+            resolver.panelResolve(id, answer % 4);
+        }
+        uint256 f = resolver.forfeited();
+        uint256 before = usdg.balanceOf(address(router));
+        resolver.forwardForfeits();
+        totalIn += usdg.balanceOf(address(router)) - before;
+        if (usdg.balanceOf(address(router)) - before != f) totalIn = type(uint256).max; // forward must move all of f
+        ++nForfeit;
+    }
 
     constructor(FeeRouter r, MockUSDG u, MockUSDG s, address owner_, address[6] memory pool_) {
         router = r;
@@ -114,6 +158,13 @@ contract FeeRouterInvariantsTest is TestBase {
         stray = new MockUSDG();
         router = new FeeRouter(OWNER, address(usdg), pool[0], pool[1], pool[2], pool[3]);
         handler = new FeeRouterHandler(router, usdg, stray, OWNER, pool);
+        IfsoOutcomeResolver resolver = new IfsoOutcomeResolver(
+            OWNER, address(usdg), 2 hours, 72 hours, 100e6, handler.R_PANEL(), address(router)
+        );
+        address rCreator = handler.R_CREATOR();
+        vm.prank(OWNER);
+        resolver.setCreator(rCreator, true);
+        handler.setResolver(resolver);
     }
 
     function targetContracts() public view returns (address[] memory t) {
@@ -122,7 +173,7 @@ contract FeeRouterInvariantsTest is TestBase {
     }
 
     function targetSelectors() public view returns (FuzzSelector[] memory s) {
-        bytes4[] memory sel = new bytes4[](8);
+        bytes4[] memory sel = new bytes4[](9);
         sel[0] = FeeRouterHandler.fund.selector;
         sel[1] = FeeRouterHandler.distribute.selector;
         sel[2] = FeeRouterHandler.setRecipients.selector;
@@ -131,6 +182,7 @@ contract FeeRouterInvariantsTest is TestBase {
         sel[5] = FeeRouterHandler.fund.selector; // weighted: inflow and distribute dominate
         sel[6] = FeeRouterHandler.distribute.selector;
         sel[7] = FeeRouterHandler.distribute.selector;
+        sel[8] = FeeRouterHandler.forfeit.selector; //         real resolver inflow (audit M-1)
         s = new FuzzSelector[](1);
         s[0] = FuzzSelector(address(handler), sel);
     }
@@ -176,7 +228,12 @@ contract FeeRouterInvariantsTest is TestBase {
         handler.distribute();
         handler.sweep(false, 5);
         handler.sweep(true, 0);
-        assertTrue(handler.nDistribute() == 2 && handler.nDistributeRefused() == 1, "distribute paths");
+        handler.forfeit(1, false); //                          panel answers: loser's half
+        handler.forfeit(0, true); //                           panel silent: both halves
+        assertEq(usdg.balanceOf(address(router)), 150e6, "forfeits reached the router");
+        handler.distribute();
+        assertTrue(handler.nDistribute() == 3 && handler.nDistributeRefused() == 1, "distribute paths");
+        assertEq(handler.nForfeit(), 2, "forfeit path");
         assertTrue(handler.nSetRecipients() == 1 && handler.nSweep() == 1 && handler.maxDust() > 0, "other paths");
         invariant_FeeRouterConserves();
         invariant_FeeRouterExactSplit();

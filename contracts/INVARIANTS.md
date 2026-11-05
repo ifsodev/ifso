@@ -1,7 +1,7 @@
 # Invariants
 
 Three contracts hold or route value, and each has a handler-based suite: IfsoEscrow (R4-R8), IfsoOutcomeResolver
-(OR1-OR4) and FeeRouter (FR1-FR3). Each suite runs 10,000 runs x depth 50 (500,000 random calls) in the
+(OR1-OR5) and FeeRouter (FR1-FR3). Each suite runs 10,000 runs x depth 50 (500,000 random calls) in the
 `invariant` profile.
 
 ## IfsoEscrow
@@ -37,23 +37,27 @@ handler path stops reaching its success branch, so the suite can never pass by d
 Suite: `test/invariant/ResolverInvariants.t.sol`. The handler creates questions, proposes (any outcome, from four
 bonded actors), disputes, finalizes, answers as the panel (agreeing and disagreeing, VOID included), times the panel
 out, withdraws bonds (to self and to another address), changes the bond between a proposal and its dispute, sends
-stray USDG to the resolver and warps time. Expected credits are computed in the handler from the rules in the
+stray USDG to the resolver, tries self-disputes (the proposer disputing its own proposal, audit M-1), forwards
+forfeits to the FeeRouter and warps time. Expected credits are computed in the handler from the rules in the
 contract header, never read back from the resolver. `test_ResolverHandlerReachesEveryPath` fails if any path stops
 reaching its success branch.
 
 | # | Invariant (in words) | Test |
 |---|---|---|
-| OR1 | The resolver's USDG balance equals the sum of every claimable bond plus every live bond (one bond for a PROPOSED question, two for a DISPUTED one, each at the bond snapshotted at proposal), plus USDG sent to it by mistake. | `invariant_ResolverBalanceEqualsBonds` |
-| OR2 | No double credit: no question is credited by two terminal calls; everything ever credited (claimable + withdrawn) equals the pots of the questions that reached FINAL or VOID; credited + live equals every bond ever posted. | `invariant_ResolverNoDoubleCredit` |
-| OR3 | Each pot goes to the right party: undisputed FINAL pays the proposer its bond; a panel answer equal to the proposal pays the proposer both bonds, any other answer (VOID included) pays the disputer both; a panel time-out returns each side its own bond. | `invariant_ResolverCreditsRightParty` |
+| OR1 | The resolver's USDG balance equals the sum of every claimable bond plus every live bond (one bond for a PROPOSED question, two for a DISPUTED one, each at the bond snapshotted at proposal), plus forfeits not yet forwarded (`forfeited`), plus USDG sent to it by mistake. Forwarded forfeits reached the FeeRouter and nobody else. | `invariant_ResolverBalanceEqualsBonds` |
+| OR2 | No double credit: no question is credited by two terminal calls; everything ever credited (claimable + withdrawn) equals the pots of the questions that reached FINAL or VOID; credited + live + forfeits (held and forwarded) equals every bond ever posted; forfeits equal the spec (panel: `ceil(bond / 2)` of the loser's bond; silence: `2 * ceil(bond / 2)`). | `invariant_ResolverNoDoubleCredit` |
+| OR3 | Each pot goes to the right party: undisputed FINAL pays the proposer its bond; a panel answer equal to the proposal pays the proposer its bond plus `floor(bond / 2)` of the disputer's, any other answer (VOID included) pays the disputer its bond plus `floor(bond / 2)` of the proposer's; a panel time-out returns each side `floor(bond / 2)` (audit M-1). | `invariant_ResolverCreditsRightParty` |
 | OR4 | A question's state only moves forward (OPEN -> PROPOSED -> FINAL, or PROPOSED -> DISPUTED -> FINAL / VOID). FINAL and VOID never change again. | `invariant_ResolverStatesOnlyMoveForward` |
+| OR5 | No free self-dispute (audit M-1): no question is ever disputed by its own proposer (proposer == disputer never succeeds), and every disputed question that resolves (panel for, against, VOID, or silent) forfeits at least `bond / 2`, measured on the contract, so two addresses of one owner cannot make a dispute free. Also proved symbolically for every bond in bounds and every answer (Halmos `check_ResolverDisputeSplit`) and per branch in `test/pocs/AuditM1SelfDispute.t.sol`. | `invariant_ResolverNoFreeSelfDispute` |
 
 ## FeeRouter
 
 Suite: `test/invariant/FeeRouterInvariants.t.sol`. The handler sends fee inflows of any size (most do not divide by
 20, so rounding is exercised), calls the permissionless `distribute`, changes recipients as the owner (one address
 may hold two roles), freezes and unfreezes a recipient at the USDG issuer, sweeps a stray token and tries to sweep
-USDG. Expected amounts come from the documented 80/10/5/5 rule computed in the handler.
+USDG. Since audit M-1 it also drives a REAL `IfsoOutcomeResolver` wired to the router (a disputed question answered or
+timed out, then `forwardForfeits`), so forfeited bond halves are counted as inflow in FR1-FR3. Expected amounts come
+from the documented 80/10/5/5 rule computed in the handler.
 `test_FeeRouterHandlerReachesEveryPath` covers rounding, a shared address, a frozen recipient (the whole distribute
 is refused and the router keeps everything, never a partial split) and both sweep paths.
 
@@ -79,6 +83,14 @@ each was also run against the two new suites alone (default profile) to show whi
 | `INV-FR3-stuck` | work takes floor(80%), so the rounding remainder stays in the router | FR3 (`USDG left in the router after distribute`), FR2 |
 
 Result: 7 / 7 killed by the targeted invariant.
+
+## Mutation check of the audit M-1 fix (2026-11-05)
+
+Mutants `AM1-*` in `tools/mutants.py` undo the fix one branch at a time: self-dispute allowed again, the panel winner
+takes both whole bonds, the panel forfeit not booked or rounded down, silence returning whole bonds, silence booking no
+forfeit or only one half, `forwardForfeits` not clearing the counter, paying the caller instead of the FeeRouter,
+accepting an empty forward, and a zero FeeRouter in the constructor. `R-pot`, `R-timeout-credit` and
+`INV-OR3-timeout-party` were re-pointed at the new split. Resolver mutants: 30 / 30 killed.
 
 ## Launch cap rules
 

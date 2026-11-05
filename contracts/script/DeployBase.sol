@@ -316,6 +316,7 @@ abstract contract DeployBase {
 
         // resolver panel, bond, windows, creator
         _check(resolver.bondToken() == x.usdg, "resolver.bondToken");
+        _check(resolver.feeRouter() == address(router), "resolver.feeRouter");
         _check(resolver.panel() == x.panel, "resolver.panel");
         _check(resolver.bondAmount() == x.bond, "resolver.bondAmount");
         _check(resolver.disputeWindow() == x.disputeWindow, "resolver.disputeWindow");
