@@ -296,7 +296,7 @@ jobs:
           "$RUNNER_TEMP/gitleaks" detect --source . --config .github/gitleaks.toml --redact --no-banner --exit-code 1
 
   docs:
-    # the public root docs changed: the app copy tests that read them (banned words, FRONTEND.md coverage, example slugs,
+    # the public root docs changed: the app copy tests that read them (banned words, FRONTEND.md coverage, example slugs, SECURITY.md multisig text,
     # CHANGELOG union merge, accepted advisories in SECURITY.md) and the README/owner-powers checks. The app and
     # contracts jobs run the same checks when their own files change.
     needs: changes
@@ -317,7 +317,7 @@ jobs:
           restore-keys: bun-${{ runner.os }}-1.4.4-app-
       - run: bun install --frozen-lockfile
       - name: copy tests that read the root docs and web/src
-        run: bun test test/bannedWords.test.ts test/frontendDoc.test.ts test/copyExamples.test.ts test/changelog.union.test.ts test/deps.advisories.test.ts
+        run: bun test test/bannedWords.test.ts test/frontendDoc.test.ts test/copyExamples.test.ts test/changelog.union.test.ts test/deps.advisories.test.ts test/securityDoc.test.ts
       - name: README deployment table matches deployments/
         working-directory: contracts
         run: bash tools/readme-deploy-check.sh

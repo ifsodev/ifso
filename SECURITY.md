@@ -49,8 +49,9 @@ function can move, redirect or freeze escrowed USDG (invariant R7, `contracts/IN
 ### Other roles
 - **Panel multisig**: decides disputed outcome questions within 72 h; if it stays silent the question is VOID and
   each side gets its own money back. It cannot touch any other payment. It is a separate multisig contract from the
-  owner's. On testnet 46630 both multisigs share the same 3 signers (2 of 3); on mainnet the panel multisig gets
-  signers different from the owner multisig's (not created yet).
+  owner's. On testnet 46630 both multisigs share the same 3 signers (2 of 3). On mainnet both multisigs exist
+  (2 of 3 each, addresses in "Signer contacts" below) and the panel multisig's 3 signers are all different from the
+  owner multisig's.
 - **Resolver service**: proposes results with a bond; anyone can dispute with a matching bond. Questions are
   registered by the relayer key (the only question creator; gas only), so the resolver key with the bond float stays
   on the worker. Its keys never hold user funds.

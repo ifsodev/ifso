@@ -169,7 +169,7 @@ job_docs() {
   need_version bun "$PIN_BUN" bun --version || return 1
   cd "$r/app" || return 1
   step bun install --frozen-lockfile || return 1
-  CI=true bun test test/bannedWords.test.ts test/frontendDoc.test.ts test/copyExamples.test.ts test/changelog.union.test.ts test/deps.advisories.test.ts 2>&1 | tee "$work/res/docs.out"
+  CI=true bun test test/bannedWords.test.ts test/frontendDoc.test.ts test/copyExamples.test.ts test/changelog.union.test.ts test/deps.advisories.test.ts test/securityDoc.test.ts 2>&1 | tee "$work/res/docs.out"
   local rc=${PIPESTATUS[0]}
   no_unhandled "$work/res/docs.out" || return 1
   [ "$rc" = 0 ] || return 1
