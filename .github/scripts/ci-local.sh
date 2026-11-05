@@ -77,6 +77,7 @@ job_contracts() {
   step forge fmt --check || return 1
   { forge build --sizes && bash tools/size-gate.sh; } || return 1
   step python3 tools/natspec-check.py || return 1
+  step python3 tools/mutation.py --check-find || return 1   # stale mutants fail here too, not only under --slow
   step bash tools/readme-deploy-check.sh || return 1
   step bash tools/owner-powers-check.sh || return 1
   step forge doc --out "$work/forge-doc" || return 1

@@ -6,7 +6,8 @@ KILLED (a test failed) or SURVIVED (all tests passed). A mutant that does not co
 a mutant whose `find` text is missing or ambiguous is STALE: any stale or invalid mutant fails the run, so a moved
 line can never silently drop out of the score. Writes ../.audit-grade/mutation.md (and mutation.json).
 
-usage: python3 tools/mutation.py [--only ID,ID] [--min-score 90] [--out DIR]"""
+usage: python3 tools/mutation.py [--only ID,ID] [--min-score 90] [--out DIR]
+       python3 tools/mutation.py --check-find   (seconds, no forge: exit 1 when any mutant's find text is stale)"""
 import argparse, json, os, re, shutil, subprocess, sys, tempfile, time
 from collections import OrderedDict
 
@@ -27,7 +28,28 @@ def run(cmd, cwd, timeout):
         return 124, (e.stdout or "") + "timeout"
 
 
+def check_find():
+    """The cheap half of the run: every mutant's `find` text occurs exactly `count` times (default 1) in its source file,
+    so a reformatted or moved line fails the fast gate instead of only the slow mutation job."""
+    stale = []
+    for m in MUTANTS:
+        try:
+            src = open(os.path.join(ROOT, "src", m["file"])).read()
+        except OSError:
+            stale.append(f"{m['id']}: {m['file']} not found")
+            continue
+        n, want = src.count(m["find"]), m.get("count", 1)
+        if n != want:
+            stale.append(f"{m['id']}: find text occurs {n}x in {m['file']}, expected {want}x")
+    for s in stale:
+        print("STALE", s)
+    print(f"mutation --check-find: {len(MUTANTS) - len(stale)} of {len(MUTANTS)} mutants find their text")
+    return 1 if stale else 0
+
+
 def main():
+    if sys.argv[1:] == ["--check-find"]:
+        sys.exit(check_find())
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--min-score", type=float, default=0)

@@ -66,6 +66,8 @@ jobs:
         run: forge build --sizes && bash tools/size-gate.sh
       - name: NatSpec on every external/public function
         run: python3 tools/natspec-check.py
+      - name: every mutant's find text is in its source (a reformat cannot make one stale unseen)
+        run: python3 tools/mutation.py --check-find
       - name: README deployment table matches deployments/
         run: bash tools/readme-deploy-check.sh
       - name: every onlyOwner function is listed in SECURITY.md

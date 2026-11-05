@@ -333,7 +333,7 @@ MUTANTS = [
     dict(id="AM1-forward-empty", file=R, finding="A-M1", why="an empty forward is accepted (no-op transaction)",
          find="if (amt == 0) revert NothingToWithdraw();\n        forfeited = 0;", repl="forfeited = 0;"),
     dict(id="AM1-ctor-zero", file=R, finding="A-M1", why="a zero FeeRouter is accepted (forfeits burned)",
-         find=" || feeRouter_ == address(0)) revert ZeroAddress();", repl=") revert ZeroAddress();"),
+         find=" || feeRouter_ == address(0)) {", repl=") {"),
     # ---- audit 2026-11-05 I-16 (strict accept / propose times)
     dict(id="AI16-earliest", file=R, finding="A-I16", why="earliestResolve may equal closeTime again",
          find="earliestResolve <= closeTime) revert BadQuestion();", repl="earliestResolve < closeTime) revert BadQuestion();"),
