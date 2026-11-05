@@ -49,6 +49,7 @@
   "test/keeper.shadow.test.ts": 1,
   "test/keeper.sweep.test.ts": 3,
   "test/keeper.voidOwed.anvil.test.ts": 2,
+  "test/keeperLag.scan.test.ts": 4,
   "test/keys.test.ts": 7,
   "test/link.flow.test.ts": 9,
   "test/link.test.ts": 8,
@@ -87,6 +88,7 @@
   "test/reviewR3.service.test.ts": 6,
   "test/rounds.test.ts": 16,
   "test/rpc.test.ts": 5,
+  "test/securityDoc.test.ts": 2,
   "test/stats.anvil.test.ts": 5,
   "test/stats.test.ts": 6,
   "test/testnetRun.envRoles.test.ts": 2,
@@ -120,6 +122,10 @@
   "test/invariant/ResolverInvariants.t.sol:ResolverInvariantsTest": 6,
   "test/pocs/AuditI16StrictTimes.t.sol:AuditI16StrictTimesTest": 3,
   "test/pocs/AuditM1SelfDispute.t.sol:AuditM1SelfDisputePoC": 12
+ },
+ "release": {
+  "hardening-cases.sh": 96,
+  "lib/test_*.py": 78
  },
  "web": {
   "test/api.test.ts": 4,
