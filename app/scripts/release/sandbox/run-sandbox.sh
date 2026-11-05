@@ -537,6 +537,19 @@ ok "arm.sh arms on a preflight of the current main and the rebuilt queue's sched
 ok "39: arming ran the real publish dry run over the whole queue and it reached 'dry run: not pushed'" bash -c "grep -q 'sync-public dry run at the queue tip' '$W/arm.out' && grep -q 'dry run: not pushed' '$W/arm.out'"
 ok "47/48: arming said the server runs private main, origin answers it, and root's own fetch of main agrees" bash -c "grep -q 'running release = private main' '$W/arm.out' && grep -q \"root's own fetch of private main\" '$W/arm.out'"
 ok "arming wrote LAUNCH_AT and the slots" bash -c "python3 -c 'import json,sys; s=json.load(open(\"$W/home/schedule.json\")); sys.exit(0 if s[\"launchAt\"]==\"$FUTURE\" and all(u[\"slot\"] for u in s[\"updates\"]) else 1)'"
+# 49: a launch-time move while armed is posted to the ops chat in three zones, and released updates keep their times
+python3 - "$W/home/state.json" <<'PY2'
+import json, sys
+import os
+p = sys.argv[1]; s = json.load(open(p)) if os.path.exists(p) else {"updates": {}}
+s["updates"]["TU01"] = {"status": "released", "attempts": 1}; json.dump(s, open(p, "w"))
+PY2
+chown "$RUSER" "$W/home/state.json" 2>/dev/null || true
+T1="$(python3 -c 'import json; print(json.load(open("'"$W"'/home/schedule.json"))["updates"][0]["slot"])')"
+LATER="$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=3)).strftime("%Y-%m-%dT%H:00:00Z"))')"
+rp set-times --launch-at "$LATER" --interval-minutes 60 --min-gap 2 >"$W/settimes.out" 2>&1
+ok "49: set-times kept the released TU01's time and moved the others" bash -c "python3 -c 'import json,sys; u=json.load(open(\"$W/home/schedule.json\"))[\"updates\"]; sys.exit(0 if u[0][\"slot\"]==\"$T1\" and u[1][\"slot\"]==\"$LATER\" else 1)'"
+ok "49: the move reached the ops chat with the times in UTC, MSK and US Eastern" bash -c "grep '/sendMessage' '$CTL/requests.jsonl' | grep 'release times set' | grep 'UTC' | grep 'MSK' | grep -qE 'E[SD]T'"
 rm -f "$W/ALLOW_REAL_DEPLOY"
 as_rel kill "$(cat "$ROOT/w4.pid")" 2>/dev/null || true
 

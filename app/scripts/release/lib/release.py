@@ -1511,17 +1511,54 @@ def cmd_retry(tid):
     return 0
 
 
+def us_eastern(t):
+    """(local datetime, 'EST'|'EDT') for a UTC datetime: America/New_York from the tz database when this host has it, else the US
+    rule (DST from the second Sunday of March 07:00 UTC to the first Sunday of November 06:00 UTC)."""
+    try:
+        from zoneinfo import ZoneInfo
+        lt = t.astimezone(ZoneInfo("America/New_York"))
+        return lt, lt.tzname()
+    except Exception:  # noqa: BLE001  (no tzdata on a minimal host)
+        def sunday(month, nth):
+            d = dt.datetime(t.year, month, 1, tzinfo=dt.timezone.utc)
+            d += dt.timedelta(days=(6 - d.weekday()) % 7)
+            return d + dt.timedelta(weeks=nth - 1)
+        dst = sunday(3, 2) + dt.timedelta(hours=7) <= t < sunday(11, 1) + dt.timedelta(hours=6)
+        return t + dt.timedelta(hours=-4 if dst else -5), "EDT" if dst else "EST"
+
+
+def three_zones(t):
+    """'2026-11-17 14:00 UTC = 17:00 MSK = 09:00 EST' (Moscow is UTC+3 all year)."""
+    msk = t + dt.timedelta(hours=3)
+    et, zn = us_eastern(t)
+    day = lambda x: "" if x.date() == t.date() else f" ({x.strftime('%a %d %b')})"  # noqa: E731
+    return f"{t.strftime('%Y-%m-%d %H:%M')} UTC = {msk.strftime('%H:%M')} MSK{day(msk)} = {et.strftime('%H:%M')} {zn}{day(et)}"
+
+
 def cmd_set_times(args):
+    """Write the slots: every update NOT yet released (or in progress) gets one, from --launch-at, one per interval, in queue
+    order; released ones keep the time they had (a move mid-launch never re-dates the history; incident 49). Then the new times
+    go to the ops chat in UTC, MSK and US Eastern (log only while unarmed)."""
     la = arg(args, "--launch-at")
     iv = int(arg(args, "--interval-minutes", "60"))
     gap = int(arg(args, "--min-gap", "2"))
     t0 = parse(la)  # must be UTC with a Z; anything else is refused
     sched = schedule()
-    for i, u in enumerate(sched["updates"]):
+    st = init_state(sched)
+    keep = [u for u in sched["updates"] if st["updates"][u["id"]]["status"] in ("released", "in_progress") and u.get("slot")]
+    todo = [u for u in sched["updates"] if u not in keep]
+    for i, u in enumerate(todo):
         u["slot"] = iso(t0 + dt.timedelta(minutes=iv * i))
     sched.update({"launchAt": la, "minGapMinutes": gap, "cadence": {"perDay": round(1440 / iv, 2), "intervalMinutes": iv}})
     save(SCHEDULE, sched)
-    print(f"launchAt {la}; {len(sched['updates'])} slots, one every {iv} min; last at {sched['updates'][-1]['slot']}")
+    last = todo[-1]["slot"] if todo else sched["updates"][-1].get("slot")
+    print(f"launchAt {la}; {len(todo)} slots, one every {iv} min; last at {last}" + (f"; {len(keep)} released kept their times" if keep else ""))
+    if todo:
+        msg = plain(f"the release times are set: {todo[0]['id']} at {three_zones(t0)}, then one every {iv} minutes; the last one, "
+                    f"{todo[-1]['id']}, at {three_zones(parse(last))}",
+                    "no", f"{len(todo)} updates got these slots" + (f"; the {len(keep)} already released keep their times" if keep else ""),
+                    "the runner releases at these times (status: sudo ifso-release-status)")
+        notify(load(STATE, {"updates": {}}), "release times set (UTC / MSK / US Eastern)", msg)
     return 0
 
 

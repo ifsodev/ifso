@@ -852,5 +852,55 @@ class StaleLocks(unittest.TestCase):
             q.communicate(b"x")
 
 
+class SetTimes(unittest.TestCase):
+    """Incident 49 (and the time-move rule): set-times re-dates only the updates not yet released, and posts the new times to the
+    ops chat in UTC, MSK and US Eastern (DST-aware)."""
+
+    def setUp(self):
+        self.calls, self.old_run = [], R.run
+        R.run = lambda cmd, **k: (self.calls.append(cmd) or (0, "")) if "--ping" not in cmd else (0, "")
+
+    def tearDown(self):
+        R.run = self.old_run
+        for f in (R.STATE,):
+            if os.path.exists(f):
+                os.remove(f)
+
+    def posted(self):
+        return [" ".join(c) for c in self.calls if any("slots" in str(x).lower() or "times" in str(x).lower() for x in c[-4:-2])]
+
+    def test_released_updates_keep_their_slots(self):
+        s = sched72()
+        R.save(R.SCHEDULE, s)
+        R.cmd_set_times(["--launch-at", "2026-11-17T14:00:00Z"])
+        st = state(R.load(R.SCHEDULE, None), TU01="released", TU02="released", TU03="held")
+        R.save(R.STATE, st)
+        R.cmd_set_times(["--launch-at", "2026-11-18T20:00:00Z"])
+        u = R.load(R.SCHEDULE, None)["updates"]
+        self.assertEqual([u[0]["slot"], u[1]["slot"]], ["2026-11-17T14:00:00Z", "2026-11-17T15:00:00Z"])  # released: untouched
+        self.assertEqual(u[2]["slot"], "2026-11-18T20:00:00Z")   # the held one goes first when retried
+        self.assertEqual(u[3]["slot"], "2026-11-18T21:00:00Z")
+        self.assertEqual(u[71]["slot"], "2026-11-21T17:00:00Z")  # 70 left, hourly: 20:00 + 69 h
+
+    def test_the_new_times_are_posted_in_utc_msk_and_us_eastern(self):
+        R.save(R.SCHEDULE, sched72())
+        R.cmd_set_times(["--launch-at", "2026-11-17T14:00:00Z"])
+        msg = " ".join(" ".join(c) for c in self.calls)
+        self.assertIn("2026-11-17 14:00 UTC", msg)
+        self.assertIn("17:00 MSK", msg)
+        self.assertIn("09:00 EST", msg)          # November: UTC-5
+        self.calls.clear()
+        R.cmd_set_times(["--launch-at", "2026-07-01T14:00:00Z"])
+        msg = " ".join(" ".join(c) for c in self.calls)
+        self.assertIn("10:00 EDT", msg)          # summer: UTC-4
+
+    def test_us_eastern_switches_on_the_right_days(self):
+        f = lambda t: R.us_eastern(R.parse(t))[1]  # noqa: E731
+        self.assertEqual(f("2026-03-08T06:59:00Z"), "EST")
+        self.assertEqual(f("2026-03-08T07:00:00Z"), "EDT")
+        self.assertEqual(f("2026-11-01T05:59:00Z"), "EDT")
+        self.assertEqual(f("2026-11-01T06:00:00Z"), "EST")
+
+
 if __name__ == "__main__":
     unittest.main()
