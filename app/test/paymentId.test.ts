@@ -1,15 +1,17 @@
 // One payment-id parser for the bot, the API and the site. Real escrow ids are uint256 keccak hashes (76 to 78 digits):
 // the old copies capped them at 40 (bot) and 20 (web deep link), so a real id read as "not a number".
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { encodeAbiParameters, keccak256 } from "viem";
 import { MAX_PAYMENT_ID, PAYMENT_ID_MAX_DIGITS, PAYMENT_ID_RE, isPaymentId, parsePaymentId, paymentIdString } from "../src/core/paymentId";
 import { paymentIdInput } from "../src/api/router";
 
 /** type(uint256).max: the largest id IfsoEscrow.idFor can return (78 digits). */
-export const ID_78 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+const ID_78 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 /** Real ids from the testnet run (chain 46630, .testnet-people/state.json): 78 and 77 digits. */
-export const TESTNET_ID_78 = "100445847310731864578693424659970785724122250073438508132425330087614763585464";
-export const TESTNET_ID_77 = "51376264011080535736083553933417392956537887801181481883072869833438858223172";
+const TESTNET_ID_78 = "100445847310731864578693424659970785724122250073438508132425330087614763585464";
+const TESTNET_ID_77 = "51376264011080535736083553933417392956537887801181481883072869833438858223172";
 
 describe("parsePaymentId", () => {
   test("the max matches the escrow's uint256 range", () => {
@@ -51,5 +53,30 @@ describe("API id input uses the shared parser", () => {
     expect(paymentIdInput.safeParse((MAX_PAYMENT_ID + 1n).toString()).success).toBe(false);
     expect(paymentIdInput.safeParse("0").success).toBe(false);
     expect(paymentIdInput.safeParse("12a").success).toBe(false);
+  });
+});
+
+describe("no other copy of a payment-id digit limit", () => {
+  // A digit limit of 20 or more is an id-sized number: it must come from core/paymentId.ts. A line that limits something
+  // else (a block number, say) says so with the words "not a payment id".
+  const root = join(import.meta.dir, "../..");
+  const files = (dir: string): string[] =>
+    readdirSync(dir).flatMap((n) => {
+      if (n === "node_modules" || n === "vendor" || n.startsWith(".")) return [];
+      const p = join(dir, n);
+      return statSync(p).isDirectory() ? files(p) : /\.(ts|tsx)$/.test(n) ? [p] : [];
+    });
+  test("app/src and web/src read ids through the shared parser", () => {
+    const hits: string[] = [];
+    for (const dir of ["app/src", "web/src"]) {
+      for (const f of files(join(root, dir))) {
+        if (f.endsWith(join("core", "paymentId.ts"))) continue;
+        readFileSync(f, "utf8").split("\n").forEach((line, i) => {
+          const m = /\\d\{1,(\d+)\}/.exec(line);
+          if (m && Number(m[1]) >= 20 && !line.includes("not a payment id")) hits.push(`${relative(root, f)}:${i + 1}: ${line.trim()}`);
+        });
+      }
+    }
+    expect(hits).toEqual([]);
   });
 });
