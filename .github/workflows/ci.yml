@@ -18,7 +18,7 @@ concurrency:
 #
 # Path filters: the `changes` job (.github/scripts/ci-changes.sh) decides which groups a push needs; contract jobs run
 # only for contracts/, app for app/ (and contracts/), web for web/ (and the app code it vendors), docs for the public
-# root docs. PRs, manual runs, first pushes, rewritten branches and any .github/ change run everything. gitleaks,
+# root docs, release for app/scripts/release/ (the release runner's unit tests and hardening cases). PRs, manual runs, first pushes, rewritten branches and any .github/ change run everything. gitleaks,
 # semgrep and ci-summary always run; ci-summary is the single required check (green when every job that ran passed).
 # The same commands run locally, with no filter, through .github/scripts/ci-local.sh before every public sync.
 jobs:
@@ -30,6 +30,7 @@ jobs:
       app: ${{ steps.f.outputs.app }}
       web: ${{ steps.f.outputs.web }}
       docs: ${{ steps.f.outputs.docs }}
+      release: ${{ steps.f.outputs.release }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with: { persist-credentials: false, fetch-depth: 0 }
@@ -280,6 +281,19 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: mutation, path: "${{ runner.temp }}/audit-grade" }
 
+  release:
+    # audit I-21: the release runner's unit tests (lib/test_release.py, the L-13 and L-15 cases among them) and the
+    # hardening cases of the root wrappers; stdlib python, git, ssh-keygen and curl only (all on the runner image)
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with: { persist-credentials: false }
+      - name: release runner unit tests and hardening cases
+        run: bash app/scripts/release/test-local.sh --ci
+
   gitleaks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -328,7 +342,7 @@ jobs:
   ci-summary:
     # the single required check: fails when any job that ran failed or was cancelled, when an always-on job did not
     # pass, or when a job whose files changed was skipped. Skipped jobs (files untouched) are fine.
-    needs: [changes, contracts, invariants, slither, semgrep, app, web, halmos, coverage, mutation, gitleaks, docs]
+    needs: [changes, contracts, invariants, slither, semgrep, app, web, halmos, coverage, mutation, release, gitleaks, docs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -348,7 +362,8 @@ jobs:
                     or ($r == "skipped" and ($k | IN("contracts","invariants","slither","halmos","coverage","mutation")) and $o.contracts == "true")
                     or ($r == "skipped" and $k == "app" and $o.app == "true")
                     or ($r == "skipped" and $k == "web" and $o.web == "true")
-                    or ($r == "skipped" and $k == "docs" and $o.docs == "true"))
+                    or ($r == "skipped" and $k == "docs" and $o.docs == "true")
+                    or ($r == "skipped" and $k == "release" and $o.release == "true"))
                 | "\($k)=\($r)" ] | join(" ")')"
           if [ -n "$bad" ]; then echo "::error::ci-summary: $bad"; exit 1; fi
           echo "ci-summary: every job that ran passed"

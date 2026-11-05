@@ -7,7 +7,7 @@
 #   bash .github/scripts/ci-local.sh [--repo DIR] [--rev REV] [--jobs a,b] [--slow] [--serial] [--update-baseline] [--keep]
 #     --repo DIR          the git repo (default: the repo this script sits in)
 #     --rev REV           the commit to test (default HEAD; uncommitted changes are NOT tested)
-#     --jobs a,b          only these jobs (contracts invariants slither semgrep app web docs gitleaks halmos coverage mutation)
+#     --jobs a,b          only these jobs (contracts invariants slither semgrep app web docs release gitleaks halmos coverage mutation)
 #     --slow              also run halmos, coverage and mutation (minutes to an hour; CI runs them on contract changes)
 #     --serial            one job at a time (default: four parallel lanes, each in its own worktree)
 #     --update-baseline   after an all-PASS run, write the per-file counts to DIR/.github/ci-baseline.json (commit it)
@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$repo" ] || repo="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 sha="$(git -C "$repo" rev-parse --verify "$rev^{commit}")" || { echo "ci-local: FAIL: no commit $rev in $repo"; exit 1; }
-[ -n "$jobs" ] || { jobs="contracts invariants slither semgrep app web docs gitleaks"; [ "$slow" = 1 ] && jobs="$jobs halmos coverage mutation"; }
+[ -n "$jobs" ] || { jobs="contracts invariants slither semgrep app web docs release gitleaks"; [ "$slow" = 1 ] && jobs="$jobs halmos coverage mutation"; }
 if [ "$rev" = HEAD ] && [ -n "$(git -C "$repo" status --porcelain --untracked-files=no)" ]; then
   echo "ci-local: note: $repo has uncommitted changes; testing the commit ${sha:0:7} only"
 fi
@@ -175,6 +175,10 @@ job_docs() {
   [ "$rc" = 0 ] || return 1
   (cd "$r/contracts" && step bash tools/readme-deploy-check.sh && step bash tools/owner-powers-check.sh)
 }
+job_release() { # audit I-21: the release runner's unit tests and hardening cases (ci.yml job "release")
+  local r; r="$(wt light)" || return 1
+  cd "$r" && step nice -n 10 bash app/scripts/release/test-local.sh --ci "$work/res/release.json"
+}
 job_halmos() {
   local r; r="$(wt contracts)" || return 1
   cd "$r/contracts" && HALMOS_VENV="$work/halmos-venv" step bash tools/halmos.sh
@@ -237,6 +241,9 @@ for key, fn in (("forge", "forge.xml"), ("app", "app.xml"), ("web", "web.xml")):
         n = int(s.get("tests", 0)) - int(s.get("failures", 0)) - int(s.get("errors", 0)) - int(s.get("skipped", 0))
         d[s.get("name")] = d.get(s.get("name"), 0) + n
     cur[key] = dict(sorted(d.items()))
+rp = os.path.join(res, "release.json")
+if os.path.exists(rp) and os.path.getsize(rp):
+    cur["release"] = dict(sorted(json.load(open(rp)).items()))
 json.dump(cur, open(out, "w"), indent=1, sort_keys=True)
 if not os.path.exists(base_path):
     print("counts: no .github/ci-baseline.json in this commit; run with --update-baseline and commit it"); sys.exit(1)
