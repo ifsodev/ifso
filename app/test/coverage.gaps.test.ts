@@ -104,17 +104,21 @@ describe("relayAccept", () => {
 
 describe("RateLimiter with Redis", () => {
   test("sets the window on the first hit and refuses above the limit", async () => {
+    // audit I-17: one atomic EVAL (INCR, then EXPIRE when the key is new or has no TTL); this fake runs the same logic
     const counts = new Map<string, number>();
-    const expired: [string, number][] = [];
+    const ttl = new Map<string, number>();
     const redis = {
-      incr: async (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1).get(k)!,
-      expire: async (k: string, s: number) => void expired.push([k, s]),
+      eval: async (_script: string, _n: number, k: string, s: number) => {
+        const n = counts.set(k, (counts.get(k) ?? 0) + 1).get(k)!;
+        if (n === 1 || !ttl.has(k)) ttl.set(k, s);
+        return n;
+      },
     };
     const rl = new RateLimiter(redis as never);
     expect(await rl.hit("a", 2, 60)).toBe(true);
     expect(await rl.hit("a", 2, 60)).toBe(true);
     expect(await rl.hit("a", 2, 60)).toBe(false);
-    expect(expired).toEqual([["rl:a", 60]]);
+    expect([...ttl]).toEqual([["rl:a", 60]]);
   });
 });
 

@@ -11,7 +11,7 @@ import { appRouter, jsonSafe } from "./router";
 import { RateLimiter } from "./rateLimit";
 import { readiness, type Probe } from "../ops/health";
 import { userStats } from "./stats";
-import { webhookPath } from "../bot/webhook";
+import { webhookPath, webhookTokenOk } from "../bot/webhook";
 import { stockPriceConditionAllowed } from "../core/geo";
 
 /** How long one /readyz probe run answers every caller (probes cost a DB query and two RPC reads). */
@@ -78,11 +78,18 @@ export function createApp(deps: Deps, limiter: RateLimiter, bot?: Bot, probes: R
         ip: clientIp(c.req.raw.headers, deps.env.TRUST_PROXY, (c.env as { socketIp?: string } | undefined)?.socketIp),
         country: trustedCountry(c.req.raw.headers, deps.env.TRUST_PROXY),
       }),
+      // audit I-17: the raw text of an unexpected error stays in the log; the caller gets a code and a fixed message
+      onError: ({ error, path }) => {
+        if (error.code === "INTERNAL_SERVER_ERROR") deps.log("trpc internal error", { path, error: String(error.cause?.message ?? error.message).slice(0, 300) });
+      },
     }),
   );
 
   // Telegram webhook: secret URL path + the X-Telegram-Bot-Api-Secret-Token header (a wrong or missing token is a 401)
   const path = webhookPath(deps.env);
-  if (bot && path) app.post(path, webhookCallback(bot, "hono", { secretToken: deps.env.TELEGRAM_WEBHOOK_SECRET }));
+  if (bot && path) {
+    app.post(path, async (c, next) => (webhookTokenOk(c.req.header("x-telegram-bot-api-secret-token"), deps.env.TELEGRAM_WEBHOOK_SECRET) ? next() : c.text("secret token is wrong", 401)));
+    app.post(path, webhookCallback(bot, "hono", { secretToken: deps.env.TELEGRAM_WEBHOOK_SECRET }));
+  }
   return app;
 }

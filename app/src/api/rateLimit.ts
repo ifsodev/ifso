@@ -1,6 +1,11 @@
 import type IORedis from "ioredis";
 import { keccak256, toHex } from "viem";
 
+/** INCR, and set the window's expiry when the key is new or (after a crash) has none. Atomic in Redis. */
+export const HIT_SCRIPT = `local n = redis.call('INCR', KEYS[1])
+if n == 1 or redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return n`;
+
 /** Per-IP fixed-window limiter. IPs are hashed with a secret salt (IP_HASH_SALT) and the date and never stored raw. */
 export class RateLimiter {
   private mem = new Map<string, { n: number; until: number }>();
@@ -13,9 +18,8 @@ export class RateLimiter {
 
   async hit(key: string, limit: number, windowSec: number): Promise<boolean> {
     if (this.redis) {
-      const k = `rl:${key}`;
-      const n = await this.redis.incr(k);
-      if (n === 1) await this.redis.expire(k, windowSec);
+      // audit I-17: increment and expiry in one atomic script, so a crash between them never leaves a key without a TTL
+      const n = Number(await this.redis.eval(HIT_SCRIPT, 1, `rl:${key}`, windowSec));
       return n <= limit;
     }
     const now = Date.now();

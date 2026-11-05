@@ -63,6 +63,18 @@ describe.skipIf(!bin)("bot + notifier stores on Postgres", () => {
     expect(await store.mine(99n, 99n)).toEqual([]);
   });
 
+  test("audit I-17: /mine in a group lists only that group's payments, never the user's private-chat ones", async () => {
+    const store = drizzleBotStore(db);
+    await db.insert(escrows).values([baseEscrow("9201", { amount: "1000000" }), baseEscrow("9202", { amount: "2000000" })]);
+    await db.insert(intents).values([
+      { tgId: 66n, tgChatId: 66n, text: "x", draft: {}, escrowId: "9201" }, // made in the private chat
+      { tgId: 66n, tgChatId: -1001n, text: "y", draft: {}, escrowId: "9202" }, // made in the group
+    ]);
+    expect((await store.mine(66n, -1001n)).map((r) => r.amount)).toEqual(["2000000"]);
+    expect((await store.mine(66n, 66n)).map((r) => r.amount).sort()).toEqual(["1000000", "2000000"]);
+    expect(await store.mine(66n, -2002n)).toEqual([]);
+  });
+
   test("who to tell: creator chat, linked sender / recipient / referee addresses, explicit watchers, resolver questions", async () => {
     const A = "0xaaaa000000000000000000000000000000000001";
     const B = "0xbbbb000000000000000000000000000000000002";

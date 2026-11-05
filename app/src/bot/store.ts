@@ -80,7 +80,9 @@ export function drizzleBotStore(db: Db): BotStore {
       const mine = await db
         .select({ id: intents.escrowId })
         .from(intents)
-        .where(and(isNotNull(intents.escrowId), or(eq(intents.tgChatId, chatId), eq(intents.tgId, tgId))));
+        // audit I-17: in a group only the payments made in that group; the user's own private-chat payments only in private
+        // (a Telegram private chat's id is the user's id)
+        .where(and(isNotNull(intents.escrowId), chatId === tgId ? or(eq(intents.tgChatId, chatId), eq(intents.tgId, tgId)) : eq(intents.tgChatId, chatId)));
       const ids = [...new Set([...ws.map((w) => w.id), ...mine.map((m) => m.id!)])];
       if (!ids.length) return [];
       return db

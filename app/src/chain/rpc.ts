@@ -21,6 +21,22 @@ export interface RpcOptions {
   onRecover?: () => void;
 }
 
+/**
+ * Audit I-17: an RPC URL as it may appear in an alert. Only scheme and host are kept: userinfo, the path (Infura and
+ * Alchemy put the key there) and the query (`?apikey=`) are dropped and shown as "/...".
+ */
+export function redactRpcUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const rest = (u.pathname && u.pathname !== "/") || u.search ? "/..." : "";
+    return `${u.protocol}//${u.host}${rest}`;
+  } catch {
+    return "(rpc url)";
+  }
+}
+/** Error text with every URL in it redacted as above (viem errors quote the request URL). */
+export const redactRpcText = (text: string) => text.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)]+/gi, (m) => redactRpcUrl(m));
+
 const defaultTransport = (url: string): Transport => http(url, { batch: true, retryCount: 1, timeout: 10_000 });
 
 /** Transport over `urls` tried strictly in the configured order (no latency ranking). */
@@ -42,7 +58,7 @@ export function makeTransport(urls: string[], opts: RpcOptions = {}): Transport 
         } catch (e) {
           if (i < urls.length - 1 && !failedOver) {
             failedOver = true;
-            opts.onFailover?.({ from: url.replace(/\/\/([^/@]+@)?/, "//"), error: String((e as Error).message ?? e).slice(0, 200) });
+            opts.onFailover?.({ from: redactRpcUrl(url), error: redactRpcText(String((e as Error).message ?? e)).slice(0, 200) });
           }
           throw e;
         }

@@ -35,7 +35,13 @@ export interface Ctx {
   country?: string;
 }
 
-const t = initTRPC.context<Ctx>().create();
+/** Audit I-17: what a caller sees for an unexpected server error. The raw error text (hosts, SQL, RPC) stays in the log. */
+export const INTERNAL_MESSAGE = "something went wrong on our side, try again in a little while";
+
+const t = initTRPC.context<Ctx>().create({
+  errorFormatter: ({ shape, error }) =>
+    error.code === "INTERNAL_SERVER_ERROR" ? { ...shape, message: INTERNAL_MESSAGE, data: { ...shape.data, stack: undefined } } : shape,
+});
 const addr = z.string().regex(/^0x[0-9a-fA-F]{40}$/).transform((a) => getAddress(a) as Address);
 const hex = z.string().regex(/^0x[0-9a-fA-F]*$/).transform((h) => h as Hex);
 const uint = z.string().regex(/^\d+$/).transform((s) => BigInt(s));
@@ -186,7 +192,10 @@ async function registerForFundedSender(ctx: Ctx, questionId: Hex, sender: Addres
   try {
     await registerPlanned(deps, questionId);
   } catch (e) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: String((e as Error).message).slice(0, 200) });
+    if (e instanceof FootballRefused || e instanceof PolymarketRefused) throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+    // audit I-17: the chain error text stays in the log; the caller gets a code and a fixed message
+    deps.log("question registration failed", { questionId, error: String((e as Error).message).slice(0, 300) });
+    throw new TRPCError({ code: "BAD_REQUEST", message: "the question could not be registered for this payment, try again in a little while" });
   }
 }
 
