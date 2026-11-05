@@ -1,9 +1,12 @@
 // Wallet <-> Telegram link. The bot (private chat) issues a one-time token; the site has the user sign a short EIP-191
 // message that contains it; this verifies the signature (EOA, or an EIP-1271 smart account such as a passkey account) and
 // stores the address on the Telegram user. The address must be proven by a signature: it is never taken on trust.
+// Audit L-14: this is the ONLY place a wallet is linked to a Telegram user. A create (build/submit) never links its
+// sender: an intent id is visible in group buttons, so whoever submits it proves nothing about the bot user. A bot
+// user's own escrows still reach them through the intent's chat (intents.tg_chat_id + escrow_id in the notifier).
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { recoverMessageAddress, type Address, type Hex } from "viem";
-import { intents, linkRequests, tgUsers } from "../db/schema";
+import { linkRequests, tgUsers } from "../db/schema";
 import { linkDomain, linkWalletMessage } from "../core/linkWallet";
 import type { Deps } from "../workers/deps";
 import { tokenHash } from "./linkToken";
@@ -35,11 +38,4 @@ export async function linkWallet(deps: Deps, a: { token: string; address: Addres
   const address = a.address.toLowerCase();
   await deps.db.insert(tgUsers).values({ tgId: req.tgId, address }).onConflictDoUpdate({ target: tgUsers.tgId, set: { address } });
   return { address: a.address };
-}
-
-/** After a successful create that came from the bot: remember the sender's address for notifications, never overwriting a linked one. */
-export async function rememberSender(deps: Deps, intentId: string, from: Address): Promise<void> {
-  const [it] = await deps.db.select({ tgId: intents.tgId }).from(intents).where(eq(intents.id, intentId));
-  if (!it?.tgId) return;
-  await deps.db.insert(tgUsers).values({ tgId: it.tgId, address: from.toLowerCase() }).onConflictDoUpdate({ target: tgUsers.tgId, set: { address: from.toLowerCase() }, setWhere: isNull(tgUsers.address) });
 }

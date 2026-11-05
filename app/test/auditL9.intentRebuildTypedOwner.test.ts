@@ -84,6 +84,6 @@ describe.skipIf(!havePostgres())("L-9: intent params are written only by a verif
     expect(final.state).toBe("submitted");
     expect(final.escrowId).toBe(String(b.id));
     expect(final.txHash).not.toBeNull();
-    expect((await pg.db.select().from(tgUsers)).length).toBe(1); // notifications bound to the verified sender
+    expect((await pg.db.select().from(tgUsers)).length).toBe(0); // audit L-14: a submit links no wallet (only /link does)
   });
 });

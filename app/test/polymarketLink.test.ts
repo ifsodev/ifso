@@ -72,6 +72,9 @@ describe("parsePolymarketLink", () => {
     expect(parsePolymarketLink("https://polymarket.com/market/some-market")).toEqual({ market: "some-market" });
     expect(parsePolymarketLink("some-open-market")).toEqual({ market: "some-open-market" });
   });
+  test("rescore Info: a malformed percent-escape is an invalid link, not a thrown URIError", () => {
+    for (const bad of ["https://polymarket.com/event/%E0%A4%A", "https://polymarket.com/event/e/%", "https://polymarket.com/market/%zz"]) expect(parsePolymarketLink(bad)).toEqual({ invalid: true });
+  });
 });
 
 describe("resolvePolymarketRef with stubbed Gamma", () => {
@@ -114,6 +117,12 @@ describe("resolvePolymarketRef with stubbed Gamma", () => {
     expect(await resolvePolymarketRef("https://polymarket.com/event/fed-decision-in-december")).toEqual({ ok: false, message: copy.parse.marketNoneOpen(CLOSED.title!) });
   });
 
+  test("rescore Info: a malformed link is the plain 'not a Polymarket market link' answer, no Gamma call", async () => {
+    stubGamma();
+    expect(await resolvePolymarketRef("https://polymarket.com/event/%E0%A4%A")).toEqual({ ok: false, message: copy.parse.notPolymarketLink });
+    expect(seen).toEqual([]);
+  });
+
   test("not an event on Gamma: the slug is tried as a market (single-market pages share the slug)", async () => {
     stubGamma();
     expect(await resolvePolymarketRef("https://polymarket.com/event/unknown-thing")).toEqual({ ok: true, slug: "unknown-thing" });
@@ -135,6 +144,13 @@ describe("the bot answers a multi-market or closed event link before any preview
     stubGamma();
     const r = await handleCommand(env, { tgId: 1n, chatId: 1n, cmd: "ifso", body: "@jake 20 if https://polymarket.com/event/fed-decision-in-december resolves yes" });
     expect(r.text).toBe(copy.parse.marketNoneOpen(CLOSED.title!));
+  });
+
+  test("rescore Info: a malformed link gets the plain answer, no Review button", async () => {
+    stubGamma();
+    const r = await handleCommand(env, { tgId: 1n, chatId: 1n, cmd: "ifso", body: "@jake 20 if https://polymarket.com/event/%E0%A4%A resolves yes" });
+    expect(r.text).toBe(copy.parse.notPolymarketLink);
+    expect(r.buttons).toBeUndefined();
   });
 
   test("/event/<e>/<m>: a normal preview", async () => {

@@ -1,5 +1,5 @@
-// Wallet linking (todo 04 coordinator note): the bot's /link, the signed-message proof, and remembering the sender
-// after a create that came from the bot. Real Postgres, stubbed chain.
+// Wallet linking (todo 04 coordinator note): the bot's /link and the signed-message proof. Audit L-14: a create that
+// came from the bot never links its sender to the Telegram user (only /link does). Real Postgres, stubbed chain.
 import { afterAll, beforeAll, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import type { Address, Hex } from "viem";
@@ -40,7 +40,7 @@ describe("/link in the bot (no database)", () => {
   });
 });
 
-describe.skipIf(!havePostgres())("wallet link and remembered sender", () => {
+describe.skipIf(!havePostgres())("wallet link, and a submit that links nothing", () => {
   let pg: TestDb;
   let deps: Deps;
   const caller = () => appRouter.createCaller({ deps, limiter: new RateLimiter(), ip: "203.0.113.7", country: "DE" });
@@ -123,7 +123,7 @@ describe.skipIf(!havePostgres())("wallet link and remembered sender", () => {
     for (const t of [token("e"), token("z")]) await expect(caller().linkWallet({ token: t, address: acct.address, signature: await acct.signMessage({ message: msg(t) }) })).rejects.toThrow("expired or was already used");
   });
 
-  describe("submit remembers the sender for a bot intent", () => {
+  describe("audit L-14: submit never links the sender to the bot user", () => {
     const sender = privateKeyToAccount(generatePrivateKey());
     const prep = async (tgId: bigint | null) => {
       const params = buildParams({ draft: { kind: "TIME", at: Math.floor(Date.now() / 1000) + 86400 }, nowSec: Math.floor(Date.now() / 1000), amountUsdg: "10", twoSided: false, recipient: "0x00000000000000000000000000000000000b0b0b" as Address });
@@ -132,10 +132,11 @@ describe.skipIf(!havePostgres())("wallet link and remembered sender", () => {
       const signature = await sender.signTypedData(createAuthorizationTypedData({ chainId: 4663, usdg: USDG, escrow: ESCROW, from: sender.address, value: params.amount + 250_000n, validAfter: 0n, validBefore: 9999999999n, nonce: createAuthNonce(sender.address, params) }));
       return { input: { params: jsonSafe(params) as Record<string, unknown>, from: sender.address, validAfter: "0", validBefore: "9999999999", signature, intentId: row!.id } };
     };
-    test("stores tg_users.address from the verified sender when the intent came from Telegram", async () => {
+    test("a verified submit of a Telegram intent leaves tg_users.address unset; the intent still moves", async () => {
       const { input } = await prep(TG);
       await caller().submit(input as never);
-      expect(await userAddr()).toBe(sender.address.toLowerCase());
+      expect(await userAddr()).toBeNull();
+      expect((await pg.db.select().from(intents).where(eq(intents.id, input.intentId)))[0]!.state).toBe("submitted");
     });
     test("never overwrites an address the user linked on purpose", async () => {
       const linked = "0x000000000000000000000000000000000000dead";

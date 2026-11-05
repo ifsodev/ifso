@@ -26,7 +26,7 @@ import { resolvePolymarketRef } from "../sources/polymarket";
 import { holderTier, tierConfig } from "./perks";
 import { parseCsv, totals, validateRows } from "./batchPlan";
 import { userStats } from "./stats";
-import { LinkError, linkWallet, rememberSender } from "./linkWallet";
+import { LinkError, linkWallet } from "./linkWallet";
 import { LIMITS, perksFor, TIER_RANK, type Tier } from "../core/perks";
 
 export interface Ctx {
@@ -456,8 +456,9 @@ export const appRouter = t.router({
       if (input.intentId) {
         // audit L-1 / L-9: only the intent's owner (the bot user's linked wallet, else the wallet that claimed it in build)
         // moves it to submitted, and only here, after the signature check: params and escrowId come from the signed create
-        const moved = await submitIntent(ctx, input.intentId, input.from, p, r.hash as Hex).catch(() => false);
-        if (moved) await rememberSender(ctx.deps, input.intentId, input.from).catch(() => {}); // notifications are a convenience: never fail a create over them
+        // audit L-14: it never links input.from to the bot user (only the signed /link flow does); the sender's own
+        // notifications come from the intent's chat, which the notifier reads by escrowId
+        await submitIntent(ctx, input.intentId, input.from, p, r.hash as Hex).catch(() => false);
       }
       return { txHash: r.hash, id: escrowId(input.from, p.salt).toString() };
     }),

@@ -94,10 +94,15 @@ export const EVENT_PICK_MAX = 5;
 
 /** A Polymarket ref (slug or polymarket.com link) -> the market slug, or the event slug when the link names only an event.
  *  /event/<event>/<market> and /market/<market> name the market in the LAST segment; /event/<event> names only the event. */
-export function parsePolymarketLink(ref: string): { market: string } | { event: string } {
+export function parsePolymarketLink(ref: string): { market: string } | { event: string } | { invalid: true } {
   const m = ref.match(/^https?:\/\/(?:www\.)?polymarket\.com\/([^?#]*)/i);
   if (!m) return { market: ref };
-  const parts = m[1]!.split("/").filter(Boolean).map((p) => decodeURIComponent(p));
+  let parts: string[];
+  try {
+    parts = m[1]!.split("/").filter(Boolean).map((p) => decodeURIComponent(p));
+  } catch {
+    return { invalid: true }; // a malformed %-escape (URIError): no market can be named by it
+  }
   if (parts[0] === "event" && parts.length === 2) return { event: parts[1]! };
   return { market: parts[parts.length - 1] ?? "" };
 }
@@ -114,6 +119,7 @@ export type PolymarketRefResult = { ok: true; slug: string } | { ok: false; mess
  *  event is tried as a market (single-market pages use the same slug), where the allow-list answers for it. */
 export async function resolvePolymarketRef(ref: string, getEvent: (slug: string) => Promise<GammaEvent | undefined> = fetchGammaEvent): Promise<PolymarketRefResult> {
   const p = parsePolymarketLink(ref);
+  if ("invalid" in p) return { ok: false, message: copy.parse.notPolymarketLink };
   if ("market" in p) return { ok: true, slug: p.market };
   const ev = await getEvent(p.event);
   if (!ev || !Array.isArray(ev.markets)) return { ok: true, slug: p.event };

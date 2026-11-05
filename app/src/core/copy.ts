@@ -20,6 +20,7 @@ export const copy = {
     marketPickLine: (name: string, slug: string) => `• ${name}: ${slug}`,
     marketPick: (event: string, lines: string, more: number | string) =>
       `"${event}" has more than one market. Send the one you mean in place of the link, as polymarket followed by its name (after the colon):\n${lines}${Number(more) > 0 ? `\n…and ${more} more on polymarket.com` : ""}`,
+    notPolymarketLink: "That is not a Polymarket market link. Paste the market's polymarket.com link as it is, or send polymarket followed by the market's name.",
     marketNoneOpen: (event: string) => `"${event}" has no open market right now, so it can't be used for an if-so payment.`,
     minAmount: "The smallest if-so payment is 1 USDG.",
     counterOnlyForChallenges: "Two amounts only work with /challenge (where both of you chip in).",
