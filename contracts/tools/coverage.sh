@@ -7,9 +7,10 @@ cd "$(dirname "$0")/.."
 out="../.audit-grade/coverage.md"; min=0
 while [ $# -gt 0 ]; do case "$1" in --out) out="$2"; shift 2;; --min-lines) min="$2"; shift 2;; *) echo "unknown arg $1"; exit 2;; esac; done
 raw="$(mktemp)"; trap 'rm -f "$raw"' EXIT
-# Coverage instruments the bytecode, so the test that compares runtime code with the build cannot pass under it; it
-# runs in the normal `forge test` job.
-skip="test_PostDeploy_RuntimeCodeMatchesBuild"
+# Coverage instruments the bytecode and builds without out/ artifacts, so the two tests that compare the chain or the
+# deploy record with the build (runtime code; constructor args from out/*.json, live once a 4663 record exists) cannot pass under it; they
+# run in the normal `forge test` job.
+skip="test_PostDeploy_(RuntimeCodeMatchesBuild|RecordConstructor)"
 mode="default"
 if ! forge coverage --report summary --code-size-limit 500000 --no-match-coverage '(^test/|^script/|^src/mocks/)' --no-match-test "$skip" >"$raw" 2>&1; then
   mode="--ir-minimum"
