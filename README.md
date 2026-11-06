@@ -105,7 +105,7 @@ Follow `SECURITY.md`. Please do not open a public issue for a vulnerability and 
 
 | Network | Chain id | Status |
 |---|---|---|
-| Robinhood Chain | 4663 | **live** since 2026-11-06 (commit d6b7a57, block 107148809), owned by the owner multisig `0xd21656B6ddA03246E63903Bc23F26494fAfc59d1`; Sourcify match on all 4 contracts |
+| Robinhood Chain | 4663 | **live** since 2026-11-06 (commit d6b7a57, block 107148809), escrow `0x0Ee8278eA68dD41eaa8291F92FEAC1550Cc66E5e`, owned by the owner multisig `0xd21656B6ddA03246E63903Bc23F26494fAfc59d1`; Sourcify match on all 4 contracts |
 
 Mainnet contracts (Robinhood Chain, 4663):
 

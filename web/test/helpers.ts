@@ -1,3 +1,4 @@
+import mainnetRecord from "@/config/deployments/4663.json";
 // Builds a real `build` answer the way the API router does, from the backend's own core modules (tests run in the repo).
 import { getAddress, type Address, type Hex } from "viem";
 import { buildParams } from "../../app/src/core/builder";
@@ -6,7 +7,8 @@ import { createAuthorizationTypedData } from "../../app/src/core/typedData";
 import type { BuildAnswer } from "@/lib/ifso/api";
 
 export const CHAIN_ID = 4663;
-export const ESCROW: Address = getAddress("0x1111111111111111111111111111111111111111");
+// The escrow the site is built with on its default chain (4663): the deployment record's, so a mocked /healthz agrees with it.
+export const ESCROW: Address = getAddress(mainnetRecord.contracts.IfsoEscrow.address);
 export const USDG: Address = getAddress("0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168");
 export const SENDER: Address = getAddress("0x2222222222222222222222222222222222222222");
 export const FEE = 250_000n;
