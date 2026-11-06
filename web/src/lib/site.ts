@@ -31,7 +31,7 @@ export const siteConfig = {
   ogImageAlt:
     "IFSO — Money that moves when something happens.",
   /** X/Twitter handle, e.g. "@layers". Omitted from the tags while unknown. */
-  twitterHandle: undefined as string | undefined,
+  twitterHandle: "@IfSoFinance" as string | undefined,
   author: "IFSO",
   email: "",
   /** Browser theme-color (address bar / PWA) — the site's paper. */
