@@ -13,6 +13,7 @@
 
 import Link from "next/link";
 import { LayersLogo } from "@/components/common/layers-logo";
+import { SocialIconLinks } from "@/components/common/social-links";
 import { useEffect, useRef, type RefObject } from "react";
 import { animated, useSpring } from "@react-spring/web";
 import { MistedLines } from "@/components/animation/misted-lines";
@@ -149,6 +150,7 @@ export const SiteMenu = ({ content, open, onClose, opener }: SiteMenuProps) => {
           <p className="mt-4 font-mono text-meta text-ink/60 max-mobile:mt-0">
             <MistedLines delay={FOOT_DELAY_MS} lines={[{ key: "socials", content: content.socials }]} />
           </p>
+          <SocialIconLinks className="mt-3" tabIndex={tab} />
           <Link
             href={content.cta.href}
             onClick={onClose}

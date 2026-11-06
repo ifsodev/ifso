@@ -93,6 +93,8 @@ export interface FooterColumn {
    * the landscape tablet down when `shortFrom` is "tablet".
    */
   lines: { text: string; short?: string; shortFrom?: "tablet"; href?: string }[];
+  /** Closes the column with the channel icons (`SOCIAL_LINKS`). */
+  socials?: boolean;
 }
 
 export interface ContactContent {
@@ -178,6 +180,6 @@ export const contactContent: ContactContent = {
  {label:"Explore",lines:[{text:"How it works",href:"/how-it-works"},{text:"Conditions",href:"/conditions"}]},
  {label:"Details",lines:[{text:"Pricing",href:"/pricing"},{text:"Technology",href:"/technology"}]},
  {label:"Legal",lines:[{text:"Privacy",href:"/privacy-policy"},{text:"Terms & risks",href:"/terms"}]},
- {label:"IFSO",lines:[{text:"Built on Robinhood Chain"},{text:"Back to top ↑",href:"#top"}]},
+ {label:"IFSO",lines:[{text:"Built on Robinhood Chain"},{text:"Back to top ↑",href:"#top"}],socials:true},
  ], tickerItems:["IFSO — conditional payments", "USDG", "Every payment has an expiry", "If this, then so"],
 };

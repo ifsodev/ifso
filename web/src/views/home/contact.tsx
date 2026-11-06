@@ -7,6 +7,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ContactContent } from "@/data/home/story";
 import { MistedLines } from "@/components/animation/misted-lines";
+import { SocialIconLinks } from "@/components/common/social-links";
 import { FilmTicker } from "@/views/home/film-ticker";
 import { Marquee } from "@/views/home/marquee";
 
@@ -48,7 +49,7 @@ export const Contact = ({ content }: ContactProps) => {
 
       <div className="absolute bottom-22.25 left-12 flex gap-6 max-tablet:bottom-22 max-tablet:left-8 max-portrait:bottom-26 max-portrait:grid max-portrait:grid-cols-2 max-portrait:gap-x-4 max-portrait:gap-y-8 max-mobile:bottom-20 max-mobile:left-5 max-mobile:gap-x-2.5 max-mobile:gap-y-6">
         {content.columns.map((column, columnIndex) => (
-          <div key={column.label} className="flex w-79.5 flex-col gap-3 max-tablet:w-55.5 max-portrait:w-86 max-mobile:w-42.5">
+          <div key={column.label} className="relative flex w-79.5 flex-col gap-3 max-tablet:w-55.5 max-portrait:w-86 max-mobile:w-42.5">
             <h3 className="font-mono text-label text-accent uppercase">
               <MistedLines delay={columnIndex * COLUMN_STAGGER_MS} lines={[{ key: column.label, content: column.label }]} />
             </h3>
@@ -80,6 +81,8 @@ export const Contact = ({ content }: ContactProps) => {
                 }))}
               />
             </p>
+            {/* Below the lines; beside the label in portrait, where a taller column would push the grid into the hairline above it. */}
+            {column.socials && <SocialIconLinks className="-mt-1 max-portrait:absolute max-portrait:-top-2 max-portrait:right-0 max-portrait:mt-0" />}
           </div>
         ))}
       </div>
