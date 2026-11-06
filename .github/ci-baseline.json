@@ -146,6 +146,7 @@
   "test/passkey.test.ts": 2,
   "test/paymentId.test.ts": 2,
   "test/router.contract.test.ts": 2,
+  "test/social-links.test.tsx": 4,
   "test/sports-flag.test.tsx": 9,
   "test/tailwind-source.test.ts": 1,
   "test/text.test.ts": 6,
