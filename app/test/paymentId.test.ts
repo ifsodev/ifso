@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { encodeAbiParameters, keccak256 } from "viem";
-import { MAX_PAYMENT_ID, PAYMENT_ID_MAX_DIGITS, PAYMENT_ID_RE, isPaymentId, parsePaymentId, paymentIdString } from "../src/core/paymentId";
+import { MAX_PAYMENT_ID, PAYMENT_ID_MAX_DIGITS, PAYMENT_ID_RE, PAYMENT_ID_SOURCE, isPaymentId, parsePaymentId, paymentIdString } from "../src/core/paymentId";
 import { paymentIdInput } from "../src/api/router";
 
 /** type(uint256).max: the largest id IfsoEscrow.idFor can return (78 digits). */
@@ -17,6 +17,8 @@ describe("parsePaymentId", () => {
   test("the max matches the escrow's uint256 range", () => {
     expect(MAX_PAYMENT_ID.toString()).toBe(ID_78);
     expect(ID_78).toHaveLength(PAYMENT_ID_MAX_DIGITS);
+    expect(PAYMENT_ID_RE.source).toBe(`^${PAYMENT_ID_SOURCE}$`);
+    expect(PAYMENT_ID_SOURCE).toBe(String.raw`\d{1,${PAYMENT_ID_MAX_DIGITS}}`);
     // an id made the way IfsoEscrow.idFor makes it is always in range
     const made = BigInt(keccak256(encodeAbiParameters([{ type: "address" }, { type: "bytes32" }], ["0x00000000000000000000000000000000000000aa", `0x${"ab".repeat(32)}`])));
     expect(parsePaymentId(made.toString())).toBe(made);

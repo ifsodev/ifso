@@ -13,7 +13,7 @@ export const PAYMENT_ID_MAX_DIGITS = 78;
 export const PAYMENT_ID_SOURCE = String.raw`\d{1,78}`;
 
 /** Whole-string match: digits only, 1 to 78 of them. */
-export const PAYMENT_ID_RE = new RegExp(`^${PAYMENT_ID_SOURCE}$`);
+export const PAYMENT_ID_RE = /^\d{1,78}$/; // a literal on purpose (no regex built from a string); a test keeps it equal to the source above
 
 /**
  * Reads a payment id typed by a person or taken from a URL: surrounding spaces and one leading "#" are allowed.
