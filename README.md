@@ -105,11 +105,22 @@ Follow `SECURITY.md`. Please do not open a public issue for a vulnerability and 
 
 | Network | Chain id | Status |
 |---|---|---|
-| Robinhood Chain | 4663 | not deployed |
+| Robinhood Chain | 4663 | **live** since 2026-11-06 (commit d6b7a57, block 107148809), owned by the owner multisig `0xd21656B6ddA03246E63903Bc23F26494fAfc59d1`; Sourcify match on all 4 contracts |
+
+Mainnet contracts (Robinhood Chain, 4663):
+
+| Contract | Address |
+|---|---|
+| IfsoEscrow | [`0x0Ee8278eA68dD41eaa8291F92FEAC1550Cc66E5e`](https://robinhoodchain.blockscout.com/address/0x0Ee8278eA68dD41eaa8291F92FEAC1550Cc66E5e) |
+| IfsoConditionEvaluator | [`0x527187721ebA582E721014aeF57c4beC95DAdCA9`](https://robinhoodchain.blockscout.com/address/0x527187721ebA582E721014aeF57c4beC95DAdCA9) |
+| IfsoOutcomeResolver | [`0xCA729a22d6bcd7E7C56d20A270af1baEb37C8AE8`](https://robinhoodchain.blockscout.com/address/0xCA729a22d6bcd7E7C56d20A270af1baEb37C8AE8) |
+| FeeRouter | [`0xdB9E99AC28B5CC8C9e771FDdc4E0a09F08D90D25`](https://robinhoodchain.blockscout.com/address/0xdB9E99AC28B5CC8C9e771FDdc4E0a09F08D90D25) |
+
+Verified source: `https://repo.sourcify.dev/4663/<address>` for each address above.
 | Robinhood Chain testnet | 46630 | rehearsal deployment v2 (commit 2cd783d), escrow `0x154Fb83621180f9Dfe80EC3382107C864e79626F` (Sourcify match on all 4 contracts; test tokens only) |
 
 Addresses, deploy block, transaction hashes, constructor arguments and the commit of every deployment are recorded
-in `contracts/deployments/<chainid>.json` (today only `46630.json`, the testnet; the site keeps an equal copy in
+in `contracts/deployments/<chainid>.json` (`4663.json` for mainnet and `46630.json` for the testnet; the site keeps an equal copy in
 `web/src/config/deployments/`, made by `bash web/scripts/sync-deployments.sh` and checked by a test). The deploy script reads no private key (it signs with
 `forge script --account <keystore>` or `--ledger`), refuses to run on 4663 or 46630 unless `IFSO_ARMED=1` and
 `contracts/.armed-<chainid>` both exist, hands every contract to the owner multisig and asserts the result.

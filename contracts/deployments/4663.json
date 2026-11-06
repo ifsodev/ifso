@@ -1,0 +1,201 @@
+{
+  "chainId": 4663,
+  "commit": "d6b7a577e810ac9862f1b2d2db5469ebe3d9a0da",
+  "deployer": "0x6F3b7cb76587b8bEded68FAb56E2a563e35Eca5a",
+  "contracts": {
+    "IfsoConditionEvaluator": {
+      "address": "0x527187721ebA582E721014aeF57c4beC95DAdCA9",
+      "constructorArgs": [
+        "0x6F3b7cb76587b8bEded68FAb56E2a563e35Eca5a",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "creationTx": "0x9ef29aa20f35aef44296126561d901d79908345c75f14439d8c35985cf1659e8"
+    },
+    "IfsoOutcomeResolver": {
+      "address": "0xCA729a22d6bcd7E7C56d20A270af1baEb37C8AE8",
+      "constructorArgs": [
+        "0x6F3b7cb76587b8bEded68FAb56E2a563e35Eca5a",
+        "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        7200,
+        259200,
+        100000000,
+        "0x1B435fBF1288834F5a14A6924dF660D4313f87dE",
+        "0xdB9E99AC28B5CC8C9e771FDdc4E0a09F08D90D25"
+      ],
+      "creationTx": "0x3c0ccd3c125e6fd02a20e023848646dfa7ebdadf162fb75d99a94aff648a5c2f"
+    },
+    "FeeRouter": {
+      "address": "0xdB9E99AC28B5CC8C9e771FDdc4E0a09F08D90D25",
+      "constructorArgs": [
+        "0x6F3b7cb76587b8bEded68FAb56E2a563e35Eca5a",
+        "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1",
+        "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1",
+        "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1",
+        "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1"
+      ],
+      "creationTx": "0x539395221d5ce0a2fbd3a972980402268794b872435f31101972ed7e5bbf55b1"
+    },
+    "IfsoEscrow": {
+      "address": "0x0Ee8278eA68dD41eaa8291F92FEAC1550Cc66E5e",
+      "constructorArgs": [
+        "0x6F3b7cb76587b8bEded68FAb56E2a563e35Eca5a",
+        "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "0x527187721ebA582E721014aeF57c4beC95DAdCA9",
+        "0xdB9E99AC28B5CC8C9e771FDdc4E0a09F08D90D25",
+        250000,
+        500000
+      ],
+      "creationTx": "0x50bafd8fb5ca85645cb86557ce23aa3c792c1e9e296adf4ed100ca5e71022ced"
+    }
+  },
+  "config": {
+    "ownerMultisig": "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1",
+    "panelMultisig": "0x1B435fBF1288834F5a14A6924dF660D4313f87dE",
+    "resolverCreator": "0x17232C0c982761C4CD05bf5690D24480DBAA41A3",
+    "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "pyth": "0x0000000000000000000000000000000000000000",
+    "sequencerUptimeFeed": "0x0000000000000000000000000000000000000000",
+    "feeWork": "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1",
+    "feeTreasury": "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1",
+    "feePerks": "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1",
+    "feeBurn": "0xd21656B6ddA03246E63903Bc23F26494fAfc59d1",
+    "creationFee": 250000,
+    "resolverFee": 500000,
+    "resolverBond": 100000000,
+    "maxAmount": 1000000000,
+    "disputeWindow": 7200,
+    "panelWindow": 259200,
+    "feeds": [
+      "0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9",
+      "0x319724394D3A0e3669269846abE664Cd621f9f6A",
+      "0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15",
+      "0x4A1166a659A55625345e9515b32adECea5547C38",
+      "0x6B22A786bAa607d76728168703a39Ea9C99f2cD0"
+    ],
+    "feedStockTokens": [
+      "0x0000000000000000000000000000000000000000",
+      "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C",
+      "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+      "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9"
+    ]
+  },
+  "txs": [
+    {
+      "hash": "0x9ef29aa20f35aef44296126561d901d79908345c75f14439d8c35985cf1659e8",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0x527187721eba582e721014aef57c4bec95dadca9",
+      "function": null,
+      "gasUsed": 2860828
+    },
+    {
+      "hash": "0x539395221d5ce0a2fbd3a972980402268794b872435f31101972ed7e5bbf55b1",
+      "contractName": "FeeRouter",
+      "contractAddress": "0xdb9e99ac28b5cc8c9e771fddc4e0a09f08d90d25",
+      "function": null,
+      "gasUsed": 734488
+    },
+    {
+      "hash": "0x3c0ccd3c125e6fd02a20e023848646dfa7ebdadf162fb75d99a94aff648a5c2f",
+      "contractName": "IfsoOutcomeResolver",
+      "contractAddress": "0xca729a22d6bcd7e7c56d20a270af1baeb37c8ae8",
+      "function": null,
+      "gasUsed": 1945003
+    },
+    {
+      "hash": "0x50bafd8fb5ca85645cb86557ce23aa3c792c1e9e296adf4ed100ca5e71022ced",
+      "contractName": "IfsoEscrow",
+      "contractAddress": "0x0ee8278ea68dd41eaa8291f92feac1550cc66e5e",
+      "function": null,
+      "gasUsed": 5331629
+    },
+    {
+      "hash": "0xd1ca9492b56593acc8b00999b651b9a03bbdd38cec15f98e26133893e041dd6f",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0x527187721eba582e721014aef57c4bec95dadca9",
+      "function": "setFeed(address,bool,address)",
+      "gasUsed": 50642
+    },
+    {
+      "hash": "0x550a39ca9ece94ea0a62dbd56b5c88f7ce49160cb88e9a10cb456226cf71eddc",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0x527187721eba582e721014aef57c4bec95dadca9",
+      "function": "setFeed(address,bool,address)",
+      "gasUsed": 70782
+    },
+    {
+      "hash": "0x74ebec1bfa64a45bff6e1e72b5b654f686fca47f901cc2705b75e6447a765b0f",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0x527187721eba582e721014aef57c4bec95dadca9",
+      "function": "setFeed(address,bool,address)",
+      "gasUsed": 70782
+    },
+    {
+      "hash": "0xca27eaf52802b2ba508600d2cbaf53642cd6b4c35a8da6ced04dfa43160a7f2c",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0x527187721eba582e721014aef57c4bec95dadca9",
+      "function": "setFeed(address,bool,address)",
+      "gasUsed": 70770
+    },
+    {
+      "hash": "0x0ecda77be232ac79ff6e30d628e1c35ab4cf100b62a5380caa4f5ffebf1a81bb",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0x527187721eba582e721014aef57c4bec95dadca9",
+      "function": "setFeed(address,bool,address)",
+      "gasUsed": 70782
+    },
+    {
+      "hash": "0x6024ce6a4aa33c51393f25a2a2f3b789c99cc8c2b764e6b9970d6df40f0d43b0",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0x527187721eba582e721014aef57c4bec95dadca9",
+      "function": "setResolver(address,bool)",
+      "gasUsed": 47838
+    },
+    {
+      "hash": "0x92b462a2470e74b14e7bd13a66871903ef3998d3e83c05f33085bd3d606ac7e5",
+      "contractName": "IfsoOutcomeResolver",
+      "contractAddress": "0xca729a22d6bcd7e7c56d20a270af1baeb37c8ae8",
+      "function": "setCreator(address,bool)",
+      "gasUsed": 47838
+    },
+    {
+      "hash": "0x655e3d598ded72a7d3fd6b16b1173807703b4c34efee46a853d3e53ede50ec00",
+      "contractName": "IfsoEscrow",
+      "contractAddress": "0x0ee8278ea68dd41eaa8291f92feac1550cc66e5e",
+      "function": "setMaxAmount(uint96)",
+      "gasUsed": 30035
+    },
+    {
+      "hash": "0xd8aece5cff0ec4658d51512936c789930aafcde42967c5495201774187c2d663",
+      "contractName": "IfsoConditionEvaluator",
+      "contractAddress": "0x527187721eba582e721014aef57c4bec95dadca9",
+      "function": "transferOwnership(address)",
+      "gasUsed": 47763
+    },
+    {
+      "hash": "0x9a1f56ebdb03c699b3007395b11b37158e4bada0ecc39d12dd25f4e6cf606389",
+      "contractName": "IfsoOutcomeResolver",
+      "contractAddress": "0xca729a22d6bcd7e7c56d20a270af1baeb37c8ae8",
+      "function": "transferOwnership(address)",
+      "gasUsed": 47803
+    },
+    {
+      "hash": "0xed9162dc424256df8c574972164f786e9264b3a54c60a0647f3195bad63932d4",
+      "contractName": "FeeRouter",
+      "contractAddress": "0xdb9e99ac28b5cc8c9e771fddc4e0a09f08d90d25",
+      "function": "transferOwnership(address)",
+      "gasUsed": 47737
+    },
+    {
+      "hash": "0x289a177cded2cb02e981daace43753e7a876b634635f03bacda8edd59d6b6272",
+      "contractName": "IfsoEscrow",
+      "contractAddress": "0x0ee8278ea68dd41eaa8291f92feac1550cc66e5e",
+      "function": "transferOwnership(address)",
+      "gasUsed": 30654
+    }
+  ],
+  "gasUsedTotal": 11505374,
+  "deployBlock": 107148809
+}
